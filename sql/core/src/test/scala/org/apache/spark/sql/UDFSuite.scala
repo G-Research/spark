@@ -139,12 +139,17 @@ class UDFSuite extends QueryTest with SharedSparkSession {
     assert(df2.logicalPlan.asInstanceOf[Project].projectList.forall(!_.deterministic))
     assert(df2.head().getDouble(0) >= 0.0)
 
+    val baz = udf(() => 1, DataTypes.IntegerType).asExpensive()
+    val df3 = testData.select(baz())
+    assert(df3.logicalPlan.asInstanceOf[Project].projectList.forall(!_.deterministic))
+    assert(df3.head().getInt(0) === 1)
+
     val javaUdf = udf(new UDF0[Double] {
       override def call(): Double = Math.random()
     }, DoubleType).asNondeterministic()
-    val df3 = testData.select(javaUdf())
-    assert(df3.logicalPlan.asInstanceOf[Project].projectList.forall(!_.deterministic))
-    assert(df3.head().getDouble(0) >= 0.0)
+    val df4 = testData.select(javaUdf())
+    assert(df4.logicalPlan.asInstanceOf[Project].projectList.forall(!_.deterministic))
+    assert(df4.head().getDouble(0) >= 0.0)
   }
 
   test("TwoArgument UDF") {

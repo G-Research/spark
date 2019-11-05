@@ -56,6 +56,14 @@ sealed abstract class UserDefinedFunction {
   def deterministic: Boolean
 
   /**
+   * Returns true iff evaluating the UDF is considered expensive, i.e. it should be evaluated at
+   * most once per row.
+   *
+   * @since 3.0.0
+   */
+  def expensive: Boolean
+
+  /**
    * Returns an expression that invokes the UDF, using the given arguments.
    *
    * @since 1.3.0
@@ -83,6 +91,13 @@ sealed abstract class UserDefinedFunction {
    * @since 2.3.0
    */
   def asNondeterministic(): UserDefinedFunction
+
+  /**
+   * Updates UserDefinedFunction to expensive.
+   *
+   * @since 3.0.0
+   */
+  def asExpensive(): UserDefinedFunction
 }
 
 private[sql] case class SparkUserDefinedFunction(
@@ -91,7 +106,8 @@ private[sql] case class SparkUserDefinedFunction(
     inputSchemas: Seq[Option[ScalaReflection.Schema]],
     name: Option[String] = None,
     nullable: Boolean = true,
-    deterministic: Boolean = true) extends UserDefinedFunction {
+    deterministic: Boolean = true,
+    expensive: Boolean = false) extends UserDefinedFunction {
 
   @scala.annotation.varargs
   override def apply(exprs: Column*): Column = {
@@ -113,7 +129,10 @@ private[sql] case class SparkUserDefinedFunction(
       inputTypes,
       udfName = name,
       nullable = nullable,
-      udfDeterministic = deterministic)
+      // we do not have the notion of expensive Expressions, so we set it non-deterministic
+      // when expensive but deterministic to avoid unnecessary calls,
+      // as this is a common work-around
+      udfDeterministic = deterministic && !expensive)
   }
 
   override def withName(name: String): SparkUserDefinedFunction = {
@@ -133,6 +152,14 @@ private[sql] case class SparkUserDefinedFunction(
       this
     } else {
       copy(deterministic = false)
+    }
+  }
+
+  override def asExpensive(): SparkUserDefinedFunction = {
+    if (expensive) {
+      this
+    } else {
+      copy(expensive = true)
     }
   }
 }
