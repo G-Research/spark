@@ -171,6 +171,15 @@ class DatasetSuite extends QueryTest with SharedSparkSession {
       data: _*)
   }
 
+  // expected schemata for the following tests
+  private val classDataSchema = new StructType()
+    .add("a", StringType, nullable = true)
+    .add("b", IntegerType, nullable = false)
+  private val classDataSchemaExtraFields =
+    classDataSchema.add("c", IntegerType, nullable = false)
+  private val classDataSchemaReorderFields =
+    new StructType(classDataSchema.fields.reverse)
+
   test("as tuple") {
     val data = Seq(("a", 1), ("b", 2)).toDF("a", "b")
     checkDataset(
@@ -180,6 +189,16 @@ class DatasetSuite extends QueryTest with SharedSparkSession {
 
   test("as case class / collect") {
     val ds = Seq(("a", 1), ("b", 2), ("c", 3)).toDF("a", "b").as[ClassData]
+    assert(ds.schema === classDataSchema)
+    checkDataset(
+      ds,
+      ClassData("a", 1), ClassData("b", 2), ClassData("c", 3))
+    assert(ds.collect().head == ClassData("a", 1))
+  }
+
+  test("as case class - extra fields") {
+    val ds = Seq(("a", 1, 0), ("b", 2, 0), ("c", 3, 0)).toDF("a", "b", "c").as[ClassData]
+    assert(ds.schema === classDataSchemaExtraFields)
     checkDataset(
       ds,
       ClassData("a", 1), ClassData("b", 2), ClassData("c", 3))
@@ -188,11 +207,13 @@ class DatasetSuite extends QueryTest with SharedSparkSession {
 
   test("as case class - reordered fields by name") {
     val ds = Seq((1, "a"), (2, "b"), (3, "c")).toDF("b", "a").as[ClassData]
+    assert(ds.schema === classDataSchemaReorderFields)
     assert(ds.collect() === Array(ClassData("a", 1), ClassData("b", 2), ClassData("c", 3)))
   }
 
   test("as case class - take") {
     val ds = Seq((1, "a"), (2, "b"), (3, "c")).toDF("b", "a").as[ClassData]
+    assert(ds.schema === classDataSchemaReorderFields)
     assert(ds.take(2) === Array(ClassData("a", 1), ClassData("b", 2)))
   }
 
@@ -212,6 +233,69 @@ class DatasetSuite extends QueryTest with SharedSparkSession {
       Map(1 -> ClassData("a", 0)),
       Map(1 -> ClassData("a", 1)),
       Map(1 -> ClassData("a", 2))))
+  }
+
+  // cf. test("as case class / collect")
+  test("toDS case class / collect") {
+    val ds = Seq(("a", 1), ("b", 2), ("c", 3)).toDF("a", "b").toDS[ClassData]
+    assert(ds.schema == classDataSchema)
+    checkDataset(
+      ds,
+      ClassData("a", 1), ClassData("b", 2), ClassData("c", 3))
+    assert(ds.collect().head == ClassData("a", 1))
+  }
+
+  // cf. test("as case class - extra fields")
+  test("toDS case class - extra fields") {
+    val ds = Seq(("a", 1, 0), ("b", 2, 0), ("c", 3, 0)).toDF("a", "b", "c").toDS[ClassData]
+    assert(ds.schema == classDataSchema)
+    checkDataset(
+      ds,
+      ClassData("a", 1), ClassData("b", 2), ClassData("c", 3))
+    assert(ds.collect().head == ClassData("a", 1))
+  }
+
+  // cf. test("as case class - reordered fields by name")
+  test("toDS case class - reordered fields by name") {
+    val ds = Seq((1, "a"), (2, "b"), (3, "c")).toDF("b", "a").toDS[ClassData]
+    assert(ds.schema == classDataSchema)
+    assert(ds.collect() === Array(ClassData("a", 1), ClassData("b", 2), ClassData("c", 3)))
+  }
+
+  // cf. test("as case class - take")
+  test("toDS case class - take") {
+    val ds = Seq((1, "a"), (2, "b"), (3, "c")).toDF("b", "a").toDS[ClassData]
+    assert(ds.schema == classDataSchema)
+    assert(ds.take(2) === Array(ClassData("a", 1), ClassData("b", 2)))
+  }
+
+  test("toDS case class cast type") {
+    val data = Seq((1L, "1"), (2L, "2"), (3L, "3")).toDF("a", "b")
+    val dataSchema = new StructType()
+      .add("a", LongType, nullable = false)
+      .add("b", StringType, nullable = true)
+    assert(data.schema == dataSchema)
+
+    // long column "a" becomes string type
+    // string column "b" becomes int type
+    // similarly to `as[T]`, `toDS[T]` does not change `nullable` according to `Encoder[T]`
+    val ds = data.toDS[ClassData]
+    val expectedSchema = new StructType()
+      .add("a", StringType, nullable = false)
+      .add("b", IntegerType, nullable = true)
+    assert(ds.schema == expectedSchema)
+
+    checkDataset(
+      ds,
+      ClassData("1", 1), ClassData("2", 2), ClassData("3", 3))
+    assert(ds.collect().head == ClassData("1", 1))
+  }
+
+  test("toDS case class cast type throws") {
+    val data = Seq((1L, "1"), (2L, "x"), (3L, "3")).toDF("a", "b")
+    val ds = data.toDS[ClassData]
+    assert(ds.where($"b".isNull).count === 1)
+    assertThrows[RuntimeException](ds.collect())
   }
 
   test("map") {

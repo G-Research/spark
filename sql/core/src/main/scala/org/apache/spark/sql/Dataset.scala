@@ -496,6 +496,25 @@ class Dataset[T] private[sql](
   }
 
   /**
+   * Returns a new Dataset where each record has been mapped on to the specified type.
+   * This only supports `U` being a class. Fields for the class will be mapped to columns of the
+   * same name (case sensitivity is determined by `spark.sql.caseSensitive`).
+   *
+   * If the schema of the Dataset does not match the desired `U` type, you can use `select`
+   * along with `alias` or `as` to rearrange or rename as required.
+   *
+   * This method eagerly projects away any columns that are not present in the specified class.
+   * It further guarantees the order of columns as well as data types to match `U`.
+   *
+   * @group basic
+   * @since 3.0.0
+   */
+  def toDS[U : Encoder]: Dataset[U] = {
+    val columns = implicitly[Encoder[U]].schema.fields.map(f => col(f.name).cast(f.dataType))
+    select(columns: _*).as[U]
+  }
+
+  /**
    * Returns the schema of this Dataset.
    *
    * @group basic
