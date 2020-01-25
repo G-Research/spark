@@ -17,9 +17,14 @@
 
 package org.apache.spark.ui.jobs
 
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets.UTF_8
+import java.util.Locale
 import javax.servlet.http.HttpServletRequest
 
-import scala.xml.{Attribute, Elem, Node, NodeSeq, Null, Text}
+import scala.collection.JavaConverters._
+import scala.collection.immutable.ListSet
+import scala.xml.{Attribute, Elem, Node, NodeSeq, Null, Text, Unparsed}
 
 import org.apache.spark.scheduler.Schedulable
 import org.apache.spark.status.{AppSummary, PoolData}
@@ -46,8 +51,10 @@ private[ui] class AllStagesPage(parent: StagesTab) extends WebUIPage("") {
     val allStages = parent.store.stageList(null)
     val appSummary = parent.store.appSummary()
 
+    val metrics = StagePagedTable.selectedMetrics(request)
+
     val (summaries, tables) = allStatuses.map(
-      summaryAndTableForStatus(allStages, appSummary, _, request)).unzip
+      summaryAndTableForStatus(allStages, metrics, appSummary, _, request)).unzip
 
     val summary: NodeSeq =
       <div>
@@ -71,13 +78,17 @@ private[ui] class AllStagesPage(parent: StagesTab) extends WebUIPage("") {
         Seq.empty[Node]
       }
 
-    val content = summary ++ poolsDescription ++ tables.flatten.flatten
+    val content = summary ++
+      StagePagedTable.additionalMetrics(metrics, request) ++
+      poolsDescription ++
+      tables.flatten.flatten
 
     UIUtils.headerSparkPage(request, "Stages for All Jobs", content, parent)
   }
 
   private def summaryAndTableForStatus(
       allStages: Seq[StageData],
+      metrics: ListSet[StageTableMetric],
       appSummary: AppSummary,
       status: StageStatus,
       request: HttpServletRequest): (Option[Elem], Option[NodeSeq]) = {
@@ -95,7 +106,7 @@ private[ui] class AllStagesPage(parent: StagesTab) extends WebUIPage("") {
 
       val stagesTable =
         new StageTableBase(parent.store, request, stages, statusName(status), stageTag(status),
-          parent.basePath, subPath, parent.isFairScheduler, killEnabled, isFailedStage)
+          parent.basePath, subPath, metrics, parent.isFairScheduler, killEnabled, isFailedStage)
       val stagesSize = stages.size
       (Some(summary(appSummary, status, stagesSize)),
         Some(table(appSummary, status, stagesTable, stagesSize)))

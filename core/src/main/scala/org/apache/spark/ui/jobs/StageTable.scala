@@ -19,16 +19,18 @@ package org.apache.spark.ui.jobs
 
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets.UTF_8
-import java.util.Date
+import java.util.{Date, Locale}
+
 import javax.servlet.http.HttpServletRequest
 
+import scala.collection.JavaConverters._
+import scala.collection.immutable.{ListMap, ListSet}
 import scala.xml._
-
 import org.apache.commons.text.StringEscapeUtils
-
 import org.apache.spark.status.AppStatusStore
 import org.apache.spark.status.api.v1
 import org.apache.spark.ui._
+import org.apache.spark.ui.jobs.StagePagedTable._
 import org.apache.spark.util.Utils
 
 private[ui] class StageTableBase(
@@ -39,6 +41,7 @@ private[ui] class StageTableBase(
     stageTag: String,
     basePath: String,
     subPath: String,
+    metrics: ListSet[StageTableMetric],
     isFairScheduler: Boolean,
     killEnabled: Boolean,
     isFailedStage: Boolean) {
@@ -58,6 +61,7 @@ private[ui] class StageTableBase(
       isFairScheduler,
       killEnabled,
       currentTime,
+      metrics,
       isFailedStage,
       request
     ).table(stagePage)
@@ -90,14 +94,22 @@ private[ui] class StageTableRowData(
     val shuffleRead: Long,
     val shuffleReadWithUnit: String,
     val shuffleWrite: Long,
-    val shuffleWriteWithUnit: String)
+    val shuffleWriteWithUnit: String,
+    val peakExecutionMemory: Long,
+    val peakExecutionMemoryWithUnit: String,
+    val memoryBytesSpilled: Long,
+    val memoryBytesSpilledWithUnit: String,
+    val diskBytesSpilled: Long,
+    val diskBytesSpilledWithUnit: String,
+    val jvmGcTime: Long,
+    val formattedJvmGcTime: String)
 
 private[ui] class MissingStageTableRowData(
     stageInfo: v1.StageData,
     stageId: Int,
     attemptId: Int) extends StageTableRowData(
   stageInfo, None, stageId, attemptId, "", None, new Date(0), "", -1, "", 0, "", 0, "", 0, "", 0,
-    "")
+    "", 0, "", 0, "", 0, "", 0, "")
 
 /** Page showing list of all ongoing and recently finished stages */
 private[ui] class StagePagedTable(
@@ -110,6 +122,7 @@ private[ui] class StagePagedTable(
     isFairScheduler: Boolean,
     killEnabled: Boolean,
     currentTime: Long,
+    metrics: ListSet[StageTableMetric],
     isFailedStage: Boolean,
     request: HttpServletRequest) extends PagedTable[StageTableRowData] {
 
@@ -151,6 +164,12 @@ private[ui] class StagePagedTable(
     s"$parameterPath&$stageTag.sort=$encodedSortColumn&$stageTag.desc=$desc#$tableHeaderId"
 
   override def headers: Seq[Node] = {
+    if (metrics.exists(m => !optionalMetricsMap.contains(m.name))) {
+      throw new IllegalArgumentException(
+        s"Unknown metric: ${metrics.map(_.name).diff(optionalMetricsMap.keySet).mkString(", ")}"
+      )
+    }
+
     // stageHeadersAndCssClasses has three parts: header title, sortable and tooltip information.
     // The tooltip information could be None, which indicates it does not have a tooltip.
     val stageHeadersAndCssClasses: Seq[(String, Boolean, Option[String])] =
@@ -160,12 +179,9 @@ private[ui] class StagePagedTable(
         ("Description", true, None),
         ("Submitted", true, None),
         ("Duration", true, Some(ToolTips.DURATION)),
-        ("Tasks: Succeeded/Total", false, None),
-        ("Input", true, Some(ToolTips.INPUT)),
-        ("Output", true, Some(ToolTips.OUTPUT)),
-        ("Shuffle Read", true, Some(ToolTips.SHUFFLE_READ)),
-        ("Shuffle Write", true, Some(ToolTips.SHUFFLE_WRITE))
+        ("Tasks: Succeeded/Total", false, None)
       ) ++
+      metrics.map(metric => (metric.name, metric.sortable, metric.tooltip)) ++
       {if (isFailedStage) {Seq(("Failure Reason", false, None))} else Seq.empty}
 
     isSortColumnValid(stageHeadersAndCssClasses, sortColumn)
@@ -210,18 +226,15 @@ private[ui] class StagePagedTable(
           {UIUtils.makeProgressBar(started = stageData.numActiveTasks,
           completed = stageData.numCompleteTasks, failed = stageData.numFailedTasks,
           skipped = 0, reasonToNumKilled = stageData.killedTasksSummary, total = info.numTasks)}
-        </td>
-        <td>{data.inputReadWithUnit}</td>
-        <td>{data.outputWriteWithUnit}</td>
-        <td>{data.shuffleReadWithUnit}</td>
-        <td>{data.shuffleWriteWithUnit}</td> ++
-        {
-          if (isFailedStage) {
-            failureReasonHtml(info)
-          } else {
-            Seq.empty
-          }
-        }
+        </td> ++
+        metrics.toSeq.map( metric =>
+          <td>{metric.value(data)}</td>
+        ) ++
+        {if (isFailedStage) {
+          failureReasonHtml(info)
+        } else {
+          Seq.empty
+        }}
     }
   }
 
@@ -291,12 +304,100 @@ private[ui] class StagePagedTable(
     <td></td> ++ // Submitted
     <td></td> ++ // Duration
     <td></td> ++ // Tasks: Succeeded/Total
-    <td></td> ++ // Input
-    <td></td> ++ // Output
-    <td></td> ++ // Shuffle Read
-    <td></td> // Shuffle Write
+    {metrics.map(_ =>
+      <td></td> // selected metrics
+    )}
   }
 }
+
+private[ui] object StagePagedTable {
+
+  val inputMetric = StageTableMetric("Input", true, Some(ToolTips.INPUT), _.inputReadWithUnit)
+  val outputMetric = StageTableMetric("Output", true, Some(ToolTips.OUTPUT), _.outputWriteWithUnit)
+  val shuffleReadMetric = StageTableMetric("Shuffle Read", true,
+    Some(ToolTips.SHUFFLE_READ), _.shuffleReadWithUnit)
+  val shuffleWriteMetric = StageTableMetric("Shuffle Write", true,
+    Some(ToolTips.SHUFFLE_WRITE), _.shuffleWriteWithUnit)
+  val peakExecutionMemoryMetric = StageTableMetric("Peak Execution Memory", true,
+    Some(ToolTips.PEAK_EXECUTION_MEMORY), _.peakExecutionMemoryWithUnit)
+  val spillMemoryMetric = StageTableMetric("Spill (Memory)", true,
+    None, _.memoryBytesSpilledWithUnit)  // TODO: add tooltip
+  val spillDiskMetric = StageTableMetric("Spill (Disk)", true,
+    None, _.diskBytesSpilledWithUnit)  // TODO: add tooltip
+  val gcTimeMetric = StageTableMetric("GC Time", true, Some(ToolTips.GC_TIME), _.formattedJvmGcTime)
+
+  val optionalMetrics = ListSet(
+    inputMetric, outputMetric,
+    shuffleReadMetric, shuffleWriteMetric,
+    peakExecutionMemoryMetric,
+    spillMemoryMetric, spillDiskMetric,
+    gcTimeMetric
+  )
+
+  val optionalMetricsMap = ListMap(optionalMetrics.toSeq.map(m => m.name -> m): _*)
+
+  val defaultMetrics = ListSet(
+    inputMetric, outputMetric,
+    shuffleReadMetric, shuffleWriteMetric
+  )
+
+  def selectedMetrics(request: HttpServletRequest): ListSet[StageTableMetric] = {
+    // this must reserve order of optionalMetrics
+    val parameterMetrics = optionalMetrics.map(m => m -> request.getParameter(s"metric.${m.name}"))
+    parameterMetrics.filter(m => Option(m._2).isDefined) match {
+      case Seq() => defaultMetrics
+      case seq => seq.filter(_._2.equalsIgnoreCase("true")).map(_._1)
+    }
+  }
+
+  def additionalMetrics(shownMetrics: ListSet[StageTableMetric],
+                        request: HttpServletRequest): Seq[Node] = {
+
+    val parameterExceptMetrics = request.getParameterMap().asScala
+      .filterNot(_._1.startsWith("metric."))
+      .map(para => para._1 + "=" + para._2(0))
+    val parameterPath = "?" + parameterExceptMetrics.mkString("&")
+
+    val shownMetricNames = shownMetrics.map(_.name)
+    <div id="parent-container">
+      <script src={UIUtils.prependBaseUri(request, "/static/utils.js")}></script>
+      <script src={UIUtils.prependBaseUri(request, "/static/stagetable.js")}></script>
+    </div>
+    <div><a id='additionalMetrics'>
+      <span class='expand-input-rate-arrow arrow-closed' id='arrowtoggle1'></span>
+      Show Additional Metrics
+    </a></div>
+    <div class='container-fluid container-fluid-div' id='toggle-metrics' hidden="true">
+      <div id='select_all' class='select-all-checkbox-div'>
+        <input type='checkbox' class='toggle-vis'> Select All</input>
+      </div>
+      {StagePagedTable.optionalMetrics.map{metric =>
+      val checked = Option(shownMetricNames.contains(metric.name))
+        .filter(identity).map(_ => "checked")
+      def toggleMetric(m: StageTableMetric): Boolean =
+        shownMetricNames.contains(m.name) ^ metric.name == m.name
+      val metricLink =
+        Unparsed(
+          parameterPath +
+            StagePagedTable.optionalMetrics.map(m =>
+              s"&metric.${URLEncoder.encode(m.name, UTF_8.name())}=${toggleMetric(m)}"
+            ).mkString("")
+        )
+      val id = metric.name.toLowerCase(Locale.ROOT).replaceAll(" ", "_")
+      <div id={id}>
+        <a href={metricLink}>
+          <input type='checkbox' class='toggle-vis' checked={checked.orNull}> {metric.name}</input>
+        </a>
+      </div>
+    }}
+    </div>
+  }
+}
+
+private[ui] case class StageTableMetric(name: String,
+                                        sortable: Boolean,
+                                        tooltip: Option[String],
+                                        value: StageTableRowData => Any)
 
 private[ui] class StageDataSource(
     store: AppStatusStore,
@@ -341,6 +442,17 @@ private[ui] class StageDataSource(
     val shuffleReadWithUnit = if (shuffleRead > 0) Utils.bytesToString(shuffleRead) else ""
     val shuffleWrite = stageData.shuffleWriteBytes
     val shuffleWriteWithUnit = if (shuffleWrite > 0) Utils.bytesToString(shuffleWrite) else ""
+    val peakExecMemory = stageData.peakExecutionMemory
+    val peakExecMemoryWithUnit = if (peakExecMemory > 0) Utils.bytesToString(peakExecMemory) else ""
+    val memorySpilled = stageData.memoryBytesSpilled
+    val memorySpilledWithUnit = if (memorySpilled > 0) Utils.bytesToString(memorySpilled) else ""
+    val diskSpilled = stageData.diskBytesSpilled
+    val diskSpilledWithUnit = if (diskSpilled > 0) Utils.bytesToString(diskSpilled) else ""
+    val jvmGcTime = stageData.jvmGcTime
+    val formattedJvmGcTime = if (jvmGcTime > 0) UIUtils.formatDuration(jvmGcTime) else ""
+    // TODO: add stageData.executorRunTime + stageData.executorCpuTime to jvm: Run / CPU / GC Time
+    // SPARK-26109: Duration of task as executorRunTime to make it consistent with the
+    // aggregated tasks summary metrics table and the previous versions of Spark.
 
     new StageTableRowData(
       stageData,
@@ -360,7 +472,15 @@ private[ui] class StageDataSource(
       shuffleRead,
       shuffleReadWithUnit,
       shuffleWrite,
-      shuffleWriteWithUnit
+      shuffleWriteWithUnit,
+      peakExecMemory,
+      peakExecMemoryWithUnit,
+      memorySpilled,
+      memorySpilledWithUnit,
+      diskSpilled,
+      diskSpilledWithUnit,
+      jvmGcTime,
+      formattedJvmGcTime
     )
   }
 
@@ -378,6 +498,10 @@ private[ui] class StageDataSource(
       case "Output" => Ordering.by(_.outputWrite)
       case "Shuffle Read" => Ordering.by(_.shuffleRead)
       case "Shuffle Write" => Ordering.by(_.shuffleWrite)
+      case "Peak Execution Memory" => Ordering.by(_.peakExecutionMemory)
+      case "Spill (Memory)" => Ordering.by(_.memoryBytesSpilled)
+      case "Spill (Disk)" => Ordering.by(_.diskBytesSpilled)
+      case "GC Time" => Ordering.by(_.jvmGcTime)
       case "Tasks: Succeeded/Total" =>
         throw new IllegalArgumentException(s"Unsortable column: $sortColumn")
       case unknownColumn => throw new IllegalArgumentException(s"Unknown column: $unknownColumn")
