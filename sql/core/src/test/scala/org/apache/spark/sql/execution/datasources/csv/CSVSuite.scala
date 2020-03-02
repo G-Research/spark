@@ -710,7 +710,6 @@ abstract class CSVSuite extends QueryTest with SharedSparkSession with TestCsvDa
   }
 
   test("nullable fields with user defined null value of \"null\"") {
-
     // year,make,model,comment,blank
     val dataSchema = StructType(List(
       StructField("year", IntegerType, nullable = true),
@@ -721,13 +720,17 @@ abstract class CSVSuite extends QueryTest with SharedSparkSession with TestCsvDa
     val cars = spark.read
       .format("csv")
       .schema(dataSchema)
-      .options(Map("header" -> "true", "nullValue" -> "null"))
+      .options(Map("header" -> "true", "nullValue" -> "null", "quoteNull" -> "true", "quoteAll" -> "true"))
       .load(testFile(carsNullFile))
 
     verifyCars(cars, withHeader = true, checkValues = false)
     val results = cars.collect()
     assert(results(0).toSeq === Array(2012, "Tesla", "null", null, null))
     assert(results(2).toSeq === Array(null, "Chevy", "Volt", null, null))
+  }
+
+  test("write csv with null and 'null'") {
+    fail("not tested")
   }
 
   test("empty fields with user defined empty values") {

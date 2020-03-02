@@ -161,6 +161,8 @@ class CSVOptions(
 
   val quoteAll = getBool("quoteAll", false)
 
+  val quoteNull = getBool("quoteNull", true)
+
   val inputBufferSize = 128
 
   /**
@@ -224,6 +226,7 @@ class CSVOptions(
     writerSettings.setEmptyValue(emptyValueInWrite)
     writerSettings.setSkipEmptyLines(true)
     writerSettings.setQuoteAllFields(quoteAll)
+    writerSettings.setQuoteNulls(quoteNull)
     writerSettings.setQuoteEscapingEnabled(escapeQuotes)
     writerSettings.setErrorContentLength(maxErrorContentLength)
     writerSettings
