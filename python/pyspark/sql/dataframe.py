@@ -1830,6 +1830,30 @@ class DataFrame(PandasMapOpsMixin, PandasConversionMixin):
         """
         return self.groupBy().agg(*exprs)
 
+    @since(3.2)
+    def observe(self, observation, *exprs):
+        """
+        Observe (named) metrics through an :class:`Observation` instance.
+        This method does not support streaming datasets.
+
+        .. versionadded:: 3.2.0
+
+        A user can retrieve the metrics by accessing `Observation.get`.
+
+        Example:
+            >>> observation = Observation("my_metrics")
+            >>> observed_df = df.observe(observation, count(lit(1)).as("rows"), max($"id").as("maxid"))
+            >>> observed_df.write.parquet("ds.parquet")
+            >>> metrics = observation.get
+
+        :param observation: :class:`Observation` instance
+        :param exprs: aggregation expressions
+        :return: observed :class:`DataFrame`
+        """
+        from pyspark.sql.observation import Observation
+        assert isinstance(observation, Observation), "observation should be Observation"
+        return observation.on(self, *exprs)
+
     @since(2.0)
     def union(self, other):
         """ Return a new :class:`DataFrame` containing union of rows in this and another
