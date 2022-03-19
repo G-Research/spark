@@ -19,11 +19,11 @@ package org.apache.spark.sql.execution.datasources.v2
 
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.AttributeMap
+import org.apache.spark.sql.catalyst.expressions.{AttributeMap, SortOrder, V2ExpressionUtils}
 import org.apache.spark.sql.catalyst.plans.physical
 import org.apache.spark.sql.catalyst.plans.physical.SinglePartition
 import org.apache.spark.sql.catalyst.util.truncatedString
-import org.apache.spark.sql.connector.read.{InputPartition, PartitionReaderFactory, Scan, SupportsReportPartitioning}
+import org.apache.spark.sql.connector.read.{InputPartition, PartitionReaderFactory, Scan, SupportsReportOrdering, SupportsReportPartitioning}
 import org.apache.spark.sql.execution.{ExplainUtils, LeafExecNode}
 import org.apache.spark.sql.execution.metric.SQLMetrics
 import org.apache.spark.sql.internal.connector.SupportsMetadata
@@ -87,6 +87,14 @@ trait DataSourceV2ScanExecBase extends LeafExecNode {
         s.outputPartitioning(), AttributeMap(output.map(a => a -> a.name)))
 
     case _ => super.outputPartitioning
+  }
+
+  override def outputOrdering: Seq[SortOrder] = scan match {
+    case s: SupportsReportOrdering if this.logicalLink.isDefined =>
+      s.outputOrdering().map(
+        order => V2ExpressionUtils.toCatalyst(order, this.logicalLink.get).asInstanceOf[SortOrder]
+      )
+    case _ => super.outputOrdering
   }
 
   override def supportsColumnar: Boolean = {
