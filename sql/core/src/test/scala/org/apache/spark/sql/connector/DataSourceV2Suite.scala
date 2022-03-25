@@ -35,7 +35,6 @@ import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.execution.datasources.v2.{BatchScanExec, DataSourceV2Relation, DataSourceV2ScanRelation}
 import org.apache.spark.sql.execution.exchange.{Exchange, ShuffleExchangeExec}
 import org.apache.spark.sql.execution.vectorized.OnHeapColumnVector
-import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.sources.{Filter, GreaterThan}
 import org.apache.spark.sql.test.SharedSparkSession
@@ -278,32 +277,9 @@ class DataSourceV2Suite extends QueryTest with SharedSparkSession with AdaptiveS
     }
   }
 
-  test("ordering reporting orderByColI") {
-    import org.apache.spark.sql.execution.SortExec
-    Seq(
-      classOf[OrderAwareDataSource],
-//      classOf[JavaOrderAwareDataSource]
-    ).foreach { cls =>
-      withClue(cls.getName) {
-        val df = spark.read.format(cls.getName).load()
-        checkAnswer(df, Seq(Row(1, 4), Row(1, 5), Row(2, 6), Row(3, 6), Row(4, 1), Row(4, 2)))
-
-        val orderByColI = df.withColumn("row", row_number() over Window.orderBy(Symbol("i")))
-        checkAnswer(
-          orderByColI,
-          Seq(Row(1, 4, 1), Row(1, 5, 2), Row(2, 6, 3), Row(3, 6, 4), Row(4, 1, 5), Row(4, 2, 6))
-        )
-        assert(collectFirst(orderByColI.queryExecution.executedPlan) {
-          case e: SortExec => e
-        }.isEmpty)
-      }
-    }
-  }
-
   test("ordering and partitioning reporting") {
     import org.apache.spark.sql.execution.SortExec
     import org.apache.spark.sql.expressions.Window
-    import org.apache.spark.sql.functions.sum
     Seq(
       classOf[OrderAndPartitionAwareDataSource],
 //      classOf[JavaOrderAndPartitionAwareDataSource]
@@ -311,32 +287,6 @@ class DataSourceV2Suite extends QueryTest with SharedSparkSession with AdaptiveS
       withClue(cls.getName) {
         val df = spark.read.format(cls.getName).load()
         checkAnswer(df, Seq(Row(1, 4), Row(1, 5), Row(2, 6), Row(3, 6), Row(4, 1), Row(4, 2)))
-
-        val groupByColI = df.groupBy(Symbol("i")).agg(sum("j"))
-        checkAnswer(groupByColI, Seq(Row(1, 9), Row(2, 6), Row(3, 6), Row(4, 3)))
-        assert(collectFirst(groupByColI.queryExecution.executedPlan) {
-          case e: ShuffleExchangeExec => e
-        }.isEmpty)
-        assert(collectFirst(groupByColI.queryExecution.executedPlan) {
-          case e: SortExec => e
-        }.isEmpty)
-
-        val groupSortByColI =
-          df.repartition(Symbol("i"))
-            .sortWithinPartitions(Symbol("i"), Symbol("j"))
-            .mapPartitions(it => it.zipWithIndex.map {
-              case (row, idx) => (row.getInt(0), row.getInt(1), idx)
-            }).toDF()
-        checkAnswer(
-          groupSortByColI,
-          Seq(Row((1, 4, 0)), Row((1, 5, 1)), Row((2, 6, 0)), Row((3, 6, 0)), Row((4, 1, 0)), Row((4, 2, 1)))
-        )
-        assert(collectFirst(groupSortByColI.queryExecution.executedPlan) {
-          case e: ShuffleExchangeExec => e
-        }.isEmpty)
-        assert(collectFirst(groupSortByColI.queryExecution.executedPlan) {
-          case e: SortExec => e
-        }.isEmpty)
 
         val windowPartByColIOrderByColJ = df.withColumn("no",
           row_number() over Window.partitionBy(Symbol("i")).orderBy(Symbol("j"))
@@ -353,11 +303,11 @@ class DataSourceV2Suite extends QueryTest with SharedSparkSession with AdaptiveS
         }.isEmpty)
 
         val windowPartByColJOrderByColI = df.withColumn("no",
-          row_number() over Window.partitionBy(Symbol("i")).orderBy(Symbol("j"))
+          row_number() over Window.partitionBy(Symbol("j")).orderBy(Symbol("i"))
         )
         checkAnswer(
           windowPartByColJOrderByColI,
-          Seq(Row(4, 1, 1), Row(5, 1, 1), Row(6, 2, 1), Row(6, 3, 2), Row(1, 4, 1), Row(2, 4, 1))
+          Seq(Row(1, 4, 1), Row(1, 5, 1), Row(2, 6, 1), Row(3, 6, 2), Row(4, 1, 1), Row(4, 2, 1))
         )
         assert(collectFirst(windowPartByColJOrderByColI.queryExecution.executedPlan) {
           case e: ShuffleExchangeExec => e
@@ -1004,13 +954,14 @@ class PartitionAwareDataSource extends TestingV2Source {
   }
 }
 
-class OrderAwareDataSource extends TestingV2Source {
+class OrderAndPartitionAwareDataSource extends PartitionAwareDataSource {
 
-  class MyScanBuilder extends SimpleScanBuilder
+  class MyScanBuilder extends super.MyScanBuilder
     with SupportsReportOrdering {
 
     override def planInputPartitions(): Array[InputPartition] = {
       // Note that column `i` is ordered across partitions, while `j` is ordered per `i`.
+      // Note that we don't have same value of column `i` across partitions.
       Array(
         SpecificInputPartition(Array(1, 1, 2), Array(4, 5, 6)),
         SpecificInputPartition(Array(3, 4, 4), Array(6, 1, 2)))
@@ -1047,31 +998,6 @@ class OrderAwareDataSource extends TestingV2Source {
     override def name(): String = "identity"
     override def references(): Array[NamedReference] = Array.empty
     override def arguments(): Array[Expression] = Seq(namedReference).toArray
-  }
-}
-
-
-class OrderAndPartitionAwareDataSource extends OrderAwareDataSource {
-
-  class MyScanBuilder extends super.MyScanBuilder
-    with SupportsReportPartitioning {
-
-    override def outputPartitioning(): Partitioning = new MyPartitioning
-  }
-
-  override def getTable(options: CaseInsensitiveStringMap): Table = new SimpleBatchTable {
-    override def newScanBuilder(options: CaseInsensitiveStringMap): ScanBuilder = {
-      new MyScanBuilder()
-    }
-  }
-
-  class MyPartitioning extends Partitioning {
-    override def numPartitions(): Int = 2
-
-    override def satisfy(distribution: Distribution): Boolean = distribution match {
-      case c: ClusteredDistribution => c.clusteredColumns.contains("i")
-      case _ => false
-    }
   }
 }
 
