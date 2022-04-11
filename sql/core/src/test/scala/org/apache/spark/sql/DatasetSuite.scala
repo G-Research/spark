@@ -711,7 +711,7 @@ class DatasetSuite extends QueryTest
     WideData(1, "one", "One", Some(1), Some(1L)),
     WideData(2, "two", null, None, Some(2L)),
     WideData(3, null, "three", Some(3), None),
-    WideData(4, null, null, None, None),
+    WideData(4, null, null, None, None)
   ).toDS()
 
   val meltedWideDataRows = Seq(
@@ -722,7 +722,7 @@ class DatasetSuite extends QueryTest
     Row(3, "str1", null),
     Row(3, "str2", "three"),
     Row(4, "str1", null),
-    Row(4, "str2", null),
+    Row(4, "str2", null)
   )
 
   test("melt with single id") {
@@ -777,7 +777,7 @@ class DatasetSuite extends QueryTest
           case "str1" => "variable"
           case "str2" => "value"
         },
-        row.getString(2),
+        row.getString(2)
       ))
     )
 
@@ -799,7 +799,7 @@ class DatasetSuite extends QueryTest
       Row(3, 3, "str1", null),
       Row(3, 3, "str2", "three"),
       Row(4, null, "str1", null),
-      Row(4, null, "str2", null),
+      Row(4, null, "str2", null)
     )
 
     // do not drop nulls
@@ -841,7 +841,7 @@ class DatasetSuite extends QueryTest
       Row(3, "int1", 3L),
       Row(3, "long1", null),
       Row(4, "int1", null),
-      Row(4, "long1", null),
+      Row(4, "long1", null)
     )
 
     // do not drop nulls
