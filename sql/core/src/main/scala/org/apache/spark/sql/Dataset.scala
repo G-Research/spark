@@ -2012,6 +2012,22 @@ class Dataset[T] private[sql](
   @scala.annotation.varargs
   def agg(expr: Column, exprs: Column*): DataFrame = groupBy().agg(expr, exprs : _*)
 
+  def melt(id: Column, ids: Column*)
+          (value: Column, values: Column*): DataFrame =
+    Melt.of(this, id +: ids, value +: values)
+
+  def melt(dropNulls: Boolean, id: Column, ids: Column*)
+          (value: Column, values: Column*): DataFrame =
+    Melt.of(this, id +: ids, value +: values, dropNulls = dropNulls)
+
+  def melt(variableColumnName: String,
+           valueColumnName: String,
+           dropNulls: Boolean,
+           expr: Column,
+           exprs: Column*)(id: Column, ids: Column*): DataFrame =
+    Melt.of(this, expr +: exprs, id +: ids, dropNulls = dropNulls,
+      variableColumnName = variableColumnName, valueColumnName = valueColumnName)
+
  /**
   * Define (named) metrics to observe on the Dataset. This method returns an 'observed' Dataset
   * that returns the same result as the input, with the following guarantees:

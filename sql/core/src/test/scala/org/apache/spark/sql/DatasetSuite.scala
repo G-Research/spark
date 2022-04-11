@@ -707,6 +707,212 @@ class DatasetSuite extends QueryTest
       1 -> "a", 2 -> "bc", 3 -> "d")
   }
 
+  lazy val meltWideDataDs: Dataset[WideData] = Seq(
+    WideData(1, "one", "One", Some(1), Some(1L)),
+    WideData(2, "two", null, None, Some(2L)),
+    WideData(3, null, "three", Some(3), None),
+    WideData(4, null, null, None, None),
+  ).toDS()
+
+  val meltedWideDataRows = Seq(
+    Row(1, "str1", "one"),
+    Row(1, "str2", "One"),
+    Row(2, "str1", "two"),
+    Row(2, "str2", null),
+    Row(3, "str1", null),
+    Row(3, "str2", "three"),
+    Row(4, "str1", null),
+    Row(4, "str2", null),
+  )
+
+  test("melt with single id") {
+    // do not drop nulls
+    checkAnswer(
+      meltWideDataDs.melt(dropNulls = false, $"id")($"str1", $"str2"),
+      meltedWideDataRows
+    )
+
+    // drop nulls
+    checkAnswer(
+      meltWideDataDs.melt($"id")($"str1", $"str2"),
+      meltedWideDataRows.filter(row => !row.isNullAt(2))
+    )
+
+    // with id column `variable`
+    val variableException = intercept[IllegalArgumentException] {
+      meltWideDataDs.withColumnRenamed("id", "variable")
+        .melt($"variable")($"str1", $"str2")
+    }
+    assert(variableException.getMessage === "Column name for variable column (variable) " +
+      "must not exist among id columns: variable")
+    checkAnswer(
+      meltWideDataDs.withColumnRenamed("id", "variable")
+        .melt(variableColumnName = "var", valueColumnName = "val",
+          dropNulls = false, $"variable")($"str1", $"str2"),
+      meltedWideDataRows
+    )
+
+    // with id column `value`
+    val valueException = intercept[IllegalArgumentException] {
+      meltWideDataDs.withColumnRenamed("id", "value")
+        .melt($"value")($"str1", $"str2")
+    }
+    assert(valueException.getMessage === "Column name for value column (value) " +
+      "must not exist among id columns: value")
+    checkAnswer(
+      meltWideDataDs.withColumnRenamed("id", "value")
+        .melt(variableColumnName = "var", valueColumnName = "val",
+          dropNulls = false, $"value")($"str1", $"str2"),
+      meltedWideDataRows
+    )
+
+    // with value column `variable` and `value`
+    checkAnswer(
+      meltWideDataDs.withColumnRenamed("str1", "variable")
+        .withColumnRenamed("str2", "value")
+        .melt(dropNulls = false, $"id")($"variable", $"value"),
+      meltedWideDataRows.map(row => Row(
+        row.getInt(0),
+        row.getString(1) match {
+          case "str1" => "variable"
+          case "str2" => "value"
+        },
+        row.getString(2),
+      ))
+    )
+
+    // with un-referenced column `variable` and `value`
+    checkAnswer(
+      meltWideDataDs.withColumnRenamed("int1", "variable")
+        .withColumnRenamed("long1", "value")
+        .melt(dropNulls = false, $"id")($"str1", $"str2"),
+      meltedWideDataRows
+    )
+  }
+
+  test("melt with two ids") {
+    val meltedRows = Seq(
+      Row(1, 1, "str1", "one"),
+      Row(1, 1, "str2", "One"),
+      Row(2, null, "str1", "two"),
+      Row(2, null, "str2", null),
+      Row(3, 3, "str1", null),
+      Row(3, 3, "str2", "three"),
+      Row(4, null, "str1", null),
+      Row(4, null, "str2", null),
+    )
+
+    // do not drop nulls
+    checkAnswer(
+      meltWideDataDs.melt(dropNulls = false, $"id", $"int1")($"str1", $"str2"),
+      meltedRows
+    )
+
+    // drop nulls
+    checkAnswer(
+      meltWideDataDs.melt($"id", $"int1")($"str1", $"str2"),
+      meltedRows.filter(row => !row.isNullAt(3))
+    )
+  }
+
+  test("melt with incompatible value types") {
+    val valueException = intercept[IllegalArgumentException] {
+      meltWideDataDs.melt($"id")($"str1", $"int1")
+    }
+    assert(valueException.getMessage === "All values must be of same types, " +
+      "found: StringType, IntegerType")
+  }
+
+  /** TODO: would be nice if LongType and IntegerType columns could be used together.
+  test("melt with compatible value types") {
+    val df = meltWideDataDs.melt(dropNulls = false, $"id")($"int1", $"long1")
+
+    assert(df.schema === StructType(Seq(
+      StructField("id", IntegerType, nullable = true),
+      StructField("variable", StringType, nullable = false),
+      StructField("value", LongType, nullable = true),
+    )))
+
+    val meltedRows = Seq(
+      Row(1, "int1", 1L),
+      Row(1, "long1", 1L),
+      Row(2, "int1", null),
+      Row(2, "long1", 2L),
+      Row(3, "int1", 3L),
+      Row(3, "long1", null),
+      Row(4, "int1", null),
+      Row(4, "long1", null),
+    )
+
+    // do not drop nulls
+    checkAnswer(
+      df,
+      meltedRows
+    )
+
+    // drop nulls
+    checkAnswer(
+      meltWideDataDs.melt($"id")($"int1", $"long1"),
+      meltedRows.filter(row => !row.isNullAt(2))
+    )
+  } */
+
+  /** TODO: expressions for ids do not work.
+  test("melt with id expr") {
+    checkAnswer(
+      meltWideDataDs.melt($"id" * 2, $"int1".cast(StringType))($"str1", $"str2"),
+      Seq(
+        Row(2, "1", "str1", "one"),
+        Row(2, "1", "str2", "One"),
+        Row(4, "null", "str1", "two"),
+        Row(6, "3", "str2", "three"),
+      )
+    )
+  } */
+
+  test("melt with value expr") {
+    val expectedWithNulls = Seq(
+      Row(1, "str1", "one"),
+      Row(1, "str2", "One"),
+      Row(1, "int1", "2"),
+      Row(1, "long1", "1"),
+      Row(2, "str1", "two"),
+      Row(2, "str2", null),
+      Row(2, "int1", null),
+      Row(2, "long1", "2"),
+      Row(3, "str1", null),
+      Row(3, "str2", "three"),
+      Row(3, "int1", "6"),
+      Row(3, "long1", null),
+      Row(4, "str1", null),
+      Row(4, "str2", null),
+      Row(4, "int1", null),
+      Row(4, "long1", null),
+    )
+
+    // do not drop nulls
+    checkAnswer(
+      meltWideDataDs.melt(dropNulls = false, $"id")(
+        $"str1",
+        $"str2",
+        ($"int1" * 2).cast(StringType).as("int1"),
+        $"long1".cast(StringType).as("long1")
+      ),
+      expectedWithNulls
+    )
+
+    // drop nulls
+    checkAnswer(
+      meltWideDataDs.melt($"id")(
+        $"str1",
+        $"str2",
+        ($"int1" * 2).cast(StringType).as("int1"),
+        $"long1".cast(StringType).as("long1")
+      ),
+      expectedWithNulls.filter(row => !row.isNullAt(2))
+    )
+  }
+
   test("SPARK-34806: observation on datasets") {
     val namedObservation = Observation("named")
     val unnamedObservation = Observation()
@@ -2153,6 +2359,7 @@ case class TestDataUnion(x: Int, y: Int, z: Int)
 case class SingleData(id: Int)
 case class DoubleData(id: Int, val1: String)
 case class TripleData(id: Int, val1: String, val2: Long)
+case class WideData(id: Int, str1: String, str2: String, int1: Option[Int], long1: Option[Long])
 
 case class WithImmutableMap(id: String, map_test: scala.collection.immutable.Map[Long, String])
 case class WithMap(id: String, map_test: scala.collection.Map[Long, String])
