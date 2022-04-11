@@ -2012,19 +2012,19 @@ class Dataset[T] private[sql](
   @scala.annotation.varargs
   def agg(expr: Column, exprs: Column*): DataFrame = groupBy().agg(expr, exprs : _*)
 
-  def melt(id: Column, ids: Column*)
-          (value: Column, values: Column*): DataFrame =
+  def melt(id: String, ids: String*)
+          (value: String, values: String*): DataFrame =
     Melt.of(this, id +: ids, value +: values)
 
-  def melt(dropNulls: Boolean, id: Column, ids: Column*)
-          (value: Column, values: Column*): DataFrame =
+  def melt(dropNulls: Boolean, id: String, ids: String*)
+          (value: String, values: String*): DataFrame =
     Melt.of(this, id +: ids, value +: values, dropNulls = dropNulls)
 
   def melt(variableColumnName: String,
            valueColumnName: String,
            dropNulls: Boolean,
-           expr: Column,
-           exprs: Column*)(id: Column, ids: Column*): DataFrame =
+           expr: String,
+           exprs: String*)(id: String, ids: String*): DataFrame =
     Melt.of(this, expr +: exprs, id +: ids, dropNulls = dropNulls,
       variableColumnName = variableColumnName, valueColumnName = valueColumnName)
 

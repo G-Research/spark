@@ -18,16 +18,15 @@
 package org.apache.spark.sql
 
 import org.apache.spark.sql.catalyst.expressions.objects.AssertNotNull
-import org.apache.spark.sql.catalyst.expressions.{Alias, AttributeReference, Expression, Literal, NamedExpression}
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Expression, Literal}
 import org.apache.spark.sql.catalyst.plans.logical.Expand
-import org.apache.spark.sql.catalyst.util.toPrettySQL
 import org.apache.spark.sql.functions.col
 import org.apache.spark.sql.types.StringType
 
 object Melt {
   def of[_](ds: Dataset[_],
-            ids: Seq[Column],
-            values: Seq[Column],
+            ids: Seq[String],
+            values: Seq[String],
             dropNulls: Boolean = true,
             variableColumnName: String = "variable",
             valueColumnName: String = "value"): DataFrame = {
@@ -38,16 +37,16 @@ object Melt {
       throw new IllegalArgumentException(f"At least one value column required")
     }
 
-    val valueProjection = ds.select(values: _*)
-    val valueTypes = valueProjection.schema.fields.map(_.dataType).toSet
+    val valueTypes = ds.schema.fields
+      .filter(attr => values.contains(attr.name))
+      .map(_.dataType).toSet
     if (valueTypes.size > 1) {
       throw new IllegalArgumentException(f"All values must be of same types, " +
         f"found: ${valueTypes.mkString(", ")}")
     }
     val valueType = valueTypes.head
 
-    val idProjection = ds.select(ids: _*)
-    val idAttrs = idProjection.logicalPlan.output
+    val idAttrs = ds.logicalPlan.output.filter(attr => ids.contains(attr.name))
     val idNames = idAttrs.map(_.name)
     if (idNames.contains(variableColumnName)) {
       throw new IllegalArgumentException(f"Column name for variable column ($variableColumnName) " +
@@ -62,7 +61,7 @@ object Melt {
     val valueAttr = AttributeReference(valueColumnName, valueType, nullable = true)()
     val output = idAttrs ++ Seq(variableAttr, valueAttr)
 
-    val valueAttrs = valueProjection.queryExecution.logical.output
+    val valueAttrs = ds.queryExecution.logical.output.filter(attr => values.contains(attr.name))
     val exprs: Seq[Seq[Expression]] = valueAttrs.map {
       attr =>
         idAttrs ++ Seq(
@@ -71,7 +70,7 @@ object Melt {
         )
     }
 
-    val plan = Expand(exprs, output, ds.select(ids ++ values: _*).queryExecution.logical)
+    val plan = Expand(exprs, output, ds.queryExecution.logical)
     val df = Dataset.ofRows(ds.sparkSession, plan)
 
     if (dropNulls) {
@@ -81,11 +80,5 @@ object Melt {
     } else {
       df
     }
-  }
-
-  /** taken from class RelationalGroupedDataset */
-  private[this] def alias(expr: Expression): NamedExpression = expr match {
-    case expr: NamedExpression => expr
-    case expr: Expression => Alias(expr, toPrettySQL(expr))()
   }
 }
