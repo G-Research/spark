@@ -710,12 +710,12 @@ class DatasetSuite extends QueryTest
   test("SPARK-38864: melt dataset") {
     // for more tests on melt, see MeltSuite
 
-    // out test DataFrame
+    // our test DataFrame
     val df = Seq(
       (1, "one", Some(1L), Some(10L)),
       (2, "two", None, Some(20L)),
       (3, null, None, None),
-      (4, "four", Some(4L), Some(40L)),
+      (4, "four", Some(4L), Some(40L))
     ).toDF("id", "str", "long1", "long2")
 
     // melt while keeping null values
