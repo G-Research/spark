@@ -61,7 +61,8 @@ private[sql] object Melt {
     }
 
     // all melted values have to have the same type
-    val valueTypes = resolvedValues.filter(_._2.isDefined).values.map(_.get.dataType).toSet
+    val valueAttrs = resolvedValues.filter(_._2.isDefined).values.map(_.get.toAttribute).toSeq
+    val valueTypes = valueAttrs.map(_.dataType).toSet
     if (valueTypes.size > 1) {
       throw new IllegalArgumentException(f"All values must be of same types, " +
         f"found: ${valueTypes.toSeq.map(_.toString).sorted.mkString(", ")}")
@@ -86,7 +87,6 @@ private[sql] object Melt {
     val output = idAttrs ++ Seq(variableAttr, valueAttr)
 
     // construct melt expressions for Expand
-    val valueAttrs = resolvedValues.filter(_._2.isDefined).values.map(_.get.toAttribute).toSeq
     val exprs: Seq[Seq[Expression]] = valueAttrs.map {
       attr =>
         idAttrs ++ Seq(
