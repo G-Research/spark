@@ -2012,6 +2012,52 @@ class Dataset[T] private[sql](
   @scala.annotation.varargs
   def agg(expr: Column, exprs: Column*): DataFrame = groupBy().agg(expr, exprs : _*)
 
+  /**
+   * (Scala-specific)
+   * Unpivot a DataFrame from wide format to long format, optionally
+   * leaving identifier variables set.
+   *
+   * This function is useful to massage a DataFrame into a format where some
+   * columns are identifier variables (`ids`), while all other columns,
+   * considered measured variables (`values`), are "unpivoted" to the rows,
+   * leaving just two non-identifier columns, 'variable' and 'value'.
+   *
+   * {{{
+   *   val df = Seq((1, 11, 12), (2, 21, 22)).toDF("id", "int1", "int2")
+   *   df.show()
+   *   // output:
+   *   // +---+----+----+
+   *   // | id|int1|int2|
+   *   // +---+----+----+
+   *   // |  1|  11|  12|
+   *   // |  2|  21|  22|
+   *   // +---+----+----+
+   *
+   *   df.melt(Seq("id")).show()
+   *   // output:
+   *   // +---+--------+-----+
+   *   // | id|variable|value|
+   *   // +---+--------+-----+
+   *   // |  1|    int1|   11|
+   *   // |  1|    int2|   12|
+   *   // |  2|    int1|   21|
+   *   // |  2|    int2|   22|
+   *   // +---+--------+-----+
+   * }}}
+   *
+   * When no id columns are given, the unpivoted DataFrame consists of only the
+   * `variable` and `value` columns. When no value columns are given, all non-identifier
+   * columns are considered value columns.
+   *
+   * @param ids names of the id columns
+   * @param values names of the value columns
+   * @param dropNulls rows with null values are dropped from the returned DataFrame
+   * @param variableColumnName name of the variable column, default `variable`
+   * @param valueColumnName name of the value column, default `value`
+   *
+   * @group untypedrel
+   * @since 3.4.0
+   */
   def melt(ids: Seq[String],
            values: Seq[String] = Seq.empty,
            dropNulls: Boolean = false,
@@ -2023,6 +2069,68 @@ class Dataset[T] private[sql](
       valueColumnName = valueColumnName,
       dropNulls = dropNulls
     )
+
+  /**
+   * (Java-specific)
+   * Unpivot a DataFrame from wide format to long format, optionally
+   * leaving identifier variables set.
+   *
+   * This function is useful to massage a DataFrame into a format where some
+   * columns are identifier variables (`ids`), while all other columns,
+   * considered measured variables (`values`), are "unpivoted" to the rows,
+   * leaving just two non-identifier columns, 'variable' and 'value'.
+   *
+   * {{{
+   *   df.show()
+   *   // output:
+   *   // +---+----+----+
+   *   // | id|int1|int2|
+   *   // +---+----+----+
+   *   // |  1|  11|  12|
+   *   // |  2|  21|  22|
+   *   // +---+----+----+
+   *
+   *   df.melt(new String[] { "id" }).show()
+   *   // output:
+   *   // +---+--------+-----+
+   *   // | id|variable|value|
+   *   // +---+--------+-----+
+   *   // |  1|    int1|   11|
+   *   // |  1|    int2|   12|
+   *   // |  2|    int1|   21|
+   *   // |  2|    int2|   22|
+   *   // +---+--------+-----+
+   * }}}
+   *
+   * When no id columns are given, the unpivoted DataFrame consists of only the
+   * `variable` and `value` columns. When no value columns are given, all non-identifier
+   * columns are considered value columns.
+   *
+   * @param ids names of the id columns
+   * @param values names of the value columns
+   * @param dropNulls rows with null values are dropped from the returned DataFrame
+   * @param variableColumnName name of the variable column, default `variable`
+   * @param valueColumnName name of the value column, default `value`
+   *
+   * @group untypedrel
+   * @since 3.4.0
+   */
+  def melt(ids: Array[String],
+           values: Array[String],
+           dropNulls: Boolean,
+           variableColumnName: String,
+           valueColumnName: String): DataFrame =
+    Melt.of(this,
+      ids, values,
+      dropNulls = dropNulls,
+      variableColumnName = variableColumnName,
+      valueColumnName = valueColumnName
+    )
+
+  def melt(ids: Array[String]): DataFrame = melt(ids.toSeq)
+  def melt(ids: Array[String], values: Array[String]): DataFrame = melt(ids.toSeq, values.toSeq)
+  def melt(ids: Array[String], values: Array[String], dropNulls: Boolean): DataFrame =
+    melt(ids.toSeq, values.toSeq, dropNulls = dropNulls)
 
  /**
   * Define (named) metrics to observe on the Dataset. This method returns an 'observed' Dataset
