@@ -41,6 +41,8 @@ import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.test.SharedSparkSession
 import org.apache.spark.sql.types._
 
+import scala.reflect.ClassTag
+
 case class TestDataPoint(x: Int, y: Double, s: String, t: TestDataPoint2)
 case class TestDataPoint2(x: Int, s: String)
 
@@ -728,29 +730,31 @@ class DatasetSuite extends QueryTest
   test("melt without ids or values") {
     // do not drop nulls
     checkAnswer(
-      meltWideDataDs.select($"id", $"str1", $"str2").melt(Seq.empty),
-      meltedWideDataRows
+      meltWideDataDs.select($"str1", $"str2").melt(Seq.empty),
+      meltedWideDataRows.map(row => Row(row.getString(1), row.getString(2)))
     )
 
     // drop nulls
     checkAnswer(
-      meltWideDataDs.select($"id", $"str1", $"str2").melt(Seq.empty, dropNulls = true),
+      meltWideDataDs.select($"str1", $"str2").melt(Seq.empty, dropNulls = true),
       meltedWideDataRows.filter(row => !row.isNullAt(2))
+        .map(row => Row(row.getString(1), row.getString(2)))
     )
   }
 
   test("melt without ids") {
     // do not drop nulls
     checkAnswer(
-      meltWideDataDs.select($"id", $"str1", $"str2").melt(Seq.empty, Seq("str1", "str2")),
-      meltedWideDataRows
+      meltWideDataDs.select($"str1", $"str2").melt(Seq.empty, Seq("str1", "str2")),
+      meltedWideDataRows.map(row => Row(row.getString(1), row.getString(2)))
     )
 
     // drop nulls
     checkAnswer(
-      meltWideDataDs.select($"id", $"str1", $"str2")
+      meltWideDataDs.select($"str1", $"str2")
         .melt(Seq.empty, Seq("str1", "str2"), dropNulls = true),
       meltedWideDataRows.filter(row => !row.isNullAt(2))
+        .map(row => Row(row.getString(1), row.getString(2)))
     )
   }
 
@@ -854,7 +858,7 @@ class DatasetSuite extends QueryTest
     // do drop nulls
     checkAnswer(
       meltWideDataDs.select($"id", $"str1", $"str2").melt(Seq("id"), dropNulls = true),
-      meltedWideDataRows
+      meltedWideDataRows.filter(row => !row.isNullAt(2))
     )
   }
 
@@ -899,6 +903,32 @@ class DatasetSuite extends QueryTest
       meltedRows.filter(row => !row.isNullAt(2))
     )
   } */
+
+  test("melt with invalid arguments") {
+    def assertException[T <: Exception : ClassTag](func: () => Any, message: String): Unit = {
+      val exception = intercept[T] { func() }
+      assert(exception.getMessage === message)
+    }
+
+    // melting with empty list of value columns
+    assertException[IllegalArgumentException](
+      () => meltWideDataDs.melt(Seq.empty, Seq.empty),
+      "All values must be of same types, found: StringType, IntegerType"
+    )
+
+    val valueException2 = intercept[IllegalArgumentException] {
+      meltWideDataDs.melt(Seq("id"), Seq.empty)
+    }
+    assert(valueException2.getMessage === "All values must be of same types, " +
+      "found: StringType, IntegerType")
+
+    // melting without giving values and no non-id columns
+    val valueException3 = intercept[IllegalArgumentException] {
+      meltWideDataDs.select("id").melt(Seq("id"))
+    }
+    assert(valueException3.getMessage === "All values must be of same types, " +
+      "found: StringType, IntegerType")
+  }
 
   test("melt with dot and backtick") {
     val df = meltWideDataDs

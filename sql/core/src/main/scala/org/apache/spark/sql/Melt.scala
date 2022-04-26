@@ -26,13 +26,11 @@ private[sql] object Melt {
   def of[_](ds: Dataset[_],
             ids: Seq[String],
             values: Seq[String],
-            dropNulls: Boolean = true,
+            dropNulls: Boolean = false,
             variableColumnName: String = "variable",
             valueColumnName: String = "value"): DataFrame = {
     // all given ids and values should exist in ds
-    val resolver = ds.sparkSession.sessionState.analyzer.resolver
-    val unknown = (ids ++ values)
-      .filter(ds.queryExecution.analyzed.resolveQuoted(_, resolver).isEmpty)
+    val unknown = (ids ++ values).diff(ds.columns)
     if (unknown.nonEmpty) {
       throw new IllegalArgumentException(
         s"Unknown columns: ${unknown.mkString(", ")}, dataset has: ${ds.columns.mkString(", ")}"
@@ -52,9 +50,9 @@ private[sql] object Melt {
     }
 
     // all melted values have to have the same type
-    val valueTypes = valueNames.map(
-      ds.queryExecution.analyzed.resolveQuoted(_, resolver).get.dataType
-    ).toSet
+    val valueTypes = ds.logicalPlan.output.filter(
+      attr => valueNames.contains(attr.name)
+    ).map(_.dataType).toSet
     if (valueTypes.size > 1) {
       throw new IllegalArgumentException(f"All values must be of same types, " +
         f"found: ${valueTypes.mkString(", ")}")
@@ -62,6 +60,7 @@ private[sql] object Melt {
     val valueType = valueTypes.head
 
     // resolve ids
+    val resolver = ds.sparkSession.sessionState.analyzer.resolver
     val idAttrs = ids.map(ds.queryExecution.analyzed.resolveQuoted(_, resolver).get.toAttribute)
     val idNames = idAttrs.map(_.name)
     if (idNames.contains(variableColumnName)) {
