@@ -95,53 +95,6 @@ class MeltSuite extends QueryTest
       Melt.of(meltWideDataDs, Seq("id"), Seq("str1", "str2"), dropNulls = true),
       meltedWideDataRows.filter(row => !row.isNullAt(2))
     )
-
-    // with id column `variable`
-    assertException[IllegalArgumentException] {
-      Melt.of(
-        meltWideDataDs.withColumnRenamed("id", "variable"),
-        Seq("variable"), Seq("str1", "str2")
-      )
-    }("Column name for variable column (variable) must not exist among id columns: variable")
-    checkAnswer(
-      Melt.of(meltWideDataDs.withColumnRenamed("id", "variable"),
-        Seq("variable"), Seq("str1", "str2"), variableColumnName = "var", valueColumnName = "val"),
-      meltedWideDataRows
-    )
-
-    // with id column `value`
-    assertException[IllegalArgumentException] {
-      Melt.of(meltWideDataDs.withColumnRenamed("id", "value"),
-        Seq("value"), Seq("str1", "str2"))
-    }("Column name for value column (value) must not exist among id columns: value")
-    checkAnswer(
-      Melt.of(meltWideDataDs.withColumnRenamed("id", "value"),
-        Seq("value"), Seq("str1", "str2"), variableColumnName = "var", valueColumnName = "val"),
-      meltedWideDataRows
-    )
-
-    // with value column `variable` and `value`
-    checkAnswer(
-      Melt.of(meltWideDataDs.withColumnRenamed("str1", "variable")
-        .withColumnRenamed("str2", "value"),
-        Seq("id"), Seq("variable", "value")),
-      meltedWideDataRows.map(row => Row(
-        row.getInt(0),
-        row.getString(1) match {
-          case "str1" => "variable"
-          case "str2" => "value"
-        },
-        row.getString(2)
-      ))
-    )
-
-    // with un-referenced column `variable` and `value`
-    checkAnswer(
-      Melt.of(meltWideDataDs.withColumnRenamed("int1", "variable")
-        .withColumnRenamed("long1", "value"),
-        Seq("id"), Seq("str1", "str2")),
-      meltedWideDataRows
-    )
   }
 
   test("melt with two ids") {
@@ -180,6 +133,31 @@ class MeltSuite extends QueryTest
     checkAnswer(
       Melt.of(meltWideDataDs.select($"id", $"str1", $"str2"), Seq("id"), dropNulls = true),
       meltedWideDataRows.filter(row => !row.isNullAt(2))
+    )
+  }
+
+  test("melt with variable / value value columns") {
+    // with value column `variable` and `value`
+    checkAnswer(
+      Melt.of(meltWideDataDs.withColumnRenamed("str1", "variable")
+        .withColumnRenamed("str2", "value"),
+        Seq("id"), Seq("variable", "value")),
+      meltedWideDataRows.map(row => Row(
+        row.getInt(0),
+        row.getString(1) match {
+          case "str1" => "variable"
+          case "str2" => "value"
+        },
+        row.getString(2)
+      ))
+    )
+
+    // with un-referenced column `variable` and `value`
+    checkAnswer(
+      Melt.of(meltWideDataDs.withColumnRenamed("int1", "variable")
+        .withColumnRenamed("long1", "value"),
+        Seq("id"), Seq("str1", "str2")),
+      meltedWideDataRows
     )
   }
 
@@ -236,6 +214,31 @@ class MeltSuite extends QueryTest
     assertException[IllegalArgumentException] {
       Melt.of(meltWideDataDs.select("id"), Seq("id"))
     }("The dataset has no non-id columns to melt")
+
+    // melting with id column `variable`
+    assertException[IllegalArgumentException] {
+      Melt.of(
+        meltWideDataDs.withColumnRenamed("id", "variable"),
+        Seq("variable"), Seq("str1", "str2")
+      )
+    }("Column name for variable column (variable) must not exist among id columns: variable")
+    checkAnswer(
+      Melt.of(meltWideDataDs.withColumnRenamed("id", "variable"),
+        Seq("variable"), Seq("str1", "str2"), variableColumnName = "var", valueColumnName = "val"),
+      meltedWideDataRows
+    )
+
+    // melting with id column `value`
+    assertException[IllegalArgumentException] {
+      Melt.of(meltWideDataDs.withColumnRenamed("id", "value"),
+        Seq("value"), Seq("str1", "str2"))
+    }("Column name for value column (value) must not exist among id columns: value")
+    checkAnswer(
+      Melt.of(meltWideDataDs.withColumnRenamed("id", "value"),
+        Seq("value"), Seq("str1", "str2"), variableColumnName = "var", valueColumnName = "val"),
+      meltedWideDataRows
+    )
+
   }
 
   test("melt with dot and backtick") {
