@@ -41,8 +41,6 @@ import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.test.SharedSparkSession
 import org.apache.spark.sql.types._
 
-import scala.reflect.ClassTag
-
 case class TestDataPoint(x: Int, y: Double, s: String, t: TestDataPoint2)
 case class TestDataPoint2(x: Int, s: String)
 
@@ -709,264 +707,59 @@ class DatasetSuite extends QueryTest
       1 -> "a", 2 -> "bc", 3 -> "d")
   }
 
-  lazy val meltWideDataDs: Dataset[WideData] = Seq(
-    WideData(1, "one", "One", Some(1), Some(1L)),
-    WideData(2, "two", null, None, Some(2L)),
-    WideData(3, null, "three", Some(3), None),
-    WideData(4, null, null, None, None)
-  ).toDS()
+  test("SPARK-38864: melt dataset") {
+    // for more tests on melt, see MeltSuite
 
-  val meltedWideDataRows = Seq(
-    Row(1, "str1", "one"),
-    Row(1, "str2", "One"),
-    Row(2, "str1", "two"),
-    Row(2, "str2", null),
-    Row(3, "str1", null),
-    Row(3, "str2", "three"),
-    Row(4, "str1", null),
-    Row(4, "str2", null)
-  )
+    // out test DataFrame
+    val df = Seq(
+      (1, "one", Some(1L), Some(10L)),
+      (2, "two", None, Some(20L)),
+      (3, null, None, None),
+      (4, "four", Some(4L), Some(40L)),
+    ).toDF("id", "str", "long1", "long2")
 
-  test("melt without ids or values") {
-    // do not drop nulls
+    // melt while keeping null values
+    val actualWithNulls = df.melt(Seq("id"), Seq("long1", "long2"),
+      dropNulls = false, variableColumnName = "var", valueColumnName = "val")
     checkAnswer(
-      meltWideDataDs.select($"str1", $"str2").melt(Seq.empty),
-      meltedWideDataRows.map(row => Row(row.getString(1), row.getString(2)))
+      actualWithNulls,
+      Seq(
+        Row(1, "long1", 1L),
+        Row(1, "long2", 10L),
+        Row(2, "long1", null),
+        Row(2, "long2", 20L),
+        Row(3, "long1", null),
+        Row(3, "long2", null),
+        Row(4, "long1", 4L),
+        Row(4, "long2", 40L),
+      )
     )
+    val expectedSchemaWithNulls = StructType(Seq(
+      StructField("id", IntegerType, nullable = false),
+      StructField("var", StringType, nullable = false),
+      StructField("val", LongType, nullable = true),
+    ))
+    assert(actualWithNulls.schema === expectedSchemaWithNulls)
 
-    // drop nulls
+    // melt while removing null values
+    val actualWithoutNulls = df.melt(Seq("id"), Seq("long1", "long2"),
+      dropNulls = true, variableColumnName = "var", valueColumnName = "val")
     checkAnswer(
-      meltWideDataDs.select($"str1", $"str2").melt(Seq.empty, dropNulls = true),
-      meltedWideDataRows.filter(row => !row.isNullAt(2))
-        .map(row => Row(row.getString(1), row.getString(2)))
+      actualWithoutNulls,
+      Seq(
+        Row(1, "long1", 1L),
+        Row(1, "long2", 10L),
+        Row(2, "long2", 20L),
+        Row(4, "long1", 4L),
+        Row(4, "long2", 40L),
+      )
     )
-  }
-
-  test("melt without ids") {
-    // do not drop nulls
-    checkAnswer(
-      meltWideDataDs.select($"str1", $"str2").melt(Seq.empty, Seq("str1", "str2")),
-      meltedWideDataRows.map(row => Row(row.getString(1), row.getString(2)))
-    )
-
-    // drop nulls
-    checkAnswer(
-      meltWideDataDs.select($"str1", $"str2")
-        .melt(Seq.empty, Seq("str1", "str2"), dropNulls = true),
-      meltedWideDataRows.filter(row => !row.isNullAt(2))
-        .map(row => Row(row.getString(1), row.getString(2)))
-    )
-  }
-
-  test("melt with single id") {
-    // do not drop nulls
-    checkAnswer(
-      meltWideDataDs.melt(Seq("id"), Seq("str1", "str2")),
-      meltedWideDataRows
-    )
-
-    // drop nulls
-    checkAnswer(
-      meltWideDataDs.melt(Seq("id"), Seq("str1", "str2"), dropNulls = true),
-      meltedWideDataRows.filter(row => !row.isNullAt(2))
-    )
-
-    // with id column `variable`
-    val variableException = intercept[IllegalArgumentException] {
-      meltWideDataDs.withColumnRenamed("id", "variable")
-        .melt(Seq("variable"), Seq("str1", "str2"))
-    }
-    assert(variableException.getMessage === "Column name for variable column (variable) " +
-      "must not exist among id columns: variable")
-    checkAnswer(
-      meltWideDataDs.withColumnRenamed("id", "variable")
-        .melt(Seq("variable"), Seq("str1", "str2"),
-          variableColumnName = "var", valueColumnName = "val"),
-      meltedWideDataRows
-    )
-
-    // with id column `value`
-    val valueException = intercept[IllegalArgumentException] {
-      meltWideDataDs.withColumnRenamed("id", "value")
-        .melt(Seq("value"), Seq("str1", "str2"))
-    }
-    assert(valueException.getMessage === "Column name for value column (value) " +
-      "must not exist among id columns: value")
-    checkAnswer(
-      meltWideDataDs.withColumnRenamed("id", "value")
-        .melt(Seq("value"), Seq("str1", "str2"),
-          variableColumnName = "var", valueColumnName = "val"),
-      meltedWideDataRows
-    )
-
-    // with value column `variable` and `value`
-    checkAnswer(
-      meltWideDataDs.withColumnRenamed("str1", "variable")
-        .withColumnRenamed("str2", "value")
-        .melt(Seq("id"), Seq("variable", "value")),
-      meltedWideDataRows.map(row => Row(
-        row.getInt(0),
-        row.getString(1) match {
-          case "str1" => "variable"
-          case "str2" => "value"
-        },
-        row.getString(2)
-      ))
-    )
-
-    // with un-referenced column `variable` and `value`
-    checkAnswer(
-      meltWideDataDs.withColumnRenamed("int1", "variable")
-        .withColumnRenamed("long1", "value")
-        .melt(Seq("id"), Seq("str1", "str2")),
-      meltedWideDataRows
-    )
-  }
-
-  test("melt with two ids") {
-    val meltedRows = Seq(
-      Row(1, 1, "str1", "one"),
-      Row(1, 1, "str2", "One"),
-      Row(2, null, "str1", "two"),
-      Row(2, null, "str2", null),
-      Row(3, 3, "str1", null),
-      Row(3, 3, "str2", "three"),
-      Row(4, null, "str1", null),
-      Row(4, null, "str2", null)
-    )
-
-    // do not drop nulls
-    checkAnswer(
-      meltWideDataDs.melt(Seq("id", "int1"), Seq("str1", "str2")),
-      meltedRows
-    )
-
-    // drop nulls
-    checkAnswer(
-      meltWideDataDs.melt(Seq("id", "int1"), Seq("str1", "str2"), dropNulls = true),
-      meltedRows.filter(row => !row.isNullAt(3))
-    )
-  }
-
-  test("melt without values") {
-    // do not drop nulls
-    checkAnswer(
-      meltWideDataDs.select($"id", $"str1", $"str2").melt(Seq("id")),
-      meltedWideDataRows
-    )
-
-    // do drop nulls
-    checkAnswer(
-      meltWideDataDs.select($"id", $"str1", $"str2").melt(Seq("id"), dropNulls = true),
-      meltedWideDataRows.filter(row => !row.isNullAt(2))
-    )
-  }
-
-  test("melt with incompatible value types") {
-    val valueException = intercept[IllegalArgumentException] {
-      meltWideDataDs.melt(Seq("id"), Seq("str1", "int1"))
-    }
-    assert(valueException.getMessage === "All values must be of same types, " +
-      "found: StringType, IntegerType")
-  }
-
-  /** TODO: would be nice if LongType and IntegerType columns could be used together.
-  test("melt with compatible value types") {
-    val df = meltWideDataDs.melt(Seq("id"), Seq("int1", "long1"))
-
-    assert(df.schema === StructType(Seq(
-      StructField("id", IntegerType, nullable = true),
-      StructField("variable", StringType, nullable = false),
-      StructField("value", LongType, nullable = true),
-    )))
-
-    val meltedRows = Seq(
-      Row(1, "int1", 1L),
-      Row(1, "long1", 1L),
-      Row(2, "int1", null),
-      Row(2, "long1", 2L),
-      Row(3, "int1", 3L),
-      Row(3, "long1", null),
-      Row(4, "int1", null),
-      Row(4, "long1", null)
-    )
-
-    // do not drop nulls
-    checkAnswer(
-      df,
-      meltedRows
-    )
-
-    // drop nulls
-    checkAnswer(
-      meltWideDataDs.melt(Seq("id"), Seq("int1", "long1"), dropNulls = true),
-      meltedRows.filter(row => !row.isNullAt(2))
-    )
-  } */
-
-  test("melt with invalid arguments") {
-    def assertException[T <: Exception : ClassTag](func: () => Any, message: String): Unit = {
-      val exception = intercept[T] { func() }
-      assert(exception.getMessage === message)
-    }
-
-    // melting with empty list of value columns
-    assertException[IllegalArgumentException](
-      () => meltWideDataDs.melt(Seq.empty, Seq.empty),
-      "All values must be of same types, found: StringType, IntegerType"
-    )
-
-    val valueException2 = intercept[IllegalArgumentException] {
-      meltWideDataDs.melt(Seq("id"), Seq.empty)
-    }
-    assert(valueException2.getMessage === "All values must be of same types, " +
-      "found: StringType, IntegerType")
-
-    // melting without giving values and no non-id columns
-    val valueException3 = intercept[IllegalArgumentException] {
-      meltWideDataDs.select("id").melt(Seq("id"))
-    }
-    assert(valueException3.getMessage === "All values must be of same types, " +
-      "found: StringType, IntegerType")
-  }
-
-  test("melt with dot and backtick") {
-    val df = meltWideDataDs
-      .withColumnRenamed("id", "`an.id`")
-      .withColumnRenamed("str1", "`str.one`")
-      .withColumnRenamed("str2", "`str.two`")
-    checkAnswer(
-      df.melt(Seq("`an.id`"), Seq("`str.one`", "`str.two`")),
-      meltedWideDataRows.map(row => Row(
-        row.getInt(0),
-        row.getString(1) match {
-          case "str1" => "str.one"
-          case "str2" => "str.two"
-        },
-        row.getString(2)
-      ))
-    )
-  }
-
-  test("melt with struct fields") {
-    val df = meltWideDataDs.select(
-      struct($"id").as("an"),
-      struct(
-        $"str1".as("one"),
-        $"str2".as("two")
-      ).as("str")
-    )
-    checkAnswer(
-      df.melt(Seq("an.id"), Seq("str.one", "str.two")),
-      meltedWideDataRows.map(row => Row(
-        row.getInt(0),
-        row.getString(1) match {
-          case "str1" => "str.one"
-          case "str2" => "str.two"
-        },
-        row.getString(2)
-      ))
-    )
+    val expectedSchemaWithoutNulls = StructType(Seq(
+      StructField("id", IntegerType, nullable = false),
+      StructField("var", StringType, nullable = false),
+      StructField("val", LongType, nullable = false),
+    ))
+    assert(actualWithoutNulls.schema === expectedSchemaWithoutNulls)
   }
 
   test("SPARK-34806: observation on datasets") {

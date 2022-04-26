@@ -18,6 +18,7 @@
 package org.apache.spark.sql
 
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Expression, Literal}
+import org.apache.spark.sql.catalyst.expressions.objects.AssertNotNull
 import org.apache.spark.sql.catalyst.plans.logical.Expand
 import org.apache.spark.sql.functions.col
 import org.apache.spark.sql.types.StringType
@@ -25,7 +26,7 @@ import org.apache.spark.sql.types.StringType
 private[sql] object Melt {
   def of[_](ds: Dataset[_],
             ids: Seq[String],
-            values: Seq[String],
+            values: Seq[String] = Seq.empty,
             dropNulls: Boolean = false,
             variableColumnName: String = "variable",
             valueColumnName: String = "value"): DataFrame = {
@@ -55,7 +56,7 @@ private[sql] object Melt {
     ).map(_.dataType).toSet
     if (valueTypes.size > 1) {
       throw new IllegalArgumentException(f"All values must be of same types, " +
-        f"found: ${valueTypes.mkString(", ")}")
+        f"found: ${valueTypes.toSeq.map(_.toString).sorted.mkString(", ")}")
     }
     val valueType = valueTypes.head
 
@@ -95,7 +96,11 @@ private[sql] object Melt {
 
     // drop null values if requested
     if (dropNulls) {
-      df.where(col(valueColumnName).isNotNull)
+      val valueColumn = col(valueColumnName)
+      // with `AssertNotNull` we express this column is non-nullable (reflected in schema)
+      val nonNullableValueColumn = Column(AssertNotNull(valueColumn.expr))
+      df.where(valueColumn.isNotNull)
+        .withColumn(valueColumnName, nonNullableValueColumn)
     } else {
       df
     }
