@@ -725,44 +725,73 @@ class DatasetSuite extends QueryTest
     Row(4, "str2", null)
   )
 
-  test("melt with single id") {
+  test("melt without ids or values") {
     // do not drop nulls
     checkAnswer(
-      meltWideDataDs.melt(dropNulls = false, "id")("str1", "str2"),
+      meltWideDataDs.select($"id", $"str1", $"str2").melt(Seq.empty),
       meltedWideDataRows
     )
 
     // drop nulls
     checkAnswer(
-      meltWideDataDs.melt("id")("str1", "str2"),
+      meltWideDataDs.select($"id", $"str1", $"str2").melt(Seq.empty, dropNulls = true),
+      meltedWideDataRows.filter(row => !row.isNullAt(2))
+    )
+  }
+
+  test("melt without ids") {
+    // do not drop nulls
+    checkAnswer(
+      meltWideDataDs.select($"id", $"str1", $"str2").melt(Seq.empty, Seq("str1", "str2")),
+      meltedWideDataRows
+    )
+
+    // drop nulls
+    checkAnswer(
+      meltWideDataDs.select($"id", $"str1", $"str2")
+        .melt(Seq.empty, Seq("str1", "str2"), dropNulls = true),
+      meltedWideDataRows.filter(row => !row.isNullAt(2))
+    )
+  }
+
+  test("melt with single id") {
+    // do not drop nulls
+    checkAnswer(
+      meltWideDataDs.melt(Seq("id"), Seq("str1", "str2")),
+      meltedWideDataRows
+    )
+
+    // drop nulls
+    checkAnswer(
+      meltWideDataDs.melt(Seq("id"), Seq("str1", "str2"), dropNulls = true),
       meltedWideDataRows.filter(row => !row.isNullAt(2))
     )
 
     // with id column `variable`
     val variableException = intercept[IllegalArgumentException] {
       meltWideDataDs.withColumnRenamed("id", "variable")
-        .melt("variable")("str1", "str2")
+        .melt(Seq("variable"), Seq("str1", "str2"))
     }
     assert(variableException.getMessage === "Column name for variable column (variable) " +
       "must not exist among id columns: variable")
     checkAnswer(
       meltWideDataDs.withColumnRenamed("id", "variable")
-        .melt(variableColumnName = "var", valueColumnName = "val",
-          dropNulls = false, "variable")("str1", "str2"),
+        .melt(Seq("variable"), Seq("str1", "str2"),
+          variableColumnName = "var", valueColumnName = "val"),
       meltedWideDataRows
     )
 
     // with id column `value`
     val valueException = intercept[IllegalArgumentException] {
       meltWideDataDs.withColumnRenamed("id", "value")
-        .melt("value")("str1", "str2")
+        .melt(Seq("value"), Seq("str1", "str2"))
     }
     assert(valueException.getMessage === "Column name for value column (value) " +
       "must not exist among id columns: value")
     checkAnswer(
       meltWideDataDs.withColumnRenamed("id", "value")
-        .melt(variableColumnName = "var", valueColumnName = "val",
-          dropNulls = false, "value")("str1", "str2"),
+        .melt(Seq("value"), Seq("str1", "str2"),
+          variableColumnName = "var", valueColumnName = "val"),
       meltedWideDataRows
     )
 
@@ -770,7 +799,7 @@ class DatasetSuite extends QueryTest
     checkAnswer(
       meltWideDataDs.withColumnRenamed("str1", "variable")
         .withColumnRenamed("str2", "value")
-        .melt(dropNulls = false, "id")("variable", "value"),
+        .melt(Seq("id"), Seq("variable", "value")),
       meltedWideDataRows.map(row => Row(
         row.getInt(0),
         row.getString(1) match {
@@ -785,7 +814,7 @@ class DatasetSuite extends QueryTest
     checkAnswer(
       meltWideDataDs.withColumnRenamed("int1", "variable")
         .withColumnRenamed("long1", "value")
-        .melt(dropNulls = false, "id")("str1", "str2"),
+        .melt(Seq("id"), Seq("str1", "str2")),
       meltedWideDataRows
     )
   }
@@ -804,20 +833,34 @@ class DatasetSuite extends QueryTest
 
     // do not drop nulls
     checkAnswer(
-      meltWideDataDs.melt(dropNulls = false, "id", "int1")("str1", "str2"),
+      meltWideDataDs.melt(Seq("id", "int1"), Seq("str1", "str2")),
       meltedRows
     )
 
     // drop nulls
     checkAnswer(
-      meltWideDataDs.melt("id", "int1")("str1", "str2"),
+      meltWideDataDs.melt(Seq("id", "int1"), Seq("str1", "str2"), dropNulls = true),
       meltedRows.filter(row => !row.isNullAt(3))
+    )
+  }
+
+  test("melt without values") {
+    // do not drop nulls
+    checkAnswer(
+      meltWideDataDs.select($"id", $"str1", $"str2").melt(Seq("id")),
+      meltedWideDataRows
+    )
+
+    // do drop nulls
+    checkAnswer(
+      meltWideDataDs.select($"id", $"str1", $"str2").melt(Seq("id"), dropNulls = true),
+      meltedWideDataRows
     )
   }
 
   test("melt with incompatible value types") {
     val valueException = intercept[IllegalArgumentException] {
-      meltWideDataDs.melt("id")("str1", "int1")
+      meltWideDataDs.melt(Seq("id"), Seq("str1", "int1"))
     }
     assert(valueException.getMessage === "All values must be of same types, " +
       "found: StringType, IntegerType")
@@ -825,7 +868,7 @@ class DatasetSuite extends QueryTest
 
   /** TODO: would be nice if LongType and IntegerType columns could be used together.
   test("melt with compatible value types") {
-    val df = meltWideDataDs.melt(dropNulls = false, "id")("int1", "long1")
+    val df = meltWideDataDs.melt(Seq("id"), Seq("int1", "long1"))
 
     assert(df.schema === StructType(Seq(
       StructField("id", IntegerType, nullable = true),
@@ -852,10 +895,49 @@ class DatasetSuite extends QueryTest
 
     // drop nulls
     checkAnswer(
-      meltWideDataDs.melt("id")("int1", "long1"),
+      meltWideDataDs.melt(Seq("id"), Seq("int1", "long1"), dropNulls = true),
       meltedRows.filter(row => !row.isNullAt(2))
     )
   } */
+
+  test("melt with dot and backtick") {
+    val df = meltWideDataDs
+      .withColumnRenamed("id", "`an.id`")
+      .withColumnRenamed("str1", "`str.one`")
+      .withColumnRenamed("str2", "`str.two`")
+    checkAnswer(
+      df.melt(Seq("`an.id`"), Seq("`str.one`", "`str.two`")),
+      meltedWideDataRows.map(row => Row(
+        row.getInt(0),
+        row.getString(1) match {
+          case "str1" => "str.one"
+          case "str2" => "str.two"
+        },
+        row.getString(2)
+      ))
+    )
+  }
+
+  test("melt with struct fields") {
+    val df = meltWideDataDs.select(
+      struct($"id").as("an"),
+      struct(
+        $"str1".as("one"),
+        $"str2".as("two")
+      ).as("str")
+    )
+    checkAnswer(
+      df.melt(Seq("an.id"), Seq("str.one", "str.two")),
+      meltedWideDataRows.map(row => Row(
+        row.getInt(0),
+        row.getString(1) match {
+          case "str1" => "str.one"
+          case "str2" => "str.two"
+        },
+        row.getString(2)
+      ))
+    )
+  }
 
   test("SPARK-34806: observation on datasets") {
     val namedObservation = Observation("named")
