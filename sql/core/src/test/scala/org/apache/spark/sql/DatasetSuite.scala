@@ -731,13 +731,13 @@ class DatasetSuite extends QueryTest
         Row(3, "long1", null),
         Row(3, "long2", null),
         Row(4, "long1", 4L),
-        Row(4, "long2", 40L),
+        Row(4, "long2", 40L)
       )
     )
     val expectedSchemaWithNulls = StructType(Seq(
       StructField("id", IntegerType, nullable = false),
       StructField("var", StringType, nullable = false),
-      StructField("val", LongType, nullable = true),
+      StructField("val", LongType, nullable = true)
     ))
     assert(actualWithNulls.schema === expectedSchemaWithNulls)
 
@@ -751,13 +751,13 @@ class DatasetSuite extends QueryTest
         Row(1, "long2", 10L),
         Row(2, "long2", 20L),
         Row(4, "long1", 4L),
-        Row(4, "long2", 40L),
+        Row(4, "long2", 40L)
       )
     )
     val expectedSchemaWithoutNulls = StructType(Seq(
       StructField("id", IntegerType, nullable = false),
       StructField("var", StringType, nullable = false),
-      StructField("val", LongType, nullable = false),
+      StructField("val", LongType, nullable = false)
     ))
     assert(actualWithoutNulls.schema === expectedSchemaWithoutNulls)
   }
