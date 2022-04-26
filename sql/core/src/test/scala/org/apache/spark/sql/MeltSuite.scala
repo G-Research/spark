@@ -17,10 +17,9 @@
 
 package org.apache.spark.sql
 
-import org.apache.spark.sql.functions.struct
-import org.apache.spark.sql.test.SharedSparkSession
-
 import scala.reflect.ClassTag
+
+import org.apache.spark.sql.test.SharedSparkSession
 
 /**
  * Comprehensive tests for Melt.of(), which is used by Dataset.melt.
@@ -47,6 +46,9 @@ class MeltSuite extends QueryTest
     Row(4, "str2", null)
   )
 
+  val meltedWideDataWithoutIdRows: Seq[Row] =
+    meltedWideDataRows.map(row => Row(row.getString(1), row.getString(2)))
+
   private def assertException[T <: Exception : ClassTag](func: => Any)(message: String): Unit = {
     val exception = intercept[T] { func }
     assert(exception.getMessage === message)
@@ -56,14 +58,13 @@ class MeltSuite extends QueryTest
     // do not drop nulls
     checkAnswer(
       Melt.of(meltWideDataDs.select($"str1", $"str2"), Seq.empty),
-      meltedWideDataRows.map(row => Row(row.getString(1), row.getString(2)))
+      meltedWideDataWithoutIdRows
     )
 
     // drop nulls
     checkAnswer(
       Melt.of(meltWideDataDs.select($"str1", $"str2"), Seq.empty, dropNulls = true),
-      meltedWideDataRows.filter(row => !row.isNullAt(2))
-        .map(row => Row(row.getString(1), row.getString(2)))
+      meltedWideDataWithoutIdRows.filter(row => !row.isNullAt(1))
     )
   }
 
@@ -71,15 +72,14 @@ class MeltSuite extends QueryTest
     // do not drop nulls
     checkAnswer(
       Melt.of(meltWideDataDs.select($"str1", $"str2"), Seq.empty, Seq("str1", "str2")),
-      meltedWideDataRows.map(row => Row(row.getString(1), row.getString(2)))
+      meltedWideDataWithoutIdRows
     )
 
     // drop nulls
     checkAnswer(
       Melt.of(meltWideDataDs.select($"str1", $"str2"),
         Seq.empty, Seq("str1", "str2"), dropNulls = true),
-      meltedWideDataRows.filter(row => !row.isNullAt(2))
-        .map(row => Row(row.getString(1), row.getString(2)))
+      meltedWideDataWithoutIdRows.filter(row => !row.isNullAt(1))
     )
   }
 
@@ -240,9 +240,9 @@ class MeltSuite extends QueryTest
 
   test("melt with dot and backtick") {
     val df = meltWideDataDs
-      .withColumnRenamed("id", "`an.id`")
-      .withColumnRenamed("str1", "`str.one`")
-      .withColumnRenamed("str2", "`str.two`")
+      .withColumnRenamed("id", "an.id")
+      .withColumnRenamed("str1", "str.one")
+      .withColumnRenamed("str2", "str.two")
     checkAnswer(
       Melt.of(df, Seq("`an.id`"), Seq("`str.one`", "`str.two`")),
       meltedWideDataRows.map(row => Row(
@@ -254,8 +254,14 @@ class MeltSuite extends QueryTest
         row.getString(2)
       ))
     )
+
+    // without backticks, this references struct fields, which do not exist
+    assertException[IllegalArgumentException] {
+      Melt.of(df, Seq("an.id"), Seq("str.one", "str.two")).collect()
+    }("Unknown columns: an.id, str.one, str.two, dataset has: an.id, str.one, str.two, int1, long1")
   }
 
+  /** TODO: Would be nice to melt on struct fields.
   test("melt with struct fields") {
     val df = meltWideDataDs.select(
       struct($"id").as("an"),
@@ -275,5 +281,5 @@ class MeltSuite extends QueryTest
         row.getString(2)
       ))
     )
-  }
+  } */
 }

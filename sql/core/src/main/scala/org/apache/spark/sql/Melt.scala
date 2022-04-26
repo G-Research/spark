@@ -30,19 +30,29 @@ private[sql] object Melt {
             dropNulls: Boolean = false,
             variableColumnName: String = "variable",
             valueColumnName: String = "value"): DataFrame = {
-    // all given ids and values should exist in ds
-    val unknown = (ids ++ values).diff(ds.columns)
-    if (unknown.nonEmpty) {
-      throw new IllegalArgumentException(
-        s"Unknown columns: ${unknown.mkString(", ")}, dataset has: ${ds.columns.mkString(", ")}"
-      )
-    }
-
     // if no values given, all non-id columns are melted
     val valueNames = if (values.isEmpty) {
       ds.columns.diff(ids).toSeq
     } else {
       values
+    }
+
+    // resolve given column names
+    val resolver = ds.sparkSession.sessionState.analyzer.resolver
+    val resolvedIds = ids.map(c =>
+      (c, ds.queryExecution.analyzed.resolveQuoted(c, resolver).map(_.toAttribute))
+    ).toMap
+    val resolvedValues = valueNames.map(c =>
+      (c, ds.queryExecution.analyzed.resolveQuoted(c, resolver).map(_.toAttribute))
+    ).toMap
+
+    // all given ids and values should exist in ds
+    val unresolvedColumns = (resolvedIds ++ resolvedValues).filter(_._2.isEmpty).keys
+    if (unresolvedColumns.nonEmpty) {
+      throw new IllegalArgumentException(
+        s"Unknown columns: ${unresolvedColumns.mkString(", ")}, " +
+          s"dataset has: ${ds.columns.mkString(", ")}"
+      )
     }
 
     // if there are no values given and no non-id columns exist, we cannot melt
@@ -51,9 +61,7 @@ private[sql] object Melt {
     }
 
     // all melted values have to have the same type
-    val valueTypes = ds.logicalPlan.output.filter(
-      attr => valueNames.contains(attr.name)
-    ).map(_.dataType).toSet
+    val valueTypes = resolvedValues.filter(_._2.isDefined).values.map(_.get.dataType).toSet
     if (valueTypes.size > 1) {
       throw new IllegalArgumentException(f"All values must be of same types, " +
         f"found: ${valueTypes.toSeq.map(_.toString).sorted.mkString(", ")}")
@@ -61,8 +69,7 @@ private[sql] object Melt {
     val valueType = valueTypes.head
 
     // resolve ids
-    val resolver = ds.sparkSession.sessionState.analyzer.resolver
-    val idAttrs = ids.map(ds.queryExecution.analyzed.resolveQuoted(_, resolver).get.toAttribute)
+    val idAttrs = resolvedIds.filter(_._2.isDefined).values.map(_.get.toAttribute).toSeq
     val idNames = idAttrs.map(_.name)
     if (idNames.contains(variableColumnName)) {
       throw new IllegalArgumentException(f"Column name for variable column ($variableColumnName) " +
@@ -79,9 +86,7 @@ private[sql] object Melt {
     val output = idAttrs ++ Seq(variableAttr, valueAttr)
 
     // construct melt expressions for Expand
-    val valueAttrs = valueNames.map(
-      ds.queryExecution.analyzed.resolveQuoted(_, resolver).get.toAttribute
-    )
+    val valueAttrs = resolvedValues.filter(_._2.isDefined).values.map(_.get.toAttribute).toSeq
     val exprs: Seq[Seq[Expression]] = valueAttrs.map {
       attr =>
         idAttrs ++ Seq(
