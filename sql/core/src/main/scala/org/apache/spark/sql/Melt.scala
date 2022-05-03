@@ -17,11 +17,13 @@
 
 package org.apache.spark.sql
 
-import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Expression, Literal}
+import org.apache.spark.sql.catalyst.analysis.{AnsiTypeCoercion, TypeCoercion}
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Cast, Expression, Literal}
 import org.apache.spark.sql.catalyst.expressions.objects.AssertNotNull
 import org.apache.spark.sql.catalyst.plans.logical.Expand
 import org.apache.spark.sql.functions.col
-import org.apache.spark.sql.types.StringType
+import org.apache.spark.sql.internal.SQLConf
+import org.apache.spark.sql.types.{DataType, StringType}
 
 private[sql] object Melt {
   def of[_](ds: Dataset[_],
@@ -62,12 +64,7 @@ private[sql] object Melt {
 
     // all melted values have to have the same type
     val valueAttrs = resolvedValues.filter(_._2.isDefined).values.map(_.get.toAttribute).toSeq
-    val valueTypes = valueAttrs.map(_.dataType).toSet
-    if (valueTypes.size > 1) {
-      throw new IllegalArgumentException(f"All values must be of same types, " +
-        f"found: ${valueTypes.toSeq.map(_.toString).sorted.mkString(", ")}")
-    }
-    val valueType = valueTypes.head
+    val valueType = valueAttrs.map(_.dataType).reduce(tightestCommonType)
 
     // resolve ids
     val idAttrs = resolvedIds.filter(_._2.isDefined).values.map(_.get.toAttribute).toSeq
@@ -91,7 +88,7 @@ private[sql] object Melt {
       attr =>
         idAttrs ++ Seq(
           Literal(attr.name),
-          attr
+          Cast(attr, valueType)
         )
     }
 
@@ -110,4 +107,13 @@ private[sql] object Melt {
       df
     }
   }
+
+  private def tightestCommonType(d1: DataType, d2: DataType): DataType = {
+    val typeCoercion = if (SQLConf.get.ansiEnabled) AnsiTypeCoercion else TypeCoercion
+    typeCoercion.findTightestCommonType(d1, d2).getOrElse(
+      throw new IllegalArgumentException("All values must be of compatible types, " +
+        f"types $d1 and $d2 are not compatible")
+    )
+  }
+
 }

@@ -2023,31 +2023,44 @@ class Dataset[T] private[sql](
    * leaving just two non-identifier columns, 'variable' and 'value'.
    *
    * {{{
-   *   val df = Seq((1, 11, 12), (2, 21, 22)).toDF("id", "int1", "int2")
+   *   val df = Seq((1, 11, 12L), (2, 21, 22L)).toDF("id", "int", "long")
    *   df.show()
    *   // output:
-   *   // +---+----+----+
-   *   // | id|int1|int2|
-   *   // +---+----+----+
-   *   // |  1|  11|  12|
-   *   // |  2|  21|  22|
-   *   // +---+----+----+
+   *   // +---+---+----+
+   *   // | id|int|long|
+   *   // +---+---+----+
+   *   // |  1| 11|  12|
+   *   // |  2| 21|  22|
+   *   // +---+---+----+
    *
    *   df.melt(Seq("id")).show()
    *   // output:
    *   // +---+--------+-----+
    *   // | id|variable|value|
    *   // +---+--------+-----+
-   *   // |  1|    int1|   11|
-   *   // |  1|    int2|   12|
-   *   // |  2|    int1|   21|
-   *   // |  2|    int2|   22|
+   *   // |  1|     int|   11|
+   *   // |  1|    long|   12|
+   *   // |  2|     int|   21|
+   *   // |  2|    long|   22|
    *   // +---+--------+-----+
+   *
+   *   df.melt(Seq("id")).printSchema
+   *   //root
+   *   // |-- id: integer (nullable = false)
+   *   // |-- variable: string (nullable = false)
+   *   // |-- value: long (nullable = true)
    * }}}
    *
    * When no id columns are given, the unpivoted DataFrame consists of only the
    * `variable` and `value` columns. When no value columns are given, all non-identifier
    * columns are considered value columns.
+   *
+   * All value columns must be of the same data type. If they are not the same data type,
+   * all value columns are cast to the nearest common data type. For instance,
+   * types `IntegerType` and `LongType` are compatible and cast to `LongType`,
+   * while `IntegerType` and `StringType` are not compatible and `melt` fails.
+   *
+   * The type of the `value` column is the nearest common data type of the value columns.
    *
    * @param ids names of the id columns
    * @param values names of the value columns
@@ -2083,28 +2096,41 @@ class Dataset[T] private[sql](
    * {{{
    *   df.show()
    *   // output:
-   *   // +---+----+----+
-   *   // | id|int1|int2|
-   *   // +---+----+----+
-   *   // |  1|  11|  12|
-   *   // |  2|  21|  22|
-   *   // +---+----+----+
+   *   // +---+---+----+
+   *   // | id|int|long|
+   *   // +---+---+----+
+   *   // |  1| 11|  12|
+   *   // |  2| 21|  22|
+   *   // +---+---+----+
    *
    *   df.melt(new String[] { "id" }).show()
    *   // output:
    *   // +---+--------+-----+
    *   // | id|variable|value|
    *   // +---+--------+-----+
-   *   // |  1|    int1|   11|
-   *   // |  1|    int2|   12|
-   *   // |  2|    int1|   21|
-   *   // |  2|    int2|   22|
+   *   // |  1|     int|   11|
+   *   // |  1|    long|   12|
+   *   // |  2|     int|   21|
+   *   // |  2|    long|   22|
    *   // +---+--------+-----+
+   *
+   *   df.melt(Seq("id")).printSchema
+   *   //root
+   *   // |-- id: integer (nullable = false)
+   *   // |-- variable: string (nullable = false)
+   *   // |-- value: long (nullable = true)
    * }}}
    *
    * When no id columns are given, the unpivoted DataFrame consists of only the
    * `variable` and `value` columns. When no value columns are given, all non-identifier
    * columns are considered value columns.
+   *
+   * All value columns must be of the same data type. If they are not the same data type,
+   * all value columns are cast to the nearest common data type. For instance,
+   * types `IntegerType` and `LongType` are compatible and cast to `LongType`,
+   * while `IntegerType` and `StringType` are not compatible and `melt` fails.
+   *
+   * The type of the `value` column is the nearest common data type of the value columns.
    *
    * @param ids names of the id columns
    * @param values names of the value columns

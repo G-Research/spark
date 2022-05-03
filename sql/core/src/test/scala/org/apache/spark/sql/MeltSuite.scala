@@ -20,6 +20,7 @@ package org.apache.spark.sql
 import scala.reflect.ClassTag
 
 import org.apache.spark.sql.test.SharedSparkSession
+import org.apache.spark.sql.types.{IntegerType, LongType, StringType, StructField, StructType}
 
 /**
  * Comprehensive tests for Melt.of(), which is used by Dataset.melt.
@@ -164,17 +165,17 @@ class MeltSuite extends QueryTest
   test("melt with incompatible value types") {
     assertException[IllegalArgumentException] {
       Melt.of(meltWideDataDs, Seq("id"), Seq("str1", "int1"))
-    }("All values must be of same types, found: IntegerType, StringType")
+    }("All values must be of compatible types, " +
+      "types StringType and IntegerType are not compatible")
   }
 
-  /** TODO: would be nice if LongType and IntegerType columns could be used together.
   test("melt with compatible value types") {
     val df = Melt.of(meltWideDataDs, Seq("id"), Seq("int1", "long1"))
 
     assert(df.schema === StructType(Seq(
-      StructField("id", IntegerType, nullable = true),
+      StructField("id", IntegerType, nullable = false),
       StructField("variable", StringType, nullable = false),
-      StructField("value", LongType, nullable = true),
+      StructField("value", LongType, nullable = true)
     )))
 
     val meltedRows = Seq(
@@ -199,16 +200,18 @@ class MeltSuite extends QueryTest
       Melt.of(meltWideDataDs, Seq("id"), Seq("int1", "long1"), dropNulls = true),
       meltedRows.filter(row => !row.isNullAt(2))
     )
-  } */
+  }
 
   test("melt with invalid arguments") {
     // melting with empty list of value columns
     assertException[IllegalArgumentException] {
       Melt.of(meltWideDataDs, Seq.empty, Seq.empty)
-    }("All values must be of same types, found: IntegerType, LongType, StringType")
+    }("All values must be of compatible types, " +
+      "types StringType and LongType are not compatible")
     assertException[IllegalArgumentException] {
       Melt.of(meltWideDataDs, Seq("id"), Seq.empty)
-    }("All values must be of same types, found: IntegerType, LongType, StringType")
+    }("All values must be of compatible types, " +
+      "types StringType and IntegerType are not compatible")
 
     // melting without giving values and no non-id columns
     assertException[IllegalArgumentException] {
