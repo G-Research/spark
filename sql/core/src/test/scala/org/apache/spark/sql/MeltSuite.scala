@@ -203,7 +203,13 @@ class MeltSuite extends QueryTest
   }
 
   test("melt with invalid arguments") {
+    // melting with column in both ids and values
+    assertException[IllegalArgumentException] {
+      Melt.of(meltWideDataDs, Seq("str1", "int1"), Seq("str1", "str2", "int1", "long1"))
+    }("A column cannot be both an id and a value column: str1, int1")
+
     // melting with empty list of value columns
+    // where potential value columns are of incompatible types
     assertException[IllegalArgumentException] {
       Melt.of(meltWideDataDs, Seq.empty, Seq.empty)
     }("All values must be of compatible types, " +

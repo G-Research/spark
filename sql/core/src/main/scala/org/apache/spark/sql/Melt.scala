@@ -32,6 +32,12 @@ private[sql] object Melt {
             dropNulls: Boolean = false,
             variableColumnName: String = "variable",
             valueColumnName: String = "value"): DataFrame = {
+    // values should be disjoint to ids
+    if (values.intersect(ids).nonEmpty) {
+      throw new IllegalArgumentException(s"A column cannot be both an id and a value column: " +
+        s"${values.intersect(ids).mkString(", ")}")
+    }
+
     // if no values given, all non-id columns are melted
     val valueNames = if (values.isEmpty) {
       ds.columns.diff(ids).toSeq
