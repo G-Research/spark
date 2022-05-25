@@ -55,6 +55,11 @@ class MeltSuite extends QueryTest
     assert(exception.getMessage === message)
   }
 
+  private def assertExceptionContains[T <: Exception : ClassTag](func: => Any)(message: String): Unit = {
+    val exception = intercept[T] { func }
+    assert(exception.getMessage.contains(message))
+  }
+
   test("melt without ids or values") {
     // do not drop nulls
     checkAnswer(
@@ -292,6 +297,29 @@ class MeltSuite extends QueryTest
   }
 
   test("melt with invalid arguments") {
+    // melting where id column does not exist
+    assertExceptionContains[AnalysisException] {
+      Melt.of(
+        meltWideDataDs,
+        Seq("1"),
+        Seq("str1", "str2"),
+        dropNulls = false,
+        variableColumnName = "variable",
+        valueColumnName = "value")
+    }("[MISSING_COLUMN] Column '`1`' does not exist. Did you mean one of the following? " +
+      "[id, int1, str1, str2, long1]")
+
+    // melting where value column does not exist
+    assertException[IllegalArgumentException] {
+      Melt.of(
+        meltWideDataDs,
+        Seq("id"),
+        Seq("does not exist"),
+        dropNulls = false,
+        variableColumnName = "variable",
+        valueColumnName = "value")
+    }("Unknown value columns: does not exist, candidate value columns are: str1, str2, int1, long1")
+
     // melting with column in both ids and values
     assertException[IllegalArgumentException] {
       Melt.of(
@@ -314,7 +342,7 @@ class MeltSuite extends QueryTest
         variableColumnName = "variable",
         valueColumnName = "value")
     }("All values must be of compatible types, " +
-      "types StringType and LongType are not compatible")
+      "types IntegerType and StringType are not compatible")
     assertException[IllegalArgumentException] {
       Melt.of(
         meltWideDataDs,
@@ -396,8 +424,8 @@ class MeltSuite extends QueryTest
       meltedWideDataRows.map(row => Row(
         row.getInt(0),
         row.getString(1) match {
-          case "str1" => "str.one"
-          case "str2" => "str.two"
+          case "str1" => "`str.one`"
+          case "str2" => "`str.two`"
         },
         row.getString(2)
       ))
@@ -411,7 +439,7 @@ class MeltSuite extends QueryTest
         dropNulls = false,
         variableColumnName = "variable",
         valueColumnName = "value").collect()
-    }("Unknown columns: an.id, str.one, str.two, dataset has: an.id, str.one, str.two, int1, long1")
+    }("Unknown value columns: str.one, str.two, candidate value columns are: str.one, str.two, int1, long1")
   }
 
   /** TODO(SPARK-39292): Would be nice to melt on struct fields.

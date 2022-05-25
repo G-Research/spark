@@ -17,7 +17,7 @@
 
 package org.apache.spark.sql
 
-import org.apache.spark.sql.catalyst.analysis.{AnsiTypeCoercion, TypeCoercion}
+import org.apache.spark.sql.catalyst.analysis.{AnsiTypeCoercion, TypeCoercion, UnresolvedAttribute}
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Cast, Expression, Literal}
 import org.apache.spark.sql.catalyst.expressions.objects.AssertNotNull
 import org.apache.spark.sql.catalyst.plans.logical.Expand
@@ -40,62 +40,57 @@ private[sql] object Melt {
     }
 
     // if no values given, all non-id columns are melted
-    val valueNames = if (values.isEmpty) {
-      ds.columns.diff(ids).toSeq
-    } else {
-      values
-    }
-
-    // resolve given column names
-    val resolver = ds.sparkSession.sessionState.analyzer.resolver
-    val resolvedIds = ids.map(c =>
-      (c, ds.queryExecution.analyzed.resolveQuoted(c, resolver).map(_.toAttribute))
-    ).toMap
-    val resolvedValues = valueNames.map(c =>
-      (c, ds.queryExecution.analyzed.resolveQuoted(c, resolver).map(_.toAttribute))
-    ).toMap
-
-    // all given ids and values should exist in ds
-    val unresolvedColumns = (resolvedIds ++ resolvedValues).filter(_._2.isEmpty).keys
-    if (unresolvedColumns.nonEmpty) {
-      throw new IllegalArgumentException(
-        s"Unknown columns: ${unresolvedColumns.mkString(", ")}, " +
-          s"dataset has: ${ds.columns.mkString(", ")}"
-      )
-    }
+    val valueNameCandidates = ds.columns.diff(ids).toSeq
+    val valueNames = Some(values).filter(_.nonEmpty).getOrElse(valueNameCandidates)
 
     // if there are no values given and no non-id columns exist, we cannot melt
     if (valueNames.isEmpty) {
       throw new IllegalArgumentException("The dataset has no non-id columns to melt")
     }
 
+    // resolve given column names
+    val resolver = ds.sparkSession.sessionState.analyzer.resolver
+    val resolvedValues = valueNames.map(c =>
+      ds.logicalPlan.resolveQuoted(c, resolver).map(_.toAttribute) match {
+        case Some(v) => Right(v)
+        case None => Left(c)
+      }
+    )
+
+    // all given values should exist in ds
+    val unresolvedValues = resolvedValues.filter(_.isLeft).map(_.swap.toOption.get)
+    if (unresolvedValues.nonEmpty) {
+      throw new IllegalArgumentException(
+        s"Unknown value columns: ${unresolvedValues.mkString(", ")}, " +
+          s"candidate value columns are: ${valueNameCandidates.mkString(", ")}"
+      )
+    }
+
     // all melted values have to have the same type
-    val valueAttrs = resolvedValues.filter(_._2.isDefined).values.map(_.get.toAttribute).toSeq
+    val valueAttrs = resolvedValues.filter(_.isRight).map(_.toOption.get)
     val valueType = valueAttrs.map(_.dataType).reduce(tightestCommonType)
 
-    // resolve ids
-    val idAttrs = resolvedIds.filter(_._2.isDefined).values.map(_.get.toAttribute).toSeq
-    val idNames = idAttrs.map(_.name)
-    if (idNames.contains(variableColumnName)) {
+    if (ids.contains(variableColumnName)) {
       throw new IllegalArgumentException(f"Column name for variable column ($variableColumnName) " +
-        f"must not exist among id columns: ${idNames.mkString(", ")}")
+        f"must not exist among id columns: ${ids.mkString(", ")}")
     }
-    if (idNames.contains(valueColumnName)) {
+    if (ids.contains(valueColumnName)) {
       throw new IllegalArgumentException(f"Column name for value column ($valueColumnName) " +
-        f"must not exist among id columns: ${idNames.mkString(", ")}")
+        f"must not exist among id columns: ${ids.mkString(", ")}")
     }
 
     // construct output attributes
+    val idAttrs = ids.map(UnresolvedAttribute.quotedString)
     val variableAttr = AttributeReference(variableColumnName, StringType, nullable = false)()
     val valueAttr = AttributeReference(valueColumnName, valueType, nullable = true)()
     val output = idAttrs ++ Seq(variableAttr, valueAttr)
 
     // construct melt expressions for Expand
-    val exprs: Seq[Seq[Expression]] = valueAttrs.map {
+    val exprs: Seq[Seq[Expression]] = valueNames.map {
       attr =>
         idAttrs ++ Seq(
-          Literal(attr.name),
-          Cast(attr, valueType)
+          Literal(attr),
+          Cast(UnresolvedAttribute.quotedString(attr), valueType)
         )
     }
 

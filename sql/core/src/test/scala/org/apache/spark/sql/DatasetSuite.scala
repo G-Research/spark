@@ -760,6 +760,12 @@ class DatasetSuite extends QueryTest
       StructField("val", LongType, nullable = false)
     ))
     assert(actualWithoutNulls.schema === expectedSchemaWithoutNulls)
+
+    // melt after pivoting
+    val pivoted = courseSales.groupBy("year").pivot("course", Seq("dotNET", "Java")).agg(sum($"earnings"))
+    val melted = pivoted.melt(Array("year"))
+    val expected = courseSales.groupBy("year", "course").sum("earnings")
+    checkAnswer(melted, expected)
   }
 
   test("SPARK-34806: observation on datasets") {
