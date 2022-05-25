@@ -2070,17 +2070,19 @@ class Dataset[T] private[sql](
    * @group untypedrel
    * @since 3.4.0
    */
-  def melt(ids: Array[String],
-           values: Array[String],
-           dropNulls: Boolean,
-           variableColumnName: String,
-           valueColumnName: String): DataFrame =
-    Melt.of(this,
-      ids, values,
+  def melt(
+      ids: Array[String],
+      values: Array[String],
+      dropNulls: Boolean,
+      variableColumnName: String,
+      valueColumnName: String): DataFrame =
+    Melt.of(
+      this,
+      ids,
+      values,
       variableColumnName = variableColumnName,
       valueColumnName = valueColumnName,
-      dropNulls = dropNulls
-    )
+      dropNulls = dropNulls)
 
   /**
    * Unpivot a DataFrame from wide format to long format, optionally
