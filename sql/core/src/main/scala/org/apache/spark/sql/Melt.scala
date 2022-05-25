@@ -35,7 +35,7 @@ private[sql] object Melt {
       valueColumnName: String): DataFrame = {
     // values should be disjoint to ids
     if (values.intersect(ids).nonEmpty) {
-      throw new IllegalArgumentException(s"A column cannot be both an id and a value column: " +
+      throw new IllegalArgumentException("A column cannot be both an id and a value column: " +
         s"${values.intersect(ids).mkString(", ")}")
     }
 
