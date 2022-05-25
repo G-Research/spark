@@ -29,10 +29,10 @@ private[sql] object Melt {
   def of[_](
       ds: Dataset[_],
       ids: Seq[String],
-      values: Seq[String] = Seq.empty,
-      dropNulls: Boolean = false,
-      variableColumnName: String = "variable",
-      valueColumnName: String = "value"): DataFrame = {
+      values: Seq[String],
+      dropNulls: Boolean,
+      variableColumnName: String,
+      valueColumnName: String): DataFrame = {
     // values should be disjoint to ids
     if (values.intersect(ids).nonEmpty) {
       throw new IllegalArgumentException(s"A column cannot be both an id and a value column: " +

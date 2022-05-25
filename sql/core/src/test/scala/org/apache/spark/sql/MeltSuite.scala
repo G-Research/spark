@@ -58,13 +58,25 @@ class MeltSuite extends QueryTest
   test("melt without ids or values") {
     // do not drop nulls
     checkAnswer(
-      Melt.of(meltWideDataDs.select($"str1", $"str2"), Seq.empty),
+      Melt.of(
+        meltWideDataDs.select($"str1", $"str2"),
+        Seq.empty,
+        Seq.empty,
+        dropNulls = false,
+        variableColumnName = "variable",
+        valueColumnName = "value"),
       meltedWideDataWithoutIdRows
     )
 
     // drop nulls
     checkAnswer(
-      Melt.of(meltWideDataDs.select($"str1", $"str2"), Seq.empty, dropNulls = true),
+      Melt.of(
+        meltWideDataDs.select($"str1", $"str2"),
+        Seq.empty,
+        Seq.empty,
+        dropNulls = true,
+        variableColumnName = "variable",
+        valueColumnName = "value"),
       meltedWideDataWithoutIdRows.filter(row => !row.isNullAt(1))
     )
   }
@@ -72,14 +84,25 @@ class MeltSuite extends QueryTest
   test("melt without ids") {
     // do not drop nulls
     checkAnswer(
-      Melt.of(meltWideDataDs.select($"str1", $"str2"), Seq.empty, Seq("str1", "str2")),
+      Melt.of(
+        meltWideDataDs.select($"str1", $"str2"),
+        Seq.empty,
+        Seq("str1", "str2"),
+        dropNulls = false,
+        variableColumnName = "variable",
+        valueColumnName = "value"),
       meltedWideDataWithoutIdRows
     )
 
     // drop nulls
     checkAnswer(
-      Melt.of(meltWideDataDs.select($"str1", $"str2"),
-        Seq.empty, Seq("str1", "str2"), dropNulls = true),
+      Melt.of(
+        meltWideDataDs.select($"str1", $"str2"),
+        Seq.empty,
+        Seq("str1", "str2"),
+        dropNulls = true,
+        variableColumnName = "variable",
+        valueColumnName = "value"),
       meltedWideDataWithoutIdRows.filter(row => !row.isNullAt(1))
     )
   }
@@ -87,13 +110,25 @@ class MeltSuite extends QueryTest
   test("melt with single id") {
     // do not drop nulls
     checkAnswer(
-      Melt.of(meltWideDataDs, Seq("id"), Seq("str1", "str2")),
+      Melt.of(
+        meltWideDataDs,
+        Seq("id"),
+        Seq("str1", "str2"),
+        dropNulls = false,
+        variableColumnName = "variable",
+        valueColumnName = "value"),
       meltedWideDataRows
     )
 
     // drop nulls
     checkAnswer(
-      Melt.of(meltWideDataDs, Seq("id"), Seq("str1", "str2"), dropNulls = true),
+      Melt.of(
+        meltWideDataDs,
+        Seq("id"),
+        Seq("str1", "str2"),
+        dropNulls = true,
+        variableColumnName = "variable",
+        valueColumnName = "value"),
       meltedWideDataRows.filter(row => !row.isNullAt(2))
     )
   }
@@ -112,13 +147,25 @@ class MeltSuite extends QueryTest
 
     // do not drop nulls
     checkAnswer(
-      Melt.of(meltWideDataDs, Seq("id", "int1"), Seq("str1", "str2")),
+      Melt.of(
+        meltWideDataDs,
+        Seq("id", "int1"),
+        Seq("str1", "str2"),
+        dropNulls = false,
+        variableColumnName = "variable",
+        valueColumnName = "value"),
       meltedRows
     )
 
     // drop nulls
     checkAnswer(
-      Melt.of(meltWideDataDs, Seq("id", "int1"), Seq("str1", "str2"), dropNulls = true),
+      Melt.of(
+        meltWideDataDs,
+        Seq("id", "int1"),
+        Seq("str1", "str2"),
+        dropNulls = true,
+        variableColumnName = "variable",
+        valueColumnName = "value"),
       meltedRows.filter(row => !row.isNullAt(3))
     )
   }
@@ -126,13 +173,25 @@ class MeltSuite extends QueryTest
   test("melt without values") {
     // do not drop nulls
     checkAnswer(
-      Melt.of(meltWideDataDs.select($"id", $"str1", $"str2"), Seq("id")),
+      Melt.of(
+        meltWideDataDs.select($"id", $"str1", $"str2"),
+        Seq("id"),
+        Seq.empty,
+        dropNulls = false,
+        variableColumnName = "variable",
+        valueColumnName = "value"),
       meltedWideDataRows
     )
 
     // do drop nulls
     checkAnswer(
-      Melt.of(meltWideDataDs.select($"id", $"str1", $"str2"), Seq("id"), dropNulls = true),
+      Melt.of(
+        meltWideDataDs.select($"id", $"str1", $"str2"),
+        Seq("id"),
+        Seq.empty,
+        dropNulls = true,
+        variableColumnName = "variable",
+        valueColumnName = "value"),
       meltedWideDataRows.filter(row => !row.isNullAt(2))
     )
   }
@@ -140,9 +199,15 @@ class MeltSuite extends QueryTest
   test("melt with variable / value value columns") {
     // with value column `variable` and `value`
     checkAnswer(
-      Melt.of(meltWideDataDs.withColumnRenamed("str1", "variable")
-        .withColumnRenamed("str2", "value"),
-        Seq("id"), Seq("variable", "value")),
+      Melt.of(
+        meltWideDataDs
+          .withColumnRenamed("str1", "variable")
+          .withColumnRenamed("str2", "value"),
+        Seq("id"),
+        Seq("variable", "value"),
+        dropNulls = false,
+        variableColumnName = "variable",
+        valueColumnName = "value"),
       meltedWideDataRows.map(row => Row(
         row.getInt(0),
         row.getString(1) match {
@@ -155,22 +220,40 @@ class MeltSuite extends QueryTest
 
     // with un-referenced column `variable` and `value`
     checkAnswer(
-      Melt.of(meltWideDataDs.withColumnRenamed("int1", "variable")
-        .withColumnRenamed("long1", "value"),
-        Seq("id"), Seq("str1", "str2")),
+      Melt.of(
+        meltWideDataDs
+          .withColumnRenamed("int1", "variable")
+          .withColumnRenamed("long1", "value"),
+        Seq("id"),
+        Seq("str1", "str2"),
+        dropNulls = false,
+        variableColumnName = "variable",
+        valueColumnName = "value"),
       meltedWideDataRows
     )
   }
 
   test("melt with incompatible value types") {
     assertException[IllegalArgumentException] {
-      Melt.of(meltWideDataDs, Seq("id"), Seq("str1", "int1"))
+      Melt.of(
+        meltWideDataDs,
+        Seq("id"),
+        Seq("str1", "int1"),
+        dropNulls = false,
+        variableColumnName = "variable",
+        valueColumnName = "value")
     }("All values must be of compatible types, " +
       "types StringType and IntegerType are not compatible")
   }
 
   test("melt with compatible value types") {
-    val df = Melt.of(meltWideDataDs, Seq("id"), Seq("int1", "long1"))
+    val df = Melt.of(
+      meltWideDataDs,
+      Seq("id"),
+      Seq("int1", "long1"),
+      dropNulls = false,
+      variableColumnName = "variable",
+      valueColumnName = "value")
 
     assert(df.schema === StructType(Seq(
       StructField("id", IntegerType, nullable = false),
@@ -197,7 +280,13 @@ class MeltSuite extends QueryTest
 
     // drop nulls
     checkAnswer(
-      Melt.of(meltWideDataDs, Seq("id"), Seq("int1", "long1"), dropNulls = true),
+      Melt.of(
+        meltWideDataDs,
+        Seq("id"),
+        Seq("int1", "long1"),
+        dropNulls = true,
+        variableColumnName = "variable",
+        valueColumnName = "value"),
       meltedRows.filter(row => !row.isNullAt(2))
     )
   }
@@ -205,46 +294,87 @@ class MeltSuite extends QueryTest
   test("melt with invalid arguments") {
     // melting with column in both ids and values
     assertException[IllegalArgumentException] {
-      Melt.of(meltWideDataDs, Seq("str1", "int1"), Seq("str1", "str2", "int1", "long1"))
+      Melt.of(
+        meltWideDataDs,
+        Seq("str1", "int1"),
+        Seq("str1", "str2", "int1", "long1"),
+        dropNulls = false,
+        variableColumnName = "variable",
+        valueColumnName = "value")
     }("A column cannot be both an id and a value column: str1, int1")
 
     // melting with empty list of value columns
     // where potential value columns are of incompatible types
     assertException[IllegalArgumentException] {
-      Melt.of(meltWideDataDs, Seq.empty, Seq.empty)
+      Melt.of(
+        meltWideDataDs,
+        Seq.empty,
+        Seq.empty,
+        dropNulls = false,
+        variableColumnName = "variable",
+        valueColumnName = "value")
     }("All values must be of compatible types, " +
       "types StringType and LongType are not compatible")
     assertException[IllegalArgumentException] {
-      Melt.of(meltWideDataDs, Seq("id"), Seq.empty)
+      Melt.of(
+        meltWideDataDs,
+        Seq("id"),
+        Seq.empty,
+        dropNulls = false,
+        variableColumnName = "variable",
+        valueColumnName = "value")
     }("All values must be of compatible types, " +
       "types StringType and IntegerType are not compatible")
 
     // melting without giving values and no non-id columns
     assertException[IllegalArgumentException] {
-      Melt.of(meltWideDataDs.select("id"), Seq("id"))
+      Melt.of(
+        meltWideDataDs.select("id"),
+        Seq("id"),
+        Seq.empty,
+        dropNulls = false,
+        variableColumnName = "variable",
+        valueColumnName = "value")
     }("The dataset has no non-id columns to melt")
 
     // melting with id column `variable`
     assertException[IllegalArgumentException] {
       Melt.of(
         meltWideDataDs.withColumnRenamed("id", "variable"),
-        Seq("variable"), Seq("str1", "str2")
-      )
+        Seq("variable"),
+        Seq("str1", "str2"),
+        dropNulls = false,
+        variableColumnName = "variable",
+        valueColumnName = "value")
     }("Column name for variable column (variable) must not exist among id columns: variable")
     checkAnswer(
-      Melt.of(meltWideDataDs.withColumnRenamed("id", "variable"),
-        Seq("variable"), Seq("str1", "str2"), variableColumnName = "var", valueColumnName = "val"),
+      Melt.of(
+        meltWideDataDs.withColumnRenamed("id", "variable"),
+        Seq("variable"),
+        Seq("str1", "str2"),
+        dropNulls = false,
+        variableColumnName = "var",
+        valueColumnName = "val"),
       meltedWideDataRows
     )
 
     // melting with id column `value`
     assertException[IllegalArgumentException] {
-      Melt.of(meltWideDataDs.withColumnRenamed("id", "value"),
-        Seq("value"), Seq("str1", "str2"))
+      Melt.of(
+        meltWideDataDs.withColumnRenamed("id", "value"),
+        Seq("value"),
+        Seq("str1", "str2"),
+        dropNulls = false,
+        variableColumnName = "variable",
+        valueColumnName = "value")
     }("Column name for value column (value) must not exist among id columns: value")
     checkAnswer(
       Melt.of(meltWideDataDs.withColumnRenamed("id", "value"),
-        Seq("value"), Seq("str1", "str2"), variableColumnName = "var", valueColumnName = "val"),
+        Seq("value"),
+        Seq("str1", "str2"),
+        dropNulls = false,
+        variableColumnName = "var",
+        valueColumnName = "val"),
       meltedWideDataRows
     )
 
@@ -256,7 +386,13 @@ class MeltSuite extends QueryTest
       .withColumnRenamed("str1", "str.one")
       .withColumnRenamed("str2", "str.two")
     checkAnswer(
-      Melt.of(df, Seq("`an.id`"), Seq("`str.one`", "`str.two`")),
+      Melt.of(
+        df,
+        Seq("`an.id`"),
+        Seq("`str.one`", "`str.two`"),
+        dropNulls = false,
+        variableColumnName = "variable",
+        valueColumnName = "value"),
       meltedWideDataRows.map(row => Row(
         row.getInt(0),
         row.getString(1) match {
@@ -269,7 +405,12 @@ class MeltSuite extends QueryTest
 
     // without backticks, this references struct fields, which do not exist
     assertException[IllegalArgumentException] {
-      Melt.of(df, Seq("an.id"), Seq("str.one", "str.two")).collect()
+      Melt.of(df,
+        Seq("an.id"),
+        Seq("str.one", "str.two"),
+        dropNulls = false,
+        variableColumnName = "variable",
+        valueColumnName = "value").collect()
     }("Unknown columns: an.id, str.one, str.two, dataset has: an.id, str.one, str.two, int1, long1")
   }
 
