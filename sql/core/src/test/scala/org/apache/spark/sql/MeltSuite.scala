@@ -414,7 +414,8 @@ class MeltSuite extends QueryTest
     }("Unknown columns: an.id, str.one, str.two, dataset has: an.id, str.one, str.two, int1, long1")
   }
 
-  /** TODO: Would be nice to melt on struct fields.
+  /** TODO(SPARK-39292): Would be nice to melt on struct fields.
+
   test("melt with struct fields") {
     val df = meltWideDataDs.select(
       struct($"id").as("an"),
@@ -423,6 +424,7 @@ class MeltSuite extends QueryTest
         $"str2".as("two")
       ).as("str")
     )
+
     checkAnswer(
       Melt.of(df, Seq("an.id"), Seq("str.one", "str.two")),
       meltedWideDataRows.map(row => Row(
