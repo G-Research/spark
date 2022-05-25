@@ -719,7 +719,7 @@ class DatasetSuite extends QueryTest
     ).toDF("id", "str", "long1", "long2")
 
     // melt while keeping null values
-    val actualWithNulls = df.melt(Seq("id"), Seq("long1", "long2"),
+    val actualWithNulls = df.melt(Array("id"), Array("long1", "long2"),
       dropNulls = false, variableColumnName = "var", valueColumnName = "val")
     checkAnswer(
       actualWithNulls,
@@ -742,7 +742,7 @@ class DatasetSuite extends QueryTest
     assert(actualWithNulls.schema === expectedSchemaWithNulls)
 
     // melt while removing null values
-    val actualWithoutNulls = df.melt(Seq("id"), Seq("long1", "long2"),
+    val actualWithoutNulls = df.melt(Array("id"), Array("long1", "long2"),
       dropNulls = true, variableColumnName = "var", valueColumnName = "val")
     checkAnswer(
       actualWithoutNulls,

@@ -1041,7 +1041,7 @@ class Dataset[T] private[sql](
    * @param joinType Type of join to perform. Default `inner`. Must be one of:
    *                 `inner`, `cross`, `outer`, `full`, `fullouter`, `full_outer`, `left`,
    *                 `leftouter`, `left_outer`, `right`, `rightouter`, `right_outer`,
-   *                 `semi`, `leftsemi`, `left_semi`, `anti`, `leftanti`, left_anti`.
+   *                 `semi`, `leftsemi`, `left_semi`, `anti`, `leftanti`, `left_anti`.
    *
    * @note If you perform a self-join using this function without aliasing the input
    * `DataFrame`s, you will NOT be able to reference any columns after the join, since
@@ -2013,7 +2013,6 @@ class Dataset[T] private[sql](
   def agg(expr: Column, exprs: Column*): DataFrame = groupBy().agg(expr, exprs : _*)
 
   /**
-   * (Scala-specific)
    * Unpivot a DataFrame from wide format to long format, optionally
    * leaving identifier variables set.
    *
@@ -2071,11 +2070,11 @@ class Dataset[T] private[sql](
    * @group untypedrel
    * @since 3.4.0
    */
-  def melt(ids: Seq[String],
-           values: Seq[String] = Seq.empty,
-           dropNulls: Boolean = false,
-           variableColumnName: String = "variable",
-           valueColumnName: String = "value"): DataFrame =
+  def melt(ids: Array[String],
+           values: Array[String],
+           dropNulls: Boolean,
+           variableColumnName: String,
+           valueColumnName: String): DataFrame =
     Melt.of(this,
       ids, values,
       variableColumnName = variableColumnName,
@@ -2084,81 +2083,62 @@ class Dataset[T] private[sql](
     )
 
   /**
-   * (Java-specific)
    * Unpivot a DataFrame from wide format to long format, optionally
    * leaving identifier variables set.
    *
-   * This function is useful to massage a DataFrame into a format where some
-   * columns are identifier variables (`ids`), while all other columns,
-   * considered measured variables (`values`), are "unpivoted" to the rows,
-   * leaving just two non-identifier columns, 'variable' and 'value'.
+   * @see Dataset#melt(Array, Array, Boolean, String, String)
    *
-   * {{{
-   *   df.show()
-   *   // output:
-   *   // +---+---+----+
-   *   // | id|int|long|
-   *   // +---+---+----+
-   *   // |  1| 11|  12|
-   *   // |  2| 21|  22|
-   *   // +---+---+----+
-   *
-   *   df.melt(new String[] { "id" }).show()
-   *   // output:
-   *   // +---+--------+-----+
-   *   // | id|variable|value|
-   *   // +---+--------+-----+
-   *   // |  1|     int|   11|
-   *   // |  1|    long|   12|
-   *   // |  2|     int|   21|
-   *   // |  2|    long|   22|
-   *   // +---+--------+-----+
-   *
-   *   df.melt(Seq("id")).printSchema
-   *   //root
-   *   // |-- id: integer (nullable = false)
-   *   // |-- variable: string (nullable = false)
-   *   // |-- value: long (nullable = true)
-   * }}}
-   *
-   * When no id columns are given, the unpivoted DataFrame consists of only the
-   * `variable` and `value` columns. When no value columns are given, all non-identifier
-   * columns are considered value columns.
-   *
-   * All value columns must be of the same data type. If they are not the same data type,
-   * all value columns are cast to the nearest common data type. For instance,
-   * types `IntegerType` and `LongType` are compatible and cast to `LongType`,
-   * while `IntegerType` and `StringType` are not compatible and `melt` fails.
-   *
-   * The type of the `value` column is the nearest common data type of the value columns.
+   * This is equivalent to calling `Dataset#melt(Array, Array, Boolean, String, String)`
+   * with `variableColumnName = "variable"` and `valueColumnName = "value"`.
    *
    * @param ids names of the id columns
    * @param values names of the value columns
    * @param dropNulls rows with null values are dropped from the returned DataFrame
-   * @param variableColumnName name of the variable column, default `variable`
-   * @param valueColumnName name of the value column, default `value`
    *
    * @group untypedrel
    * @since 3.4.0
    */
-  def melt(ids: Array[String],
-           values: Array[String],
-           dropNulls: Boolean,
-           variableColumnName: String,
-           valueColumnName: String): DataFrame =
-    Melt.of(this,
-      ids, values,
-      dropNulls = dropNulls,
-      variableColumnName = variableColumnName,
-      valueColumnName = valueColumnName
-    )
-
-  def melt(ids: Array[String]): DataFrame = melt(ids.toSeq)
-  def melt(ids: Array[String], values: Array[String]): DataFrame = melt(ids.toSeq, values.toSeq)
   def melt(ids: Array[String], values: Array[String], dropNulls: Boolean): DataFrame =
-    melt(ids.toSeq, values.toSeq, dropNulls = dropNulls)
+    melt(ids, values, dropNulls, "variable", "value")
 
- /**
+  /**
+   * Unpivot a DataFrame from wide format to long format, optionally
+   * leaving identifier variables set.
+   *
+   * @see Dataset#melt(Array, Array, Boolean, String, String)
+   *
+   * This is equivalent to calling `Dataset#melt(Array, Array, Boolean, String, String)`
+   * with `dropNulls = false`, `variableColumnName = "variable"` and `valueColumnName = "value"`.
+   *
+   * @param ids names of the id columns
+   * @param values names of the value columns
+   *
+   * @group untypedrel
+   * @since 3.4.0
+   */
+  def melt(ids: Array[String], values: Array[String]): DataFrame =
+    melt(ids, values, dropNulls = false)
+
+
+  /**
+   * Unpivot a DataFrame from wide format to long format, optionally
+   * leaving identifier variables set.
+   *
+   * @see Dataset#melt(Array, Array, Boolean, String, String)
+   *
+   * This is equivalent to calling `Dataset#melt(Array, Array, Boolean, String, String)`
+   * with `values = Array.empty`, `dropNulls = false`, `variableColumnName = "variable"`
+   * and `valueColumnName = "value"`.
+   *
+   * @param ids names of the id columns
+   *
+   * @group untypedrel
+   * @since 3.4.0
+   */
+  def melt(ids: Array[String]): DataFrame =
+    melt(ids, Array.empty)
+
+  /**
   * Define (named) metrics to observe on the Dataset. This method returns an 'observed' Dataset
   * that returns the same result as the input, with the following guarantees:
   * <ul>
