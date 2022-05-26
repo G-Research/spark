@@ -19,6 +19,7 @@ package org.apache.spark.sql
 
 import scala.reflect.ClassTag
 
+import org.apache.spark.sql.errors.QueryErrorsSuiteBase
 import org.apache.spark.sql.test.SharedSparkSession
 import org.apache.spark.sql.types.{IntegerType, LongType, StringType, StructField, StructType}
 
@@ -26,6 +27,7 @@ import org.apache.spark.sql.types.{IntegerType, LongType, StringType, StructFiel
  * Comprehensive tests for Melt.of(), which is used by Dataset.melt.
  */
 class MeltSuite extends QueryTest
+  with QueryErrorsSuiteBase
   with SharedSparkSession {
   import testImplicits._
 
@@ -53,11 +55,6 @@ class MeltSuite extends QueryTest
   private def assertException[T <: Exception : ClassTag](func: => Any)(message: String): Unit = {
     val exception = intercept[T] { func }
     assert(exception.getMessage === message)
-  }
-
-  private def assertExceptionContains[T <: Exception : ClassTag](func: => Any)(message: String): Unit = {
-    val exception = intercept[T] { func }
-    assert(exception.getMessage.contains(message))
   }
 
   test("melt without ids or values") {
@@ -239,7 +236,7 @@ class MeltSuite extends QueryTest
   }
 
   test("melt with incompatible value types") {
-    assertException[IllegalArgumentException] {
+    val e = intercept[AnalysisException] {
       Melt.of(
         meltWideDataDs,
         Seq("id"),
@@ -247,11 +244,17 @@ class MeltSuite extends QueryTest
         dropNulls = false,
         variableColumnName = "variable",
         valueColumnName = "value")
-    }("All values must be of compatible types, " +
-      "types StringType and IntegerType are not compatible")
+    }
+    checkErrorClass(
+      exception = e,
+      errorClass = "MELT_VALUE_DATA_TYPE_MISMATCH",
+      msg = "Melt value columns must have compatible data types, " +
+        "but string and int are not compatible"
+    )
   }
 
   test("melt with compatible value types") {
+    // do not drop nulls
     val df = Melt.of(
       meltWideDataDs,
       Seq("id"),
@@ -277,63 +280,80 @@ class MeltSuite extends QueryTest
       Row(4, "long1", null)
     )
 
-    // do not drop nulls
-    checkAnswer(
-      df,
-      meltedRows
-    )
+    checkAnswer(df, meltedRows)
 
     // drop nulls
-    checkAnswer(
-      Melt.of(
-        meltWideDataDs,
-        Seq("id"),
-        Seq("int1", "long1"),
-        dropNulls = true,
-        variableColumnName = "variable",
-        valueColumnName = "value"),
-      meltedRows.filter(row => !row.isNullAt(2))
-    )
+    val df2 = Melt.of(
+      meltWideDataDs,
+      Seq("id"),
+      Seq("int1", "long1"),
+      dropNulls = true,
+      variableColumnName = "variable",
+      valueColumnName = "value")
+
+    assert(df2.schema === StructType(Seq(
+      StructField("id", IntegerType, nullable = false),
+      StructField("variable", StringType, nullable = false),
+      StructField("value", LongType, nullable = false)
+    )))
+
+    checkAnswer(df2, meltedRows.filter(row => !row.isNullAt(2)))
   }
 
   test("melt with invalid arguments") {
     // melting where id column does not exist
-    assertExceptionContains[AnalysisException] {
+    val e1 = intercept[AnalysisException] {
       Melt.of(
         meltWideDataDs,
-        Seq("1"),
+        Seq("1", "2"),
         Seq("str1", "str2"),
         dropNulls = false,
         variableColumnName = "variable",
         valueColumnName = "value")
-    }("[MISSING_COLUMN] Column '`1`' does not exist. Did you mean one of the following? " +
-      "[id, int1, str1, str2, long1]")
+    }
+    checkErrorClass(
+      exception = e1,
+      errorClass = "MISSING_COLUMNS",
+      msg = "Columns [1, 2] do not exist. Did you mean any of the following? [id, int1, long1]"
+    )
 
     // melting where value column does not exist
-    assertException[IllegalArgumentException] {
+    val e2 = intercept[AnalysisException] {
       Melt.of(
         meltWideDataDs,
         Seq("id"),
-        Seq("does not exist"),
+        Seq("does", "not", "exist"),
         dropNulls = false,
         variableColumnName = "variable",
         valueColumnName = "value")
-    }("Unknown value columns: does not exist, candidate value columns are: str1, str2, int1, long1")
+    }
+    checkErrorClass(
+      exception = e2,
+      errorClass = "MISSING_COLUMNS",
+      msg = "Columns [does, not, exist] do not exist. Did you mean any of the following? " +
+        "[str1, str2, int1, long1]"
+    )
 
     // melting with column in both ids and values
-    assertException[IllegalArgumentException] {
+    val e3 = intercept[AnalysisException] {
       Melt.of(
         meltWideDataDs,
-        Seq("str1", "int1"),
+        Seq("id", "str1", "int1"),
         Seq("str1", "str2", "int1", "long1"),
         dropNulls = false,
         variableColumnName = "variable",
         valueColumnName = "value")
-    }("A column cannot be both an id and a value column: str1, int1")
+    }
+    checkErrorClass(
+      exception = e3,
+      errorClass = "MELT_ID_AND_VALUE_COLUMNS_NOT_DISJOINT",
+      msg = "The melt id columns [id, str1, int1] and value columns [str1, str2, int1, long1] " +
+        "must be disjoint, but these columns are both: [str1, int1]"
+    )
 
     // melting with empty list of value columns
     // where potential value columns are of incompatible types
-    assertException[IllegalArgumentException] {
+    val e4 = intercept[AnalysisException] {
       Melt.of(
         meltWideDataDs,
         Seq.empty,
@@ -341,9 +361,15 @@ class MeltSuite extends QueryTest
         dropNulls = false,
         variableColumnName = "variable",
         valueColumnName = "value")
-    }("All values must be of compatible types, " +
-      "types IntegerType and StringType are not compatible")
-    assertException[IllegalArgumentException] {
+    }
+    checkErrorClass(
+      exception = e4,
+      errorClass = "MELT_VALUE_DATA_TYPE_MISMATCH",
+      msg = "Melt value columns must have compatible data types, " +
+        "but int and string are not compatible"
+    )
+
+    val e5 = intercept[AnalysisException] {
       Melt.of(
         meltWideDataDs,
         Seq("id"),
@@ -351,61 +377,82 @@ class MeltSuite extends QueryTest
         dropNulls = false,
         variableColumnName = "variable",
         valueColumnName = "value")
-    }("All values must be of compatible types, " +
-      "types StringType and IntegerType are not compatible")
+    }
+    checkErrorClass(
+      exception = e5,
+      errorClass = "MELT_VALUE_DATA_TYPE_MISMATCH",
+      msg = "Melt value columns must have compatible data types, " +
+        "but string and int are not compatible"
+    )
 
     // melting without giving values and no non-id columns
-    assertException[IllegalArgumentException] {
+    val e6 = intercept[AnalysisException] {
       Melt.of(
-        meltWideDataDs.select("id"),
-        Seq("id"),
+        meltWideDataDs.select("id", "str1", "str2"),
+        Seq("id", "str1", "str2"),
         Seq.empty,
         dropNulls = false,
         variableColumnName = "variable",
         valueColumnName = "value")
-    }("The dataset has no non-id columns to melt")
+    }
+    checkErrorClass(
+      exception = e6,
+      errorClass = "MELT_REQUIRES_VALUE_COLUMNS",
+      msg = "At least one non-id column is required to melt. " +
+        "All columns are id columns: [id, str1, str2]"
+    )
 
     // melting with id column `variable`
-    assertException[IllegalArgumentException] {
+    val e7 = intercept[AnalysisException] {
       Melt.of(
-        meltWideDataDs.withColumnRenamed("id", "variable"),
-        Seq("variable"),
-        Seq("str1", "str2"),
-        dropNulls = false,
-        variableColumnName = "variable",
-        valueColumnName = "value")
-    }("Column name for variable column (variable) must not exist among id columns: variable")
-    checkAnswer(
-      Melt.of(
-        meltWideDataDs.withColumnRenamed("id", "variable"),
-        Seq("variable"),
+        meltWideDataDs.withColumn("var", $"id"),
+        Seq("id", "var"),
         Seq("str1", "str2"),
         dropNulls = false,
         variableColumnName = "var",
-        valueColumnName = "val"),
-      meltedWideDataRows
+        valueColumnName = "val")
+    }
+    checkErrorClass(
+      exception = e7,
+      errorClass = "MELT_VARIABLE_COLUMN_IS_ID_COLUMN",
+      msg = "The melt variable column name 'var' must not be part of the id column names: [id, var]"
+    )
+    checkAnswer(
+      Melt.of(
+        meltWideDataDs.withColumn("var", $"id"),
+        Seq("id", "var"),
+        Seq("str1", "str2"),
+        dropNulls = false,
+        variableColumnName = "variable",
+        valueColumnName = "value"),
+      meltedWideDataRows.map( row => Row(row(0), row(0), row(1), row(2)))
     )
 
     // melting with id column `value`
-    assertException[IllegalArgumentException] {
+    val e8 = intercept[AnalysisException] {
       Melt.of(
-        meltWideDataDs.withColumnRenamed("id", "value"),
-        Seq("value"),
-        Seq("str1", "str2"),
-        dropNulls = false,
-        variableColumnName = "variable",
-        valueColumnName = "value")
-    }("Column name for value column (value) must not exist among id columns: value")
-    checkAnswer(
-      Melt.of(meltWideDataDs.withColumnRenamed("id", "value"),
-        Seq("value"),
+        meltWideDataDs.withColumn("val", $"id"),
+        Seq("id", "val"),
         Seq("str1", "str2"),
         dropNulls = false,
         variableColumnName = "var",
-        valueColumnName = "val"),
-      meltedWideDataRows
+        valueColumnName = "val")
+    }
+    checkErrorClass(
+      exception = e8,
+      errorClass = "MELT_VALUE_COLUMN_IS_ID_COLUMN",
+      msg = "The melt value column name 'val' must not be part of the id column names: [id, val]"
     )
-
+    checkAnswer(
+      Melt.of(
+        meltWideDataDs.withColumn("val", $"id"),
+        Seq("id", "val"),
+        Seq("str1", "str2"),
+        dropNulls = false,
+        variableColumnName = "variable",
+        valueColumnName = "value"),
+      meltedWideDataRows.map( row => Row(row(0), row(0), row(1), row(2)))
+    )
   }
 
   test("melt with dot and backtick") {
@@ -424,27 +471,31 @@ class MeltSuite extends QueryTest
       meltedWideDataRows.map(row => Row(
         row.getInt(0),
         row.getString(1) match {
-          case "str1" => "`str.one`"
-          case "str2" => "`str.two`"
+          case "str1" => "str.one"
+          case "str2" => "str.two"
         },
         row.getString(2)
       ))
     )
 
     // without backticks, this references struct fields, which do not exist
-    assertException[IllegalArgumentException] {
+    val e = intercept[AnalysisException] {
       Melt.of(df,
         Seq("an.id"),
         Seq("str.one", "str.two"),
         dropNulls = false,
         variableColumnName = "variable",
         valueColumnName = "value").collect()
-    }("Unknown value columns: str.one, str.two, candidate value columns are: str.one, str.two, int1, long1")
+    }
+    checkErrorClass(
+      exception = e,
+      errorClass = "MISSING_COLUMNS",
+      msg = "Columns [an.id] do not exist. Did you mean any of the following? [an.id, int1, long1]"
+    )
   }
 
   /** TODO(SPARK-39292): Would be nice to melt on struct fields.
-
-  test("melt with struct fields") {
+  test("SPARK-39292: melt with struct fields") {
     val df = meltWideDataDs.select(
       struct($"id").as("an"),
       struct(
@@ -454,7 +505,7 @@ class MeltSuite extends QueryTest
     )
 
     checkAnswer(
-      Melt.of(df, Seq("an.id"), Seq("str.one", "str.two")),
+      Melt.of(df, Seq("an.id"), Seq("str.one", "str.two"), false, "variable", "value"),
       meltedWideDataRows.map(row => Row(
         row.getInt(0),
         row.getString(1) match {

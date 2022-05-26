@@ -18,7 +18,7 @@
 package org.apache.spark.sql
 
 import org.apache.spark.sql.catalyst.analysis.{AnsiTypeCoercion, TypeCoercion, UnresolvedAttribute}
-import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Cast, Expression, Literal}
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Cast, Expression, Literal, NamedExpression}
 import org.apache.spark.sql.catalyst.expressions.objects.AssertNotNull
 import org.apache.spark.sql.catalyst.plans.logical.Expand
 import org.apache.spark.sql.functions.col
@@ -35,8 +35,21 @@ private[sql] object Melt {
       valueColumnName: String): DataFrame = {
     // values should be disjoint to ids
     if (values.intersect(ids).nonEmpty) {
-      throw new IllegalArgumentException("A column cannot be both an id and a value column: " +
-        s"${values.intersect(ids).mkString(", ")}")
+      throw new AnalysisException("MELT_ID_AND_VALUE_COLUMNS_NOT_DISJOINT", Array(
+        ids.mkString(", "), values.mkString(", "), values.intersect(ids).mkString(", ")
+      ))
+    }
+
+    // id columns must not contain variable or value column name
+    if (ids.contains(variableColumnName)) {
+      throw new AnalysisException("MELT_VARIABLE_COLUMN_IS_ID_COLUMN", Array(
+        variableColumnName, ids.mkString(", ")
+      ))
+    }
+    if (ids.contains(valueColumnName)) {
+      throw new AnalysisException("MELT_VALUE_COLUMN_IS_ID_COLUMN", Array(
+        valueColumnName, ids.mkString(", ")
+      ))
     }
 
     // if no values given, all non-id columns are melted
@@ -45,52 +58,44 @@ private[sql] object Melt {
 
     // if there are no values given and no non-id columns exist, we cannot melt
     if (valueNames.isEmpty) {
-      throw new IllegalArgumentException("The dataset has no non-id columns to melt")
+      throw new AnalysisException("MELT_REQUIRES_VALUE_COLUMNS", Array(ids.mkString(", ")))
     }
 
-    // resolve given column names
-    val resolver = ds.sparkSession.sessionState.analyzer.resolver
-    val resolvedValues = valueNames.map(c =>
-      ds.logicalPlan.resolveQuoted(c, resolver).map(_.toAttribute) match {
-        case Some(v) => Right(v)
-        case None => Left(c)
-      }
-    )
+    // resolve given id and value column names
+    val idExprs = ids.map(resolve(ds, _))
+    val valueExprs = valueNames.map(resolve(ds, _))
 
-    // all given values should exist in ds
-    val unresolvedValues = resolvedValues.filter(_.isLeft).map(_.swap.toOption.get)
+    // all given ids and values should exist in ds
+    val unresolvedIds = idExprs.filter(_.isLeft).map(_.swap.toOption.get)
+    if (unresolvedIds.nonEmpty) {
+      val idNameCandidates = ds.columns.diff(valueNames).toSeq
+      throw new AnalysisException("MISSING_COLUMNS",
+        Array(unresolvedIds.mkString(", "), idNameCandidates.mkString(", ")))
+    }
+    val unresolvedValues = valueExprs.filter(_.isLeft).map(_.swap.toOption.get)
     if (unresolvedValues.nonEmpty) {
-      throw new IllegalArgumentException(
-        s"Unknown value columns: ${unresolvedValues.mkString(", ")}, " +
-          s"candidate value columns are: ${valueNameCandidates.mkString(", ")}"
-      )
+      throw new AnalysisException("MISSING_COLUMNS",
+        Array(unresolvedValues.mkString(", "), valueNameCandidates.mkString(", ")))
     }
 
     // all melted values have to have the same type
-    val valueAttrs = resolvedValues.filter(_.isRight).map(_.toOption.get)
-    val valueType = valueAttrs.map(_.dataType).reduce(tightestCommonType)
-
-    if (ids.contains(variableColumnName)) {
-      throw new IllegalArgumentException(f"Column name for variable column ($variableColumnName) " +
-        f"must not exist among id columns: ${ids.mkString(", ")}")
-    }
-    if (ids.contains(valueColumnName)) {
-      throw new IllegalArgumentException(f"Column name for value column ($valueColumnName) " +
-        f"must not exist among id columns: ${ids.mkString(", ")}")
-    }
+    val resolvedValues = valueExprs.filter(_.isRight).map(_.toOption.get)
+    val valueType = resolvedValues.map(_.dataType).reduce(tightestCommonType)
 
     // construct output attributes
-    val idAttrs = ids.map(UnresolvedAttribute.quotedString)
+    val idAttrs = idExprs.filter(_.isRight).map(_.toOption.get.toAttribute)
     val variableAttr = AttributeReference(variableColumnName, StringType, nullable = false)()
+    // even with dropNulls == true we output nullable value column
+    // and filter for valueColumn.isNotNull after expand, see `if (dropNulls)` below
     val valueAttr = AttributeReference(valueColumnName, valueType, nullable = true)()
     val output = idAttrs ++ Seq(variableAttr, valueAttr)
 
     // construct melt expressions for Expand
     val exprs: Seq[Seq[Expression]] = valueNames.map {
-      attr =>
+      value =>
         idAttrs ++ Seq(
-          Literal(attr),
-          Cast(UnresolvedAttribute.quotedString(attr), valueType)
+          Literal(value),
+          Cast(UnresolvedAttribute.quotedString(value), valueType)
         )
     }
 
@@ -110,11 +115,28 @@ private[sql] object Melt {
     }
   }
 
+  /**
+   * Resolves the column against the given dataset, returns either the resolved NamedExpression,
+   * or the column name that could not be resolved.
+   *
+   * @param ds Dataset
+   * @param column column name
+   * @tparam _ Dataset type
+   * @return either resolved NamedExpression or column name
+   */
+  private def resolve[_](ds: Dataset[_], column: String): Either[String, NamedExpression] = {
+    val resolver = ds.sparkSession.sessionState.analyzer.resolver
+    ds.logicalPlan.resolveQuoted(column, resolver).map(_.toAttribute) match {
+      case Some(v) => Right(v)
+      case None => Left(column)
+    }
+  }
+
   private def tightestCommonType(d1: DataType, d2: DataType): DataType = {
     val typeCoercion = if (SQLConf.get.ansiEnabled) AnsiTypeCoercion else TypeCoercion
     typeCoercion.findTightestCommonType(d1, d2).getOrElse(
-      throw new IllegalArgumentException("All values must be of compatible types, " +
-        f"types $d1 and $d2 are not compatible")
+      throw new AnalysisException("MELT_VALUE_DATA_TYPE_MISMATCH",
+        Array(d1.simpleString, d2.simpleString))
     )
   }
 

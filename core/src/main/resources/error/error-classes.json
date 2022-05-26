@@ -256,6 +256,30 @@
       "Key <keyValue> does not exist. Use `try_element_at` to tolerate non-existent key and return NULL instead. If necessary set <config> to \"false\" to bypass this error."
     ]
   },
+  "MELT_ID_AND_VALUE_COLUMNS_NOT_DISJOINT" : {
+    "message" : [ "The melt id columns [<ids>] and value columns [<values>] must be disjoint, but these columns are both: [<both>]" ],
+    "sqlState" : "42000"
+  },
+  "MELT_VALUE_DATA_TYPE_MISMATCH" : {
+    "message" : [ "Melt value columns must have compatible data types, but <dataType1> and <dataType2> are not compatible" ],
+    "sqlState" : "42000"
+  },
+  "MELT_REQUIRES_VALUE_COLUMNS" : {
+    "message" : [ "At least one non-id column is required to melt. All columns are id columns: [<ids>]" ],
+    "sqlState" : "42000"
+  },
+  "MELT_VALUE_COLUMN_IS_ID_COLUMN" : {
+    "message" : [ "The melt value column name '<value>' must not be part of the id column names: [<ids>]" ],
+    "sqlState" : "42000"
+  },
+  "MELT_VARIABLE_COLUMN_IS_ID_COLUMN" : {
+    "message" : [ "The melt variable column name '<variable>' must not be part of the id column names: [<ids>]" ],
+    "sqlState" : "42000"
+  },
+  "MISSING_COLUMNS" : {
+    "message" : [ "Columns [<columnNames>] do not exist. Did you mean any of the following? [<proposal>]" ],
+    "sqlState" : "42000"
+  },
   "MISSING_STATIC_PARTITION_COLUMN" : {
     "message" : [
       "Unknown static partition column: <columnName>"
