@@ -2088,7 +2088,7 @@ class Dataset[T] private[sql](
    * Unpivot a DataFrame from wide format to long format, optionally
    * leaving identifier variables set.
    *
-   * @see Dataset#melt(Array, Array, Boolean, String, String)
+   * @see `org.apache.spark.sql.Dataset.melt(Array, Array, Boolean, String, String)`
    *
    * This is equivalent to calling `Dataset#melt(Array, Array, Boolean, String, String)`
    * with `variableColumnName = "variable"` and `valueColumnName = "value"`.
@@ -2107,7 +2107,7 @@ class Dataset[T] private[sql](
    * Unpivot a DataFrame from wide format to long format, optionally
    * leaving identifier variables set.
    *
-   * @see Dataset#melt(Array, Array, Boolean, String, String)
+   * @see `org.apache.spark.sql.Dataset.melt(Array, Array, Boolean, String, String)`
    *
    * This is equivalent to calling `Dataset#melt(Array, Array, Boolean, String, String)`
    * with `dropNulls = false`, `variableColumnName = "variable"` and `valueColumnName = "value"`.
@@ -2126,7 +2126,7 @@ class Dataset[T] private[sql](
    * Unpivot a DataFrame from wide format to long format, optionally
    * leaving identifier variables set.
    *
-   * @see Dataset#melt(Array, Array, Boolean, String, String)
+   * @see `org.apache.spark.sql.Dataset.melt(Array, Array, Boolean, String, String)`
    *
    * This is equivalent to calling `Dataset#melt(Array, Array, Boolean, String, String)`
    * with `values = Array.empty`, `dropNulls = false`, `variableColumnName = "variable"`
