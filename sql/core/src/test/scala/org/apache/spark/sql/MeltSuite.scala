@@ -471,8 +471,8 @@ class MeltSuite extends QueryTest
       meltedWideDataRows.map(row => Row(
         row.getInt(0),
         row.getString(1) match {
-          case "str1" => "str.one"
-          case "str2" => "str.two"
+          case "str1" => "`str.one`"
+          case "str2" => "`str.two`"
         },
         row.getString(2)
       ))
