@@ -412,40 +412,41 @@ public class JavaDatasetSuite implements Serializable {
       new GenericRow(new Object[] { 3, "int2", 32 })
     );
 
-    // test melt(ids)
-    List<Row> melted1 = ds.select(col("id"), col("int1"), col("int2"))
-      .melt(new String[] { "id" }).collectAsList();
+    // test melt(ids, variableColumnName, valueColumnName)
+    Dataset<Row> meltedDs1 = ds.drop("label").melt(
+      new String[] { "id" },
+      "var",
+      "val"
+    );
+    Assert.assertArrayEquals(new String[] { "id", "var", "val" }, meltedDs1.columns());
+    List<Row> melted1 = meltedDs1.collectAsList();
     Assert.assertEquals(expected, toSet(melted1));
 
-    // test melt(ids, values)
-    List<Row> melted2 = ds.melt(
-      new String[] { "id" },
-      new String[] { "int1", "int2" }
-    ).collectAsList();
-    Assert.assertEquals(expected, toSet(melted2));
-
-    // test melt(ids, values, dropNulls)
-    List<Row> melted3 = ds.melt(
+    // test melt(ids, values, variableColumnName, valueColumnName)
+    Dataset<Row> meltedDs2 = ds.melt(
       new String[] { "id" },
       new String[] { "int1", "int2" },
+      "column",
+      "value"
+    );
+    Assert.assertArrayEquals(new String[] { "id", "column", "value" }, meltedDs2.columns());
+    List<Row> melted2 = meltedDs2.collectAsList();
+    Assert.assertEquals(expected, toSet(melted2));
+
+    // test melt(ids, values, variableName, valueName, dropNulls)
+    Dataset<Row> meltedDs3 = ds.melt(
+      new String[] { "id" },
+      new String[] { "int1", "int2" },
+      "variable",
+      "value",
       true
-    ).collectAsList();
+    );
+    Assert.assertArrayEquals(new String[] { "id", "variable", "value" }, meltedDs3.columns());
+    List<Row> melted3 = meltedDs3.collectAsList();
     Assert.assertEquals(
       expected.stream().filter(r -> !r.isNullAt(2)).collect(Collectors.toSet()),
       toSet(melted3)
     );
-
-    // test melt(ids, values, dropNulls, variableName, valueName)
-    Dataset<Row> meltedDs = ds.melt(
-      new String[] { "id" },
-      new String[] { "int1", "int2" },
-      false,
-      "var",
-      "val"
-    );
-    Assert.assertArrayEquals(new String[] { "id", "var", "val" }, meltedDs.columns());
-    List<Row> melted5 = meltedDs.collectAsList();
-    Assert.assertEquals(expected, toSet(melted5));
   }
 
   @Test

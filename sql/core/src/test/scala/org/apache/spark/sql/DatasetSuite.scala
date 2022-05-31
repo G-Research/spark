@@ -720,7 +720,7 @@ class DatasetSuite extends QueryTest
 
     // melt while keeping null values
     val actualWithNulls = df.melt(Array("id"), Array("long1", "long2"),
-      dropNulls = false, variableColumnName = "var", valueColumnName = "val")
+      variableColumnName = "var", valueColumnName = "val", dropNulls = false)
     checkAnswer(
       actualWithNulls,
       Seq(
@@ -743,7 +743,7 @@ class DatasetSuite extends QueryTest
 
     // melt while removing null values
     val actualWithoutNulls = df.melt(Array("id"), Array("long1", "long2"),
-      dropNulls = true, variableColumnName = "var", valueColumnName = "val")
+      variableColumnName = "var", valueColumnName = "val", dropNulls = true)
     checkAnswer(
       actualWithoutNulls,
       Seq(
@@ -764,7 +764,7 @@ class DatasetSuite extends QueryTest
     // melt after pivoting
     val pivoted = courseSales.groupBy("year").pivot("course", Seq("dotNET", "Java"))
       .agg(sum($"earnings"))
-    val melted = pivoted.melt(Array("year"))
+    val melted = pivoted.melt(Array("year"), "course", "earnings")
     val expected = courseSales.groupBy("year", "course").sum("earnings")
     checkAnswer(melted, expected)
   }

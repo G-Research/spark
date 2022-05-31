@@ -2063,9 +2063,9 @@ class Dataset[T] private[sql](
    *
    * @param ids names of the id columns
    * @param values names of the value columns
-   * @param dropNulls rows with null values are dropped from the returned DataFrame
    * @param variableColumnName name of the variable column, default `variable`
    * @param valueColumnName name of the value column, default `value`
+   * @param dropNulls rows with null values are dropped from the returned DataFrame
    *
    * @group untypedrel
    * @since 3.4.0
@@ -2073,9 +2073,9 @@ class Dataset[T] private[sql](
   def melt(
       ids: Array[String],
       values: Array[String],
-      dropNulls: Boolean,
       variableColumnName: String,
-      valueColumnName: String): DataFrame =
+      valueColumnName: String,
+      dropNulls: Boolean): DataFrame =
     Melt.of(
       this,
       ids,
@@ -2091,17 +2091,21 @@ class Dataset[T] private[sql](
    * @see `org.apache.spark.sql.Dataset.melt(Array, Array, Boolean, String, String)`
    *
    * This is equivalent to calling `Dataset#melt(Array, Array, Boolean, String, String)`
-   * with `variableColumnName = "variable"` and `valueColumnName = "value"`.
+   * with `dropNulls = false`.
    *
    * @param ids names of the id columns
    * @param values names of the value columns
-   * @param dropNulls rows with null values are dropped from the returned DataFrame
+   * @param variableColumnName name of the variable column, default `variable`
+   * @param valueColumnName name of the value column, default `value`
    *
    * @group untypedrel
    * @since 3.4.0
    */
-  def melt(ids: Array[String], values: Array[String], dropNulls: Boolean): DataFrame =
-    melt(ids, values, dropNulls, "variable", "value")
+  def melt(ids: Array[String],
+           values: Array[String],
+           variableColumnName: String,
+           valueColumnName: String): DataFrame =
+    melt(ids, values, variableColumnName, valueColumnName, dropNulls = false)
 
   /**
    * Unpivot a DataFrame from wide format to long format, optionally
@@ -2110,35 +2114,19 @@ class Dataset[T] private[sql](
    * @see `org.apache.spark.sql.Dataset.melt(Array, Array, Boolean, String, String)`
    *
    * This is equivalent to calling `Dataset#melt(Array, Array, Boolean, String, String)`
-   * with `dropNulls = false`, `variableColumnName = "variable"` and `valueColumnName = "value"`.
+   * with `values = Array.empty` and `dropNulls = false`.
    *
    * @param ids names of the id columns
-   * @param values names of the value columns
+   * @param variableColumnName name of the variable column, default `variable`
+   * @param valueColumnName name of the value column, default `value`
    *
    * @group untypedrel
    * @since 3.4.0
    */
-  def melt(ids: Array[String], values: Array[String]): DataFrame =
-    melt(ids, values, dropNulls = false)
-
-
-  /**
-   * Unpivot a DataFrame from wide format to long format, optionally
-   * leaving identifier variables set.
-   *
-   * @see `org.apache.spark.sql.Dataset.melt(Array, Array, Boolean, String, String)`
-   *
-   * This is equivalent to calling `Dataset#melt(Array, Array, Boolean, String, String)`
-   * with `values = Array.empty`, `dropNulls = false`, `variableColumnName = "variable"`
-   * and `valueColumnName = "value"`.
-   *
-   * @param ids names of the id columns
-   *
-   * @group untypedrel
-   * @since 3.4.0
-   */
-  def melt(ids: Array[String]): DataFrame =
-    melt(ids, Array.empty)
+  def melt(ids: Array[String],
+           variableColumnName: String,
+           valueColumnName: String): DataFrame =
+    melt(ids, Array.empty, variableColumnName, valueColumnName)
 
   /**
   * Define (named) metrics to observe on the Dataset. This method returns an 'observed' Dataset
