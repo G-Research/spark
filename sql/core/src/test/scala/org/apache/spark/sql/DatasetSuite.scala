@@ -707,72 +707,6 @@ class DatasetSuite extends QueryTest
       1 -> "a", 2 -> "bc", 3 -> "d")
   }
 
-  test("SPARK-38864: melt dataset") {
-    // for more tests on melt, see MeltSuite
-
-    // our test DataFrame
-    val df = Seq(
-      (1, "one", Some(1L), Some(10L)),
-      (2, "two", None, Some(20L)),
-      (3, null, None, None),
-      (4, "four", Some(4L), Some(40L))
-    ).toDF("id", "str", "long1", "long2")
-
-    // melt while keeping null values
-    val actualWithNulls = df.melt(Array("id"), Array("long1", "long2"),
-      variableColumnName = "var", valueColumnName = "val", dropNulls = false)
-    checkAnswer(
-      actualWithNulls,
-      Seq(
-        Row(1, "long1", 1L),
-        Row(1, "long2", 10L),
-        Row(2, "long1", null),
-        Row(2, "long2", 20L),
-        Row(3, "long1", null),
-        Row(3, "long2", null),
-        Row(4, "long1", 4L),
-        Row(4, "long2", 40L)
-      )
-    )
-    val expectedSchemaWithNulls = StructType(Seq(
-      StructField("id", IntegerType, nullable = false),
-      StructField("var", StringType, nullable = false),
-      StructField("val", LongType, nullable = true)
-    ))
-    assert(actualWithNulls.schema === expectedSchemaWithNulls)
-
-    // melt while removing null values
-    val actualWithoutNulls = df.melt(Array("id"), Array("long1", "long2"),
-      variableColumnName = "var", valueColumnName = "val", dropNulls = true)
-    checkAnswer(
-      actualWithoutNulls,
-      Seq(
-        Row(1, "long1", 1L),
-        Row(1, "long2", 10L),
-        Row(2, "long2", 20L),
-        Row(4, "long1", 4L),
-        Row(4, "long2", 40L)
-      )
-    )
-    val expectedSchemaWithoutNulls = StructType(Seq(
-      StructField("id", IntegerType, nullable = false),
-      StructField("var", StringType, nullable = false),
-      StructField("val", LongType, nullable = false)
-    ))
-    assert(actualWithoutNulls.schema === expectedSchemaWithoutNulls)
-
-    // melt with overloaded methods
-    checkAnswer(df.melt(Array("id"), Array("long1", "long2"), "var", "val"), actualWithNulls)
-    checkAnswer(df.drop("str").melt(Array("id"), "var", "val"), actualWithNulls)
-
-    // melt after pivoting
-    val pivoted = courseSales.groupBy("year").pivot("course", Seq("dotNET", "Java"))
-      .agg(sum($"earnings"))
-    val melted = pivoted.melt(Array("year"), "course", "earnings")
-    val expected = courseSales.groupBy("year", "course").sum("earnings")
-    checkAnswer(melted, expected)
-  }
-
   test("SPARK-34806: observation on datasets") {
     val namedObservation = Observation("named")
     val unnamedObservation = Observation()
@@ -2219,7 +2153,6 @@ case class TestDataUnion(x: Int, y: Int, z: Int)
 case class SingleData(id: Int)
 case class DoubleData(id: Int, val1: String)
 case class TripleData(id: Int, val1: String, val2: Long)
-case class WideData(id: Int, str1: String, str2: String, int1: Option[Int], long1: Option[Long])
 
 case class WithImmutableMap(id: String, map_test: scala.collection.immutable.Map[Long, String])
 case class WithMap(id: String, map_test: scala.collection.Map[Long, String])
