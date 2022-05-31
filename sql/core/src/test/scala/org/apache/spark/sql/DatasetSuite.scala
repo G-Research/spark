@@ -761,6 +761,10 @@ class DatasetSuite extends QueryTest
     ))
     assert(actualWithoutNulls.schema === expectedSchemaWithoutNulls)
 
+    // melt with overloaded methods
+    checkAnswer(df.melt(Array("id"), Array("long1", "long2"), "var", "val"), actualWithNulls)
+    checkAnswer(df.drop("str").melt(Array("id"), "var", "val"), actualWithNulls)
+
     // melt after pivoting
     val pivoted = courseSales.groupBy("year").pivot("course", Seq("dotNET", "Java"))
       .agg(sum($"earnings"))
