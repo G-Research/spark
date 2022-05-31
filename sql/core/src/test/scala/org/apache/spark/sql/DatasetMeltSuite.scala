@@ -62,68 +62,19 @@ class DatasetMeltSuite extends QueryTest
     StructField("val", StringType, nullable = false)
   ))
 
-  test("melt without ids or values") {
-    // do not drop nulls
-    val melted = meltWideDataDs.select($"str1", $"str2")
-      .melt(
-        Array.empty,
-        Array.empty,
-        variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = false
-      )
-    assert(melted.schema === StructType(Seq(
-      StructField("var", StringType, nullable = false),
-      StructField("val", StringType, nullable = true)
-    )))
-    checkAnswer(melted, meltedWideDataWithoutIdRows)
-
-    // drop nulls
-    val meltedWithoutNulls = meltWideDataDs.select($"str1", $"str2")
-      .melt(
-        Array.empty,
-        Array.empty,
-        variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = true
-      )
-    assert(meltedWithoutNulls.schema === StructType(Seq(
-      StructField("var", StringType, nullable = false),
-      StructField("val", StringType, nullable = false)
-    )))
-    checkAnswer(meltedWithoutNulls, meltedWideDataWithoutIdRows.filter(row => !row.isNullAt(1)))
+  test("overloaded melt without dropNulls") {
+    checkAnswer(
+      meltWideDataDs.melt(Array("id"), Array("str1", "str2"), "var", "val"),
+      meltWideDataDs.melt(Array("id"), Array("str1", "str2"), "var", "val", dropNulls = false)
+    )
   }
 
-  test("melt without ids") {
-    // do not drop nulls
-    val melted = meltWideDataDs
-      .melt(
-        Array.empty,
-        Array("str1", "str2"),
-        variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = false
-      )
-    assert(melted.schema === StructType(Seq(
-      StructField("var", StringType, nullable = false),
-      StructField("val", StringType, nullable = true)
-    )))
-    checkAnswer(melted, meltedWideDataWithoutIdRows)
-
-    // drop nulls
-    val meltedWithoutNulls = meltWideDataDs
-      .melt(
-        Array.empty,
-        Array("str1", "str2"),
-        variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = true
-      )
-    assert(meltedWithoutNulls.schema === StructType(Seq(
-      StructField("var", StringType, nullable = false),
-      StructField("val", StringType, nullable = false)
-    )))
-    checkAnswer(meltedWithoutNulls, meltedWideDataWithoutIdRows.filter(row => !row.isNullAt(1)))
+  test("overloaded melt without value and dropNulls") {
+    val ds = meltWideDataDs.select($"id", $"str1", $"str2")
+    checkAnswer(
+      ds.melt(Array("id"), "var", "val"),
+      ds.melt(Array("id"), Array.empty, "var", "val", dropNulls = false)
+    )
   }
 
   test("melt with single id") {
@@ -199,6 +150,38 @@ class DatasetMeltSuite extends QueryTest
     checkAnswer(meltedWithoutNulls, meltedRows.filter(row => !row.isNullAt(3)))
   }
 
+  test("melt without ids") {
+    // do not drop nulls
+    val melted = meltWideDataDs
+      .melt(
+        Array.empty,
+        Array("str1", "str2"),
+        variableColumnName = "var",
+        valueColumnName = "val",
+        dropNulls = false
+      )
+    assert(melted.schema === StructType(Seq(
+      StructField("var", StringType, nullable = false),
+      StructField("val", StringType, nullable = true)
+    )))
+    checkAnswer(melted, meltedWideDataWithoutIdRows)
+
+    // drop nulls
+    val meltedWithoutNulls = meltWideDataDs
+      .melt(
+        Array.empty,
+        Array("str1", "str2"),
+        variableColumnName = "var",
+        valueColumnName = "val",
+        dropNulls = true
+      )
+    assert(meltedWithoutNulls.schema === StructType(Seq(
+      StructField("var", StringType, nullable = false),
+      StructField("val", StringType, nullable = false)
+    )))
+    checkAnswer(meltedWithoutNulls, meltedWideDataWithoutIdRows.filter(row => !row.isNullAt(1)))
+  }
+
   test("melt without values") {
     // do not drop nulls
     val melted = meltWideDataDs.select($"id", $"str1", $"str2")
@@ -223,6 +206,38 @@ class DatasetMeltSuite extends QueryTest
       )
     assert(meltedWithoutNulls.schema === meltedSchemaWithoutNulls)
     checkAnswer(meltedWithoutNulls, meltedWideDataRows.filter(row => !row.isNullAt(2)))
+  }
+
+  test("melt without ids or values") {
+    // do not drop nulls
+    val melted = meltWideDataDs.select($"str1", $"str2")
+      .melt(
+        Array.empty,
+        Array.empty,
+        variableColumnName = "var",
+        valueColumnName = "val",
+        dropNulls = false
+      )
+    assert(melted.schema === StructType(Seq(
+      StructField("var", StringType, nullable = false),
+      StructField("val", StringType, nullable = true)
+    )))
+    checkAnswer(melted, meltedWideDataWithoutIdRows)
+
+    // drop nulls
+    val meltedWithoutNulls = meltWideDataDs.select($"str1", $"str2")
+      .melt(
+        Array.empty,
+        Array.empty,
+        variableColumnName = "var",
+        valueColumnName = "val",
+        dropNulls = true
+      )
+    assert(meltedWithoutNulls.schema === StructType(Seq(
+      StructField("var", StringType, nullable = false),
+      StructField("val", StringType, nullable = false)
+    )))
+    checkAnswer(meltedWithoutNulls, meltedWideDataWithoutIdRows.filter(row => !row.isNullAt(1)))
   }
 
   test("melt with variable / value value columns") {
@@ -486,12 +501,12 @@ class DatasetMeltSuite extends QueryTest
   }
 
   test("melt with dot and backtick") {
-    val df = meltWideDataDs
+    val ds = meltWideDataDs
       .withColumnRenamed("id", "an.id")
       .withColumnRenamed("str1", "str.one")
       .withColumnRenamed("str2", "str.two")
 
-    val melted = df.melt(
+    val melted = ds.melt(
         Array("`an.id`"),
         Array("`str.one`", "`str.two`"),
         variableColumnName = "var",
@@ -510,7 +525,7 @@ class DatasetMeltSuite extends QueryTest
 
     // without backticks, this references struct fields, which do not exist
     val e = intercept[AnalysisException] {
-      df.melt(
+      ds.melt(
         Array("an.id"),
         Array("str.one", "str.two"),
         variableColumnName = "var",
@@ -527,7 +542,7 @@ class DatasetMeltSuite extends QueryTest
 
   /** TODO(SPARK-39292): Would be nice to melt on struct fields.
   test("SPARK-39292: melt with struct fields") {
-    val df = meltWideDataDs.select(
+    val ds = meltWideDataDs.select(
       struct($"id").as("an"),
       struct(
         $"str1".as("one"),
@@ -536,7 +551,7 @@ class DatasetMeltSuite extends QueryTest
     )
 
     checkAnswer(
-      df.melt(Array("an.id"), Array("str.one", "str.two"), "var", "val", false),
+      ds.melt(Array("an.id"), Array("str.one", "str.two"), "var", "val", false),
       meltedWideDataRows.map(row => Row(
         row.getInt(0),
         row.getString(1) match {
