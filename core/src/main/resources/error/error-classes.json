@@ -258,7 +258,7 @@
   },
   "MELT_ID_AND_VALUE_COLUMNS_NOT_DISJOINT" : {
     "message" : [
-      "The melt id columns [<ids>] and value columns [<values>] must be disjoint, but these columns are both: [<both>]"
+      "The melt id columns [<ids>] and value columns [<values>] must be disjoint, but these columns are either: [<either>]"
     ],
     "sqlState" : "42000"
   },
@@ -283,12 +283,6 @@
   "MELT_VARIABLE_COLUMN_IS_ID_COLUMN" : {
     "message" : [
       "The melt variable column name '<variable>' must not be part of the id column names: [<ids>]"
-    ],
-    "sqlState" : "42000"
-  },
-  "MISSING_COLUMNS" : {
-    "message" : [
-      "Columns [<columnNames>] do not exist. Did you mean any of the following? [<proposal>]"
     ],
     "sqlState" : "42000"
   },

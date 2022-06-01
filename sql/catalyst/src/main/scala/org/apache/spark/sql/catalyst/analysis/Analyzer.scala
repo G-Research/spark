@@ -294,6 +294,7 @@ class Analyzer(override val catalogManager: CatalogManager)
       ResolveUpCast ::
       ResolveGroupingAnalytics ::
       ResolvePivot ::
+      ResolveMelt ::
       ResolveOrdinalInOrderByAndGroupBy ::
       ResolveAggAliasInGroupBy ::
       ResolveMissingReferences ::
@@ -514,6 +515,10 @@ class Analyzer(override val catalogManager: CatalogManager)
       case Pivot(groupByOpt, pivotColumn, pivotValues, aggregates, child)
         if child.resolved && groupByOpt.isDefined && hasUnresolvedAlias(groupByOpt.get) =>
         Pivot(Some(assignAliases(groupByOpt.get)), pivotColumn, pivotValues, aggregates, child)
+
+      case Melt(ids, values, variableColumnName, valueColumnName, child)
+        if child.resolved && (hasUnresolvedAlias(ids) || hasUnresolvedAlias(values)) =>
+        Melt(assignAliases(ids), assignAliases(values), variableColumnName, valueColumnName, child)
 
       case Project(projectList, child) if child.resolved && hasUnresolvedAlias(projectList) =>
         Project(assignAliases(projectList), child)
@@ -860,6 +865,56 @@ class Analyzer(override val catalogManager: CatalogManager)
       case e: Attribute =>
         throw QueryCompilationErrors.aggregateExpressionRequiredForPivotError(e.sql)
       case e => e.children.foreach(checkValidAggregateExpression)
+    }
+  }
+
+  object ResolveMelt extends Rule[LogicalPlan] {
+    def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperatorsWithPruning(
+      _.containsPattern(MELT), ruleId) {
+      case m: Melt if !m.childrenResolved || !m.ids.forall(_.resolved)
+        || !m.values.forall(_.resolved) => m
+
+      case Melt(ids, values, variableColumnName, valueColumnName, child) =>
+        // values should be disjoint to ids
+        if (values.intersect(ids).nonEmpty) {
+          throw new AnalysisException("MELT_ID_AND_VALUE_COLUMNS_NOT_DISJOINT", Array(
+            ids.mkString(", "), values.mkString(", "), values.intersect(ids).mkString(", ")
+          ))
+        }
+
+        // if no values given, all non-id columns are melted
+        val valueAttrs = Some(values.map(_.toAttribute)).filter(_.nonEmpty)
+          .getOrElse(child.output.diff(ids))
+
+        // if no values are given, we cannot melt
+        if (valueAttrs.isEmpty) {
+          throw new AnalysisException("MELT_REQUIRES_VALUE_COLUMNS", Array(ids.mkString(", ")))
+        }
+
+        // all melted values have to have the same type
+        val valueType = valueAttrs.map(_.dataType).reduce(tightestCommonType)
+
+        // construct output attributes
+        val idAttrs = ids.map(_.toAttribute)
+        val variableAttr = AttributeReference(variableColumnName, StringType, nullable = false)()
+        val valueAttr = AttributeReference(valueColumnName, valueType, nullable = true)()
+        val output = idAttrs ++ Seq(variableAttr, valueAttr)
+
+        // construct melt expressions for Expand
+        val exprs: Seq[Seq[Expression]] = valueAttrs.map {
+          value => idAttrs ++ Seq(Literal(value.name), Cast(value, valueType))
+        }
+
+        // expand the melt expressions
+        Expand(exprs, output, child)
+    }
+
+    private def tightestCommonType(d1: DataType, d2: DataType): DataType = {
+      val typeCoercion = if (SQLConf.get.ansiEnabled) AnsiTypeCoercion else TypeCoercion
+      typeCoercion.findTightestCommonType(d1, d2).getOrElse(
+        throw new AnalysisException("MELT_VALUE_DATA_TYPE_MISMATCH",
+          Array(d1.simpleString, d2.simpleString))
+      )
     }
   }
 

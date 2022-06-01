@@ -2017,9 +2017,10 @@ class Dataset[T] private[sql](
    * leaving identifier variables set.
    *
    * This function is useful to massage a DataFrame into a format where some
-   * columns are identifier variables (`ids`), while all other columns,
-   * considered measured variables (`values`), are "unpivoted" to the rows,
-   * leaving just two non-identifier columns, 'variable' and 'value'.
+   * columns are identifier "variables" ("id"), while all other columns,
+   * considered measured variables ("values"), are "unpivoted" to the rows,
+   * leaving just two non-id columns, named as given by `variableColumnName`
+   * and `valueColumnName`.
    *
    * {{{
    *   val df = Seq((1, 11, 12L), (2, 21, 22L)).toDF("id", "int", "long")
@@ -2050,82 +2051,57 @@ class Dataset[T] private[sql](
    *   // |-- value: long (nullable = true)
    * }}}
    *
-   * When no id columns are given, the unpivoted DataFrame consists of only the
-   * `variable` and `value` columns. When no value columns are given, all non-identifier
-   * columns are considered value columns.
+   * When no "id" columns are given, the unpivoted DataFrame consists of only the
+   * "variable" and "value" columns. Columns given to both, `ids` and `values`, are ignored
+   * as `values`. This allows to use `"*"` as `values` to melt all non-id columns.
    *
-   * All value columns must be of the same data type. If they are not the same data type,
-   * all value columns are cast to the nearest common data type. For instance,
+   * All "value" columns must be of the same data type. If they are not the same data type,
+   * all "value" columns are cast to the nearest common data type. For instance,
    * types `IntegerType` and `LongType` are compatible and cast to `LongType`,
    * while `IntegerType` and `StringType` are not compatible and `melt` fails.
    *
-   * The type of the `value` column is the nearest common data type of the value columns.
-   *
-   * @param ids names of the id columns
-   * @param values names of the value columns
-   * @param variableColumnName name of the variable column, default `variable`
-   * @param valueColumnName name of the value column, default `value`
-   * @param dropNulls rows with null values are dropped from the returned DataFrame
+   * @param ids Names of the id columns
+   * @param values Names of the value columns
+   * @param variableColumnName Name of the variable column
+   * @param valueColumnName Name of the value column
    *
    * @group untypedrel
    * @since 3.4.0
    */
   def melt(
-      ids: Array[String],
-      values: Array[String],
+      ids: Array[Column],
+      values: Array[Column],
       variableColumnName: String,
-      valueColumnName: String,
-      dropNulls: Boolean): DataFrame =
-    Melt.of(
-      this,
-      ids,
-      values,
-      variableColumnName = variableColumnName,
-      valueColumnName = valueColumnName,
-      dropNulls = dropNulls)
+      valueColumnName: String): DataFrame = withPlan {
+    Melt(
+      ids.map(_.named),
+      values.map(_.named),
+      variableColumnName,
+      valueColumnName,
+      logicalPlan
+    )
+  }
 
   /**
    * Unpivot a DataFrame from wide format to long format, optionally
    * leaving identifier variables set.
    *
-   * @see `org.apache.spark.sql.Dataset.melt(Array, Array, Boolean, String, String)`
+   * @see `org.apache.spark.sql.Dataset.melt(Array, Array, String, String)`
    *
-   * This is equivalent to calling `Dataset#melt(Array, Array, Boolean, String, String)`
-   * with `dropNulls = false`.
+   * This is equivalent to calling `Dataset#melt(Array, Array, String, String)`
+   * with `values = Array(col("*")))`.
    *
-   * @param ids names of the id columns
-   * @param values names of the value columns
-   * @param variableColumnName name of the variable column, default `variable`
-   * @param valueColumnName name of the value column, default `value`
-   *
-   * @group untypedrel
-   * @since 3.4.0
-   */
-  def melt(ids: Array[String],
-           values: Array[String],
-           variableColumnName: String,
-           valueColumnName: String): DataFrame =
-    melt(ids, values, variableColumnName, valueColumnName, dropNulls = false)
-
-  /**
-   * Unpivot a DataFrame from wide format to long format, optionally
-   * leaving identifier variables set.
-   *
-   * @see `org.apache.spark.sql.Dataset.melt(Array, Array, Boolean, String, String)`
-   *
-   * This is equivalent to calling `Dataset#melt(Array, Array, Boolean, String, String)`
-   * with `values = Array.empty` and `dropNulls = false`.
-   *
-   * @param ids names of the id columns
-   * @param variableColumnName name of the variable column, default `variable`
-   * @param valueColumnName name of the value column, default `value`
+   * @param ids Names of the id columns
+   * @param variableColumnName Name of the variable column
+   * @param valueColumnName Name of the value column
    *
    * @group untypedrel
    * @since 3.4.0
    */
-  def melt(ids: Array[String],
-           variableColumnName: String,
-           valueColumnName: String): DataFrame =
+  def melt(
+      ids: Array[Column],
+      variableColumnName: String,
+      valueColumnName: String): DataFrame =
     melt(ids, Array.empty, variableColumnName, valueColumnName)
 
   /**

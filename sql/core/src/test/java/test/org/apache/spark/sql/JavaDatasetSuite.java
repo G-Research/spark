@@ -414,7 +414,7 @@ public class JavaDatasetSuite implements Serializable {
 
     // test melt(ids, variableColumnName, valueColumnName)
     Dataset<Row> meltedDs1 = ds.drop("label").melt(
-      new String[] { "id" },
+      new Column[] { col("id") },
       "var",
       "val"
     );
@@ -424,29 +424,14 @@ public class JavaDatasetSuite implements Serializable {
 
     // test melt(ids, values, variableColumnName, valueColumnName)
     Dataset<Row> meltedDs2 = ds.melt(
-      new String[] { "id" },
-      new String[] { "int1", "int2" },
+      new Column[] { col("id") },
+      new Column[] { col("int1"), col("int2") },
       "column",
       "value"
     );
     Assert.assertArrayEquals(new String[] { "id", "column", "value" }, meltedDs2.columns());
     List<Row> melted2 = meltedDs2.collectAsList();
     Assert.assertEquals(expected, toSet(melted2));
-
-    // test melt(ids, values, variableName, valueName, dropNulls)
-    Dataset<Row> meltedDs3 = ds.melt(
-      new String[] { "id" },
-      new String[] { "int1", "int2" },
-      "variable",
-      "value",
-      true
-    );
-    Assert.assertArrayEquals(new String[] { "id", "variable", "value" }, meltedDs3.columns());
-    List<Row> melted3 = meltedDs3.collectAsList();
-    Assert.assertEquals(
-      expected.stream().filter(r -> !r.isNullAt(2)).collect(Collectors.toSet()),
-      toSet(melted3)
-    );
   }
 
   @Test

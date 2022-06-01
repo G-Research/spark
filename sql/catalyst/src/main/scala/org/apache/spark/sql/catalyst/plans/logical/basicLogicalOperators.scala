@@ -18,7 +18,7 @@
 package org.apache.spark.sql.catalyst.plans.logical
 
 import org.apache.spark.sql.catalyst.{AliasIdentifier, SQLConfHelper}
-import org.apache.spark.sql.catalyst.analysis.{AnsiTypeCoercion, MultiInstanceRelation, Resolver, TypeCoercion, TypeCoercionBase}
+import org.apache.spark.sql.catalyst.analysis.{AnsiTypeCoercion, MultiInstanceRelation, Resolver, TypeCoercion, TypeCoercionBase, UnresolvedAttribute}
 import org.apache.spark.sql.catalyst.catalog.{CatalogStorageFormat, CatalogTable}
 import org.apache.spark.sql.catalyst.catalog.CatalogTable.VIEW_STORING_ANALYZED_PLAN
 import org.apache.spark.sql.catalyst.expressions._
@@ -1243,6 +1243,34 @@ case class Pivot(
   final override val nodePatterns: Seq[TreePattern] = Seq(PIVOT)
 
   override protected def withNewChildInternal(newChild: LogicalPlan): Pivot = copy(child = newChild)
+}
+
+/**
+ * A constructor for creating a melt, which will later be converted to a [[Expand]] during the
+ * query analysis.
+ *
+ * @param ids                Id columns
+ * @param values             Value columns
+ * @param variableColumnName Name of the variable column
+ * @param valueColumnName    Name of the value column
+ * @param child              Child operator
+ */
+case class Melt(
+    ids: Seq[NamedExpression],
+    values: Seq[NamedExpression],
+    variableColumnName: String,
+    valueColumnName: String,
+    child: LogicalPlan) extends UnaryNode {
+  override lazy val resolved = false // Melt will be replaced after being resolved.
+  override def output: Seq[Attribute] =
+    ids.map(_.toAttribute) ++ Seq(
+      AttributeReference(variableColumnName, StringType, nullable = false)(),
+      UnresolvedAttribute.quotedString(valueColumnName)
+    )
+  override def metadataOutput: Seq[Attribute] = Nil
+  final override val nodePatterns: Seq[TreePattern] = Seq(MELT)
+
+  override protected def withNewChildInternal(newChild: LogicalPlan): Melt = copy(child = newChild)
 }
 
 /**

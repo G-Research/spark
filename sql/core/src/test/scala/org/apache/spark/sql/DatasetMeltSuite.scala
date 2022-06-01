@@ -20,7 +20,7 @@ package org.apache.spark.sql
 import org.apache.spark.sql.errors.QueryErrorsSuiteBase
 import org.apache.spark.sql.functions.sum
 import org.apache.spark.sql.test.SharedSparkSession
-import org.apache.spark.sql.types.{IntegerType, LongType, StringType, StructField, StructType}
+import org.apache.spark.sql.types._
 
 /**
  * Comprehensive tests for Dataset.melt.
@@ -56,51 +56,26 @@ class DatasetMeltSuite extends QueryTest
     StructField("var", StringType, nullable = false),
     StructField("val", StringType, nullable = true)
   ))
-  val meltedSchemaWithoutNulls: StructType = StructType(Seq(
-    StructField("id", IntegerType, nullable = false),
-    StructField("var", StringType, nullable = false),
-    StructField("val", StringType, nullable = false)
-  ))
 
-  test("overloaded melt without dropNulls") {
-    checkAnswer(
-      meltWideDataDs.melt(Array("id"), Array("str1", "str2"), "var", "val"),
-      meltWideDataDs.melt(Array("id"), Array("str1", "str2"), "var", "val", dropNulls = false)
-    )
-  }
-
-  test("overloaded melt without value and dropNulls") {
+  test("overloaded melt without values") {
     val ds = meltWideDataDs.select($"id", $"str1", $"str2")
     checkAnswer(
-      ds.melt(Array("id"), "var", "val"),
-      ds.melt(Array("id"), Array.empty, "var", "val", dropNulls = false)
+      ds.melt(Array($"id"), "var", "val"),
+      ds.melt(Array($"id"), Array.empty, "var", "val")
     )
   }
 
   test("melt with single id") {
-    // do not drop nulls
     val melted = meltWideDataDs
       .melt(
-        Array("id"),
-        Array("str1", "str2"),
+        Array($"id"),
+        Array($"str1", $"str2"),
         variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = false
+        valueColumnName = "val"
       )
+    melted.explain(true)
     assert(melted.schema === meltedSchema)
     checkAnswer(melted, meltedWideDataRows)
-
-    // drop nulls
-    val meltedWithoutNulls = meltWideDataDs
-      .melt(
-        Array("id"),
-        Array("str1", "str2"),
-        variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = true
-      )
-    assert(meltedWithoutNulls.schema === meltedSchemaWithoutNulls)
-    checkAnswer(meltedWithoutNulls, meltedWideDataRows.filter(row => !row.isNullAt(2)))
   }
 
   test("melt with two ids") {
@@ -115,14 +90,12 @@ class DatasetMeltSuite extends QueryTest
       Row(4, null, "str2", null)
     )
 
-    // do not drop nulls
     val melted = meltWideDataDs
       .melt(
-        Array("id", "int1"),
-        Array("str1", "str2"),
+        Array($"id", $"int1"),
+        Array($"str1", $"str2"),
         variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = false
+        valueColumnName = "val"
       )
     assert(melted.schema === StructType(Seq(
       StructField("id", IntegerType, nullable = false),
@@ -131,81 +104,32 @@ class DatasetMeltSuite extends QueryTest
       StructField("val", StringType, nullable = true)
     )))
     checkAnswer(melted, meltedRows)
-
-    // drop nulls
-    val meltedWithoutNulls = meltWideDataDs
-      .melt(
-        Array("id", "int1"),
-        Array("str1", "str2"),
-        variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = true
-      )
-    assert(meltedWithoutNulls.schema === StructType(Seq(
-      StructField("id", IntegerType, nullable = false),
-      StructField("int1", IntegerType, nullable = true),
-      StructField("var", StringType, nullable = false),
-      StructField("val", StringType, nullable = false)
-    )))
-    checkAnswer(meltedWithoutNulls, meltedRows.filter(row => !row.isNullAt(3)))
   }
 
   test("melt without ids") {
-    // do not drop nulls
     val melted = meltWideDataDs
       .melt(
         Array.empty,
-        Array("str1", "str2"),
+        Array($"str1", $"str2"),
         variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = false
+        valueColumnName = "val"
       )
     assert(melted.schema === StructType(Seq(
       StructField("var", StringType, nullable = false),
       StructField("val", StringType, nullable = true)
     )))
     checkAnswer(melted, meltedWideDataWithoutIdRows)
-
-    // drop nulls
-    val meltedWithoutNulls = meltWideDataDs
-      .melt(
-        Array.empty,
-        Array("str1", "str2"),
-        variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = true
-      )
-    assert(meltedWithoutNulls.schema === StructType(Seq(
-      StructField("var", StringType, nullable = false),
-      StructField("val", StringType, nullable = false)
-    )))
-    checkAnswer(meltedWithoutNulls, meltedWideDataWithoutIdRows.filter(row => !row.isNullAt(1)))
   }
 
   test("melt without values") {
-    // do not drop nulls
     val melted = meltWideDataDs.select($"id", $"str1", $"str2")
       .melt(
-        Array("id"),
-        Array.empty,
+        Array($"id"),
         variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = false
+        valueColumnName = "val"
       )
     assert(melted.schema === meltedSchema)
     checkAnswer(melted, meltedWideDataRows)
-
-    // do drop nulls
-    val meltedWithoutNulls = meltWideDataDs.select($"id", $"str1", $"str2")
-      .melt(
-        Array("id"),
-        Array.empty,
-        variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = true
-      )
-    assert(meltedWithoutNulls.schema === meltedSchemaWithoutNulls)
-    checkAnswer(meltedWithoutNulls, meltedWideDataRows.filter(row => !row.isNullAt(2)))
   }
 
   test("melt without ids or values") {
@@ -215,29 +139,13 @@ class DatasetMeltSuite extends QueryTest
         Array.empty,
         Array.empty,
         variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = false
+        valueColumnName = "val"
       )
     assert(melted.schema === StructType(Seq(
       StructField("var", StringType, nullable = false),
       StructField("val", StringType, nullable = true)
     )))
     checkAnswer(melted, meltedWideDataWithoutIdRows)
-
-    // drop nulls
-    val meltedWithoutNulls = meltWideDataDs.select($"str1", $"str2")
-      .melt(
-        Array.empty,
-        Array.empty,
-        variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = true
-      )
-    assert(meltedWithoutNulls.schema === StructType(Seq(
-      StructField("var", StringType, nullable = false),
-      StructField("val", StringType, nullable = false)
-    )))
-    checkAnswer(meltedWithoutNulls, meltedWideDataWithoutIdRows.filter(row => !row.isNullAt(1)))
   }
 
   test("melt with variable / value value columns") {
@@ -246,11 +154,10 @@ class DatasetMeltSuite extends QueryTest
       .withColumnRenamed("str1", "var")
       .withColumnRenamed("str2", "val")
       .melt(
-        Array("id"),
-        Array("var", "val"),
+        Array($"id"),
+        Array($"var", $"val"),
         variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = false
+        valueColumnName = "val"
       )
     checkAnswer(melted, meltedWideDataRows.map(row => Row(
       row.getInt(0),
@@ -266,11 +173,10 @@ class DatasetMeltSuite extends QueryTest
       .withColumnRenamed("int1", "var")
       .withColumnRenamed("long1", "val")
       .melt(
-        Array("id"),
-        Array("str1", "str2"),
+        Array($"id"),
+        Array($"str1", $"str2"),
         variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = false
+        valueColumnName = "val"
       )
     checkAnswer(melted2, meltedWideDataRows)
   }
@@ -278,11 +184,10 @@ class DatasetMeltSuite extends QueryTest
   test("melt with incompatible value types") {
     val e = intercept[AnalysisException] {
       meltWideDataDs.melt(
-        Array("id"),
-        Array("str1", "int1"),
+        Array($"id"),
+        Array($"str1", $"int1"),
         variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = false
+        valueColumnName = "val"
       )
     }
     checkErrorClass(
@@ -294,13 +199,11 @@ class DatasetMeltSuite extends QueryTest
   }
 
   test("melt with compatible value types") {
-    // do not drop nulls
     val melted = meltWideDataDs.melt(
-      Array("id"),
-      Array("int1", "long1"),
+      Array($"id"),
+      Array($"int1", $"long1"),
       variableColumnName = "var",
-      valueColumnName = "val",
-      dropNulls = false
+      valueColumnName = "val"
     )
     assert(melted.schema === StructType(Seq(
       StructField("id", IntegerType, nullable = false),
@@ -319,72 +222,59 @@ class DatasetMeltSuite extends QueryTest
       Row(4, "long1", null)
     )
     checkAnswer(melted, meltedRows)
-
-    // drop nulls
-    val meltedWithoutNulls = meltWideDataDs.melt(
-      Array("id"),
-      Array("int1", "long1"),
-      variableColumnName = "var",
-      valueColumnName = "val",
-      dropNulls = true
-    )
-    assert(meltedWithoutNulls.schema === StructType(Seq(
-      StructField("id", IntegerType, nullable = false),
-      StructField("var", StringType, nullable = false),
-      StructField("val", LongType, nullable = false)
-    )))
-    checkAnswer(meltedWithoutNulls, meltedRows.filter(row => !row.isNullAt(2)))
   }
 
   test("melt with invalid arguments") {
     // melting where id column does not exist
     val e1 = intercept[AnalysisException] {
       meltWideDataDs.melt(
-        Array("1", "2"),
-        Array("str1", "str2"),
+        Array($"1", $"2"),
+        Array($"str1", $"str2"),
         variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = false
+        valueColumnName = "val"
       )
     }
     checkErrorClass(
       exception = e1,
-      errorClass = "MISSING_COLUMNS",
-      msg = "Columns [1, 2] do not exist. Did you mean any of the following? [id, int1, long1]"
+      errorClass = "MISSING_COLUMN",
+      msg = "Column '`1`' does not exist\\. Did you mean one " +
+        "of the following\\? \\[id, int1, str1, str2, long1\\];(\n.*)*",
+      matchMsg = true
     )
 
     // melting where value column does not exist
     val e2 = intercept[AnalysisException] {
       meltWideDataDs.melt(
-        Array("id"),
-        Array("does", "not", "exist"),
+        Array($"id"),
+        Array($"does", $"not", $"exist"),
         variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = false
+        valueColumnName = "val"
       )
     }
     checkErrorClass(
       exception = e2,
-      errorClass = "MISSING_COLUMNS",
-      msg = "Columns [does, not, exist] do not exist. Did you mean any of the following? " +
-        "[str1, str2, int1, long1]"
+      errorClass = "MISSING_COLUMN",
+      msg = "Column 'does' does not exist\\. Did you mean one " +
+        "of the following\\? \\[id, int1, long1, str1, str2\\];(\n.*)*",
+      matchMsg = true
     )
 
     // melting with column in both ids and values
     val e3 = intercept[AnalysisException] {
       meltWideDataDs.melt(
-        Array("id", "str1", "int1"),
-        Array("str1", "str2", "int1", "long1"),
+        Array($"id", $"str1", $"int1"),
+        Array($"str1", $"str2", $"int1", $"long1"),
         variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = false
+        valueColumnName = "val"
       )
     }
     checkErrorClass(
       exception = e3,
       errorClass = "MELT_ID_AND_VALUE_COLUMNS_NOT_DISJOINT",
-      msg = "The melt id columns [id, str1, int1] and value columns [str1, str2, int1, long1] " +
-        "must be disjoint, but these columns are both: [str1, int1]"
+      msg = "The melt id columns \\[id#\\d+, str1#\\d+, int1#\\d+\\] " +
+        "and value columns \\[str1#\\d+, str2#\\d+, int1#\\d+, long1#\\d+L\\] " +
+        "must be disjoint, but these columns are both: \\[str1#\\d+, int1#\\d+\\]",
+      matchMsg = true
     )
 
     // melting with empty list of value columns
@@ -394,8 +284,7 @@ class DatasetMeltSuite extends QueryTest
         Array.empty,
         Array.empty,
         variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = false
+        valueColumnName = "val"
       )
     }
     checkErrorClass(
@@ -407,11 +296,10 @@ class DatasetMeltSuite extends QueryTest
 
     val e5 = intercept[AnalysisException] {
       meltWideDataDs.melt(
-        Array("id"),
+        Array($"id"),
         Array.empty,
         variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = false
+        valueColumnName = "val"
       )
     }
     checkErrorClass(
@@ -424,70 +312,18 @@ class DatasetMeltSuite extends QueryTest
     // melting without giving values and no non-id columns
     val e6 = intercept[AnalysisException] {
       meltWideDataDs.select($"id", $"str1", $"str2").melt(
-        Array("id", "str1", "str2"),
+        Array($"id", $"str1", $"str2"),
         Array.empty,
         variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = false
+        valueColumnName = "val"
       )
     }
     checkErrorClass(
       exception = e6,
       errorClass = "MELT_REQUIRES_VALUE_COLUMNS",
       msg = "At least one non-id column is required to melt. " +
-        "All columns are id columns: [id, str1, str2]"
-    )
-
-    // melting with id column `variable`
-    val e7 = intercept[AnalysisException] {
-      meltWideDataDs.withColumn("var", $"id").melt(
-        Array("id", "var"),
-        Array("str1", "str2"),
-        variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = false
-      )
-    }
-    checkErrorClass(
-      exception = e7,
-      errorClass = "MELT_VARIABLE_COLUMN_IS_ID_COLUMN",
-      msg = "The melt variable column name 'var' must not be part of the id column names: [id, var]"
-    )
-    checkAnswer(
-      meltWideDataDs.withColumn("var", $"id").melt(
-        Array("id", "var"),
-        Array("str1", "str2"),
-        variableColumnName = "variable",
-        valueColumnName = "value",
-        dropNulls = false
-      ),
-      meltedWideDataRows.map( row => Row(row(0), row(0), row(1), row(2)))
-    )
-
-    // melting with id column `value`
-    val e8 = intercept[AnalysisException] {
-      meltWideDataDs.withColumn("val", $"id").melt(
-        Array("id", "val"),
-        Array("str1", "str2"),
-        variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = false
-      )
-    }
-    checkErrorClass(
-      exception = e8,
-      errorClass = "MELT_VALUE_COLUMN_IS_ID_COLUMN",
-      msg = "The melt value column name 'val' must not be part of the id column names: [id, val]"
-    )
-    checkAnswer(
-      meltWideDataDs.withColumn("val", $"id").melt(
-        Array("id", "val"),
-        Array("str1", "str2"),
-        variableColumnName = "variable",
-        valueColumnName = "value",
-        dropNulls = false
-      ),
-      meltedWideDataRows.map( row => Row(row(0), row(0), row(1), row(2)))
+        "All columns are id columns: \\[id#\\d+, str1#\\d+, str2#\\d+\\]",
+      matchMsg = true
     )
   }
 
@@ -495,7 +331,7 @@ class DatasetMeltSuite extends QueryTest
     // see test "pivot courses" in DataFramePivotSuite
     val pivoted = courseSales.groupBy("year").pivot("course", Array("dotNET", "Java"))
       .agg(sum($"earnings"))
-    val melted = pivoted.melt(Array("year"), "course", "earnings")
+    val melted = pivoted.melt(Array($"year"), "course", "earnings")
     val expected = courseSales.groupBy("year", "course").sum("earnings")
     checkAnswer(melted, expected)
   }
@@ -507,17 +343,16 @@ class DatasetMeltSuite extends QueryTest
       .withColumnRenamed("str2", "str.two")
 
     val melted = ds.melt(
-        Array("`an.id`"),
-        Array("`str.one`", "`str.two`"),
+        Array($"`an.id`"),
+        Array($"`str.one`", $"`str.two`"),
         variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = false
+        valueColumnName = "val"
       )
     checkAnswer(melted, meltedWideDataRows.map(row => Row(
         row.getInt(0),
         row.getString(1) match {
-          case "str1" => "`str.one`"
-          case "str2" => "`str.two`"
+          case "str1" => "str.one"
+          case "str2" => "str.two"
         },
         row.getString(2)
       ))
@@ -526,17 +361,18 @@ class DatasetMeltSuite extends QueryTest
     // without backticks, this references struct fields, which do not exist
     val e = intercept[AnalysisException] {
       ds.melt(
-        Array("an.id"),
-        Array("str.one", "str.two"),
+        Array($"an.id"),
+        Array($"str.one", $"str.two"),
         variableColumnName = "var",
-        valueColumnName = "val",
-        dropNulls = false
+        valueColumnName = "val"
       ).collect()  // TODO: check if collect is really needed
     }
     checkErrorClass(
       exception = e,
-      errorClass = "MISSING_COLUMNS",
-      msg = "Columns [an.id] do not exist. Did you mean any of the following? [an.id, int1, long1]"
+      errorClass = "MISSING_COLUMN",
+      msg = "Column 'an.id' does not exist\\. Did you mean one " +
+        "of the following\\? \\[an.id, int1, long1, str.one, str.two\\];(\n.*)*",
+      matchMsg = true
     )
   }
 
@@ -549,9 +385,10 @@ class DatasetMeltSuite extends QueryTest
         $"str2".as("two")
       ).as("str")
     )
+    ds.select($"an.id", $"str.one", $"str.two").show()
 
     checkAnswer(
-      ds.melt(Array("an.id"), Array("str.one", "str.two"), "var", "val", false),
+      ds.melt(Array($"an.id"), Array($"str.one", $"str.two"), "var", "val"),
       meltedWideDataRows.map(row => Row(
         row.getInt(0),
         row.getString(1) match {
