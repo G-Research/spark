@@ -188,13 +188,13 @@ class DatasetMeltSuite extends QueryTest
         Array($"str1", $"int1"),
         variableColumnName = "var",
         valueColumnName = "val"
-      )
+      ).collect()
     }
     checkErrorClass(
       exception = e,
       errorClass = "MELT_VALUE_DATA_TYPE_MISMATCH",
       msg = "Melt value columns must have compatible data types, " +
-        "but string and int are not compatible"
+        "some data types are not compatible: [StringType, IntegerType]"
     )
   }
 
@@ -261,9 +261,9 @@ class DatasetMeltSuite extends QueryTest
 
     // melting with column in both ids and values
     val e3 = intercept[AnalysisException] {
-      meltWideDataDs.melt(
-        Array($"id", $"str1", $"int1"),
-        Array($"str1", $"str2", $"int1", $"long1"),
+      meltWideDataDs.withColumn("int2", $"int1").melt(
+        Array($"id", $"int1", $"long1"),
+        Array($"int1", $"int2", $"long1"),
         variableColumnName = "var",
         valueColumnName = "val"
       )
@@ -271,9 +271,9 @@ class DatasetMeltSuite extends QueryTest
     checkErrorClass(
       exception = e3,
       errorClass = "MELT_ID_AND_VALUE_COLUMNS_NOT_DISJOINT",
-      msg = "The melt id columns \\[id#\\d+, str1#\\d+, int1#\\d+\\] " +
-        "and value columns \\[str1#\\d+, str2#\\d+, int1#\\d+, long1#\\d+L\\] " +
-        "must be disjoint, but these columns are either: \\[str1#\\d+, int1#\\d+\\]",
+      msg = "The melt id columns \\[id#\\d+, int1#\\d+, long1#\\d+L\\] " +
+        "and value columns \\[int1#\\d+, int2#\\d+, long1#\\d+L\\] " +
+        "must be disjoint, but these columns are either: \\[int1#\\d+, long1#\\d+L\\]",
       matchMsg = true
     )
 
@@ -291,7 +291,7 @@ class DatasetMeltSuite extends QueryTest
       exception = e4,
       errorClass = "MELT_VALUE_DATA_TYPE_MISMATCH",
       msg = "Melt value columns must have compatible data types, " +
-        "but int and string are not compatible"
+        "some data types are not compatible: [IntegerType, StringType, LongType]"
     )
 
     val e5 = intercept[AnalysisException] {
@@ -306,7 +306,7 @@ class DatasetMeltSuite extends QueryTest
       exception = e5,
       errorClass = "MELT_VALUE_DATA_TYPE_MISMATCH",
       msg = "Melt value columns must have compatible data types, " +
-        "but string and int are not compatible"
+        "some data types are not compatible: [StringType, IntegerType, LongType]"
     )
 
     // melting without giving values and no non-id columns

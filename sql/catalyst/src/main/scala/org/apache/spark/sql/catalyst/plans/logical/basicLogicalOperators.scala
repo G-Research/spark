@@ -1253,6 +1253,7 @@ case class Pivot(
  * @param values             Value columns
  * @param variableColumnName Name of the variable column
  * @param valueColumnName    Name of the value column
+ * @param valueType          Type of value column
  * @param child              Child operator
  */
 case class Melt(
@@ -1260,12 +1261,17 @@ case class Melt(
     values: Seq[NamedExpression],
     variableColumnName: String,
     valueColumnName: String,
+    valueType: Option[DataType],
     child: LogicalPlan) extends UnaryNode {
   override lazy val resolved = false // Melt will be replaced after being resolved.
   override def output: Seq[Attribute] =
     ids.map(_.toAttribute) ++ Seq(
       AttributeReference(variableColumnName, StringType, nullable = false)(),
-      UnresolvedAttribute.quotedString(valueColumnName)
+      valueType.map(
+        AttributeReference(valueColumnName, _, nullable = values.exists(_.nullable))()
+      ).getOrElse(
+        UnresolvedAttribute.quotedString(valueColumnName)
+      )
     )
   override def metadataOutput: Seq[Attribute] = Nil
   final override val nodePatterns: Seq[TreePattern] = Seq(MELT)

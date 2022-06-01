@@ -2078,6 +2078,7 @@ class Dataset[T] private[sql](
       values.map(_.named),
       variableColumnName,
       valueColumnName,
+      None,
       logicalPlan
     )
   }

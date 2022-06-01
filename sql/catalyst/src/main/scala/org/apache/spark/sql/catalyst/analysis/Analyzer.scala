@@ -516,9 +516,9 @@ class Analyzer(override val catalogManager: CatalogManager)
         if child.resolved && groupByOpt.isDefined && hasUnresolvedAlias(groupByOpt.get) =>
         Pivot(Some(assignAliases(groupByOpt.get)), pivotColumn, pivotValues, aggregates, child)
 
-      case Melt(ids, values, variableColumnName, valueColumnName, child)
-        if child.resolved && (hasUnresolvedAlias(ids) || hasUnresolvedAlias(values)) =>
-        Melt(assignAliases(ids), assignAliases(values), variableColumnName, valueColumnName, child)
+      case m: Melt if m.child.resolved &&
+        (hasUnresolvedAlias(m.ids) || hasUnresolvedAlias(m.values)) =>
+        m.copy(ids = assignAliases(m.ids), values = assignAliases(m.values))
 
       case Project(projectList, child) if child.resolved && hasUnresolvedAlias(projectList) =>
         Project(assignAliases(projectList), child)
@@ -871,10 +871,21 @@ class Analyzer(override val catalogManager: CatalogManager)
   object ResolveMelt extends Rule[LogicalPlan] {
     def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperatorsWithPruning(
       _.containsPattern(MELT), ruleId) {
-      case m: Melt if !m.childrenResolved || !m.ids.forall(_.resolved)
-        || !m.values.forall(_.resolved) => m
 
-      case Melt(ids, values, variableColumnName, valueColumnName, child) =>
+      // once children and ids are resolved, we can determine values, if non were given
+      case m: Melt if m.childrenResolved && m.ids.forall(_.resolved) && m.values.isEmpty =>
+        // if there are no values, we cannot melt
+        val values = m.child.output.diff(m.ids)
+        if (values.isEmpty) {
+          throw new AnalysisException("MELT_REQUIRES_VALUE_COLUMNS", Array(m.ids.mkString(", ")))
+        }
+        m.copy(values = values)
+
+      case m: Melt if !m.childrenResolved || !m.ids.forall(_.resolved)
+        || m.values.isEmpty || !m.values.forall(_.resolved) || m.valueType.isEmpty => m
+
+      // TypeCoercionBase.MeltCoercion determines valueType once values are set and resolved
+      case m @ Melt(ids, values, _, _, valueType, child) =>
         // values should be disjoint to ids
         if (values.intersect(ids).nonEmpty) {
           throw new AnalysisException("MELT_ID_AND_VALUE_COLUMNS_NOT_DISJOINT", Array(
@@ -882,43 +893,18 @@ class Analyzer(override val catalogManager: CatalogManager)
           ))
         }
 
-        // if no values given, all non-id columns are melted
-        val valueAttrs = Some(values.map(_.toAttribute)).filter(_.nonEmpty)
-          .getOrElse(child.output.diff(ids))
-
-        // if no values are given, we cannot melt
-        if (valueAttrs.isEmpty) {
-          throw new AnalysisException("MELT_REQUIRES_VALUE_COLUMNS", Array(ids.mkString(", ")))
-        }
-
-        // all melted values have to have the same type
-        val valueType = valueAttrs.map(_.dataType).reduce(tightestCommonType)
-
-        // construct output attributes
-        val idAttrs = ids.map(_.toAttribute)
-        val variableAttr = AttributeReference(variableColumnName, StringType, nullable = false)()
-        val valueAttr = AttributeReference(valueColumnName, valueType, nullable = true)()
-        val output = idAttrs ++ Seq(variableAttr, valueAttr)
-
         // construct melt expressions for Expand
-        val exprs: Seq[Seq[Expression]] = valueAttrs.map {
+        val idAttrs = m.output.init.init
+        val exprs: Seq[Seq[Expression]] = values.map {
           value => idAttrs ++ Seq(
             // TODO: value.prettyName?
             Literal(value.name),
-            if (value.dataType == valueType) value else Cast(value, valueType)
+            if (value.dataType == valueType.get) value else Cast(value, valueType.get)
           )
         }
 
         // expand the melt expressions
-        Expand(exprs, output, child)
-    }
-
-    private def tightestCommonType(d1: DataType, d2: DataType): DataType = {
-      val typeCoercion = if (SQLConf.get.ansiEnabled) AnsiTypeCoercion else TypeCoercion
-      typeCoercion.findTightestCommonType(d1, d2).getOrElse(
-        throw new AnalysisException("MELT_VALUE_DATA_TYPE_MISMATCH",
-          Array(d1.simpleString, d2.simpleString))
-      )
+        Expand(exprs, m.output, child)
     }
   }
 

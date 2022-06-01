@@ -276,7 +276,7 @@
   },
   "MELT_VALUE_DATA_TYPE_MISMATCH" : {
     "message" : [
-      "Melt value columns must have compatible data types, but <dataType1> and <dataType2> are not compatible"
+      "Melt value columns must have compatible data types, some data types are not compatible: [<types>]"
     ],
     "sqlState" : "42000"
   },

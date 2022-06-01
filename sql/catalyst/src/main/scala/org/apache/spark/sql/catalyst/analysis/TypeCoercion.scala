@@ -18,11 +18,10 @@
 package org.apache.spark.sql.catalyst.analysis
 
 import javax.annotation.Nullable
-
 import scala.annotation.tailrec
 import scala.collection.mutable
-
 import org.apache.spark.internal.Logging
+import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.aggregate._
 import org.apache.spark.sql.catalyst.plans.logical._
@@ -737,6 +736,24 @@ abstract class TypeCoercionBase {
   }
 
   /**
+   * Determines the value type of a [[Melt]].
+   */
+  object MeltCoercion extends Rule[LogicalPlan] {
+    override def apply(plan: LogicalPlan): LogicalPlan =
+      plan resolveOperators {
+        case m: Melt if m.values.nonEmpty && m.values.forall(_.resolved) && m.valueType.isEmpty =>
+          val valueDataTypes = m.values.map(_.dataType).toSet
+          val valueDataType = findWiderTypeWithoutStringPromotion(valueDataTypes.toSeq)
+          if (valueDataType.isEmpty) {
+            throw new AnalysisException("MELT_VALUE_DATA_TYPE_MISMATCH", Array(
+              valueDataTypes.mkString(", ")
+            ))
+          }
+          m.copy(valueType = valueDataType)
+      }
+  }
+
+  /**
    * Cast WindowFrame boundaries to the type they operate upon.
    */
   object WindowFrameCoercion extends TypeCoercionRule {
@@ -806,6 +823,7 @@ abstract class TypeCoercionBase {
 object TypeCoercion extends TypeCoercionBase {
 
   override def typeCoercionRules: List[Rule[LogicalPlan]] =
+    MeltCoercion ::
     WidenSetOperationTypes ::
     new CombinedTypeCoercionRule(
       InConversion ::
