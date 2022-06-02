@@ -902,7 +902,11 @@ class Analyzer(override val catalogManager: CatalogManager)
 
         // construct melt expressions for Expand
         val exprs: Seq[Seq[Expression]] = valueAttrs.map {
-          value => idAttrs ++ Seq(Literal(value.name), Cast(value, valueType))
+          value => idAttrs ++ Seq(
+            // TODO: value.prettyName?
+            Literal(value.name),
+            if (value.dataType == valueType) value else Cast(value, valueType)
+          )
         }
 
         // expand the melt expressions

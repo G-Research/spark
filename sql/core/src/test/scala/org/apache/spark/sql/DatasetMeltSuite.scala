@@ -273,7 +273,7 @@ class DatasetMeltSuite extends QueryTest
       errorClass = "MELT_ID_AND_VALUE_COLUMNS_NOT_DISJOINT",
       msg = "The melt id columns \\[id#\\d+, str1#\\d+, int1#\\d+\\] " +
         "and value columns \\[str1#\\d+, str2#\\d+, int1#\\d+, long1#\\d+L\\] " +
-        "must be disjoint, but these columns are both: \\[str1#\\d+, int1#\\d+\\]",
+        "must be disjoint, but these columns are either: \\[str1#\\d+, int1#\\d+\\]",
       matchMsg = true
     )
 

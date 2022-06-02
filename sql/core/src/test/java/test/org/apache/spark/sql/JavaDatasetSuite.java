@@ -23,7 +23,6 @@ import java.sql.Date;
 import java.sql.Timestamp;
 import java.time.*;
 import java.util.*;
-import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
 
 import org.apache.spark.api.java.Optional;
