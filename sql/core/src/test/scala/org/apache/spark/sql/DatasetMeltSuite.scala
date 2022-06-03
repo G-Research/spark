@@ -270,6 +270,14 @@ class DatasetMeltSuite extends QueryTest
     checkAnswer(melted, meltedRows)
   }
 
+  test("melt and drop nulls") {
+    checkAnswer(
+      meltWideDataDs
+        .melt(Array($"id"), Array($"str1", $"str2"), "var", "val")
+        .where($"val".isNotNull),
+      meltedWideDataRows.filter(_.getString(2) != null))
+  }
+
   test("melt with invalid arguments") {
     // melting where id column does not exist
     val e1 = intercept[AnalysisException] {

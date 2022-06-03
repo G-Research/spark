@@ -2014,13 +2014,12 @@ class Dataset[T] private[sql](
 
   /**
    * Unpivot a DataFrame from wide format to long format, optionally
-   * leaving identifier variables set.
+   * leaving identifier columns set.
    *
    * This function is useful to massage a DataFrame into a format where some
-   * columns are identifier "variables" ("id"), while all other columns,
-   * considered measured variables ("values"), are "unpivoted" to the rows,
-   * leaving just two non-id columns, named as given by `variableColumnName`
-   * and `valueColumnName`.
+   * columns are identifier columns ("ids"), while all other columns ("values")
+   * are "unpivoted" to the rows, leaving just two non-id columns, named as given
+   * by `variableColumnName` and `valueColumnName`.
    *
    * {{{
    *   val df = Seq((1, 11, 12L), (2, 21, 22L)).toDF("id", "int", "long")
@@ -2033,7 +2032,7 @@ class Dataset[T] private[sql](
    *   // |  2| 21|  22|
    *   // +---+---+----+
    *
-   *   df.melt(Seq("id")).show()
+   *   df.melt(Array($"id"), Array($"int", $"long"), "variable", "value").show()
    *   // output:
    *   // +---+--------+-----+
    *   // | id|variable|value|
@@ -2043,8 +2042,7 @@ class Dataset[T] private[sql](
    *   // |  2|     int|   21|
    *   // |  2|    long|   22|
    *   // +---+--------+-----+
-   *
-   *   df.melt(Seq("id")).printSchema
+   *   // schema:
    *   //root
    *   // |-- id: integer (nullable = false)
    *   // |-- variable: string (nullable = false)
@@ -2055,7 +2053,7 @@ class Dataset[T] private[sql](
    * "variable" and "value" columns. Columns given to both, `ids` and `values`, are ignored
    * as `values`. This allows to use `"*"` as `values` to melt all non-id columns.
    *
-   * All "value" columns must be of the same data type. If they are not the same data type,
+   * All "value" columns must be of compatible data type. If they are not the same data type,
    * all "value" columns are cast to the nearest common data type. For instance,
    * types `IntegerType` and `LongType` are compatible and cast to `LongType`,
    * while `IntegerType` and `StringType` are not compatible and `melt` fails.
