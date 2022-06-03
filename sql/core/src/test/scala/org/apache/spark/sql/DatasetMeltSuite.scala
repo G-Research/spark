@@ -189,11 +189,11 @@ class DatasetMeltSuite extends QueryTest
       StructField("var", StringType, nullable = false),
       StructField("val", LongType, nullable = true))))
 
-    checkAnswer(melted, meltWideDataDs.collect().flatMap(row => Seq(
+    checkAnswer(melted, meltWideDataDs.collect().flatMap { row => Seq(
       Row(row.id, "id", row.id),
       Row(row.id, "int1", row.int1.orNull),
       Row(row.id, "long1", row.long1.orNull)
-    )))
+    )})
   }
 
   test("melt with expressions") {
@@ -211,21 +211,22 @@ class DatasetMeltSuite extends QueryTest
       StructField("var", StringType, nullable = false),
       StructField("val", LongType, nullable = true))))
 
-    checkAnswer(melted, meltWideDataDs.collect().flatMap(row => Seq(
-      Row(
-        row.id * 10,
-        row.str1,
-        "sum",
-        // sum of int1 and long1 when both are set, or null otherwise
-        row.int1.flatMap(i => row.long1.map(l => i + l)).orNull
-      ), Row(
-        row.id * 10,
-        row.str1,
-        "len",
-        // length of str2 if set, or null otherwise
-        Option(row.str2).map(_.length).orNull,
-      ))
-    ))
+    checkAnswer(melted, meltWideDataDs.collect().flatMap { row =>
+      Seq(
+        Row(
+          row.id * 10,
+          row.str1,
+          "sum",
+          // sum of int1 and long1 when both are set, or null otherwise
+          row.int1.flatMap(i => row.long1.map(l => i + l)).orNull),
+        Row(
+          row.id * 10,
+          row.str1,
+          "len",
+          // length of str2 if set, or null otherwise
+          Option(row.str2).map(_.length).orNull)
+      )
+    })
   }
 
   test("melt with variable / value columns") {
