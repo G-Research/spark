@@ -256,12 +256,6 @@
       "Key <keyValue> does not exist. Use `try_element_at` to tolerate non-existent key and return NULL instead. If necessary set <config> to \"false\" to bypass this error."
     ]
   },
-  "MELT_ID_AND_VALUE_COLUMNS_NOT_DISJOINT" : {
-    "message" : [
-      "The melt id columns [<ids>] and value columns [<values>] must be disjoint, but these columns are either: [<either>]"
-    ],
-    "sqlState" : "42000"
-  },
   "MELT_REQUIRES_VALUE_COLUMNS" : {
     "message" : [
       "At least one non-id column is required to melt. All columns are id columns: [<ids>]"

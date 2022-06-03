@@ -1246,14 +1246,23 @@ case class Pivot(
 }
 
 /**
- * A constructor for creating a melt, which will later be converted to a [[Expand]] during the
- * query analysis.
+ * A constructor for creating a melt, which will later be converted to a [[Expand]]
+ * during the query analysis.
+ *
+ * An empty values array will be replaced during analysis with all resolved outputs of child except
+ * the ids. This expansion allows to easily melt all non-id columns.
+ *
+ * The type of the value column is derived from all value columns during analysis once all values
+ * are resolved. All values' types have to be compatible, otherwise the result value column cannot
+ * be assigned the individual values and an AnalysisException is thrown.
+ *
+ * @see `org.apache.spark.sql.catalyst.analysis.TypeCoercionBase.MeltCoercion`
  *
  * @param ids                Id columns
- * @param values             Value columns
+ * @param values             Value columns to melt
  * @param variableColumnName Name of the variable column
  * @param valueColumnName    Name of the value column
- * @param valueType          Type of value column
+ * @param valueType          Type of value column once known
  * @param child              Child operator
  */
 case class Melt(

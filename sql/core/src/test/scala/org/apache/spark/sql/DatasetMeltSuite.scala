@@ -139,6 +139,15 @@ class DatasetMeltSuite extends QueryTest
         valueColumnName = "val")
     assert(melted.schema === meltedSchema)
     checkAnswer(melted, meltedWideDataRows)
+
+    val melted2 = meltWideDataDs.select($"id", $"str1", $"str2")
+      .melt(
+        Array($"id"),
+        Array.empty,
+        variableColumnName = "var",
+        valueColumnName = "val")
+    assert(melted2.schema === meltedSchema)
+    checkAnswer(melted2, meltedWideDataRows)
   }
 
   test("melt without ids or values") {
@@ -165,6 +174,26 @@ class DatasetMeltSuite extends QueryTest
       StructField("var", StringType, nullable = false),
       StructField("val", StringType, nullable = true))))
     checkAnswer(melted, meltedWideDataWithoutIdRows)
+  }
+
+  test("melt with id and star values") {
+    val melted = meltWideDataDs.select($"id", $"int1", $"long1")
+      .melt(
+        Array($"id"),
+        Array($"*"),
+        variableColumnName = "var",
+        valueColumnName = "val")
+
+    assert(melted.schema === StructType(Seq(
+      StructField("id", IntegerType, nullable = false),
+      StructField("var", StringType, nullable = false),
+      StructField("val", LongType, nullable = true))))
+
+    checkAnswer(melted, meltWideDataDs.collect().flatMap(row => Seq(
+      Row(row.id, "id", row.id),
+      Row(row.id, "int1", row.int1.orNull),
+      Row(row.id, "long1", row.long1.orNull)
+    )))
   }
 
   test("melt with expressions") {
@@ -216,17 +245,6 @@ class DatasetMeltSuite extends QueryTest
         case "str2" => "val"
       },
       row.getString(2))))
-
-    // with un-referenced column `variable` and `value`
-    val melted2 = meltWideDataDs
-      .withColumnRenamed("int1", "var")
-      .withColumnRenamed("long1", "val")
-      .melt(
-        Array($"id"),
-        Array($"str1", $"str2"),
-        variableColumnName = "var",
-        valueColumnName = "val")
-    checkAnswer(melted2, meltedWideDataRows)
   }
 
   test("melt with incompatible value types") {
@@ -311,28 +329,26 @@ class DatasetMeltSuite extends QueryTest
         "of the following\\? \\[id, int1, long1, str1, str2\\];(\n.*)*",
       matchMsg = true)
 
-    // melting with column in both ids and values
+    // melting with empty list of value columns
+    // where potential value columns are of incompatible types
     val e3 = intercept[AnalysisException] {
-      meltWideDataDs.withColumn("int2", $"int1").melt(
-        Array($"id", $"int1", $"long1"),
-        Array($"int1", $"int2", $"long1"),
+      meltWideDataDs.melt(
+        Array.empty,
+        Array.empty,
         variableColumnName = "var",
         valueColumnName = "val"
       )
     }
     checkErrorClass(
       exception = e3,
-      errorClass = "MELT_ID_AND_VALUE_COLUMNS_NOT_DISJOINT",
-      msg = "The melt id columns \\[id#\\d+, int1#\\d+, long1#\\d+L\\] " +
-        "and value columns \\[int1#\\d+, int2#\\d+, long1#\\d+L\\] " +
-        "must be disjoint, but these columns are either: \\[int1#\\d+, long1#\\d+L\\]",
-      matchMsg = true)
+      errorClass = "MELT_VALUE_DATA_TYPE_MISMATCH",
+      msg = "Melt value columns must have compatible data types, " +
+        "some data types are not compatible: [IntegerType, StringType, LongType]")
 
-    // melting with empty list of value columns
-    // where potential value columns are of incompatible types
+    // melting with star id columns so that no value columns are left
     val e4 = intercept[AnalysisException] {
       meltWideDataDs.melt(
-        Array.empty,
+        Array($"*"),
         Array.empty,
         variableColumnName = "var",
         valueColumnName = "val"
@@ -340,21 +356,6 @@ class DatasetMeltSuite extends QueryTest
     }
     checkErrorClass(
       exception = e4,
-      errorClass = "MELT_VALUE_DATA_TYPE_MISMATCH",
-      msg = "Melt value columns must have compatible data types, " +
-        "some data types are not compatible: [IntegerType, StringType, LongType]")
-
-    // melting with star id columns so that no value columns are left
-    val e5 = intercept[AnalysisException] {
-      meltWideDataDs.melt(
-        Array($"*"),
-        Array.empty,
-        variableColumnName = "var",
-        valueColumnName = "val"
-      )
-    }
-    checkErrorClass(
-      exception = e5,
       errorClass = "MELT_REQUIRES_VALUE_COLUMNS",
       msg = "At least one non-id column is required to melt. " +
         "All columns are id columns: \\[id#\\d+, str1#\\d+, str2#\\d+, int1#\\d+, long1#\\d+L\\]",
@@ -362,7 +363,7 @@ class DatasetMeltSuite extends QueryTest
 
     // melting with star value columns
     // where potential value columns are of incompatible types
-    val e6 = intercept[AnalysisException] {
+    val e5 = intercept[AnalysisException] {
       meltWideDataDs.melt(
         Array.empty,
         Array($"*"),
@@ -371,27 +372,13 @@ class DatasetMeltSuite extends QueryTest
       )
     }
     checkErrorClass(
-      exception = e6,
+      exception = e5,
       errorClass = "MELT_VALUE_DATA_TYPE_MISMATCH",
       msg = "Melt value columns must have compatible data types, " +
         "some data types are not compatible: [IntegerType, StringType, LongType]")
 
-    val e7 = intercept[AnalysisException] {
-      meltWideDataDs.melt(
-        Array($"id"),
-        Array.empty,
-        variableColumnName = "var",
-        valueColumnName = "val"
-      )
-    }
-    checkErrorClass(
-      exception = e7,
-      errorClass = "MELT_VALUE_DATA_TYPE_MISMATCH",
-      msg = "Melt value columns must have compatible data types, " +
-        "some data types are not compatible: [StringType, IntegerType, LongType]")
-
     // melting without giving values and no non-id columns
-    val e8 = intercept[AnalysisException] {
+    val e6 = intercept[AnalysisException] {
       meltWideDataDs.select($"id", $"str1", $"str2").melt(
         Array($"id", $"str1", $"str2"),
         Array.empty,
@@ -400,7 +387,7 @@ class DatasetMeltSuite extends QueryTest
       )
     }
     checkErrorClass(
-      exception = e8,
+      exception = e6,
       errorClass = "MELT_REQUIRES_VALUE_COLUMNS",
       msg = "At least one non-id column is required to melt. " +
         "All columns are id columns: \\[id#\\d+, str1#\\d+, str2#\\d+\\]",

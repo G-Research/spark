@@ -2050,16 +2050,15 @@ class Dataset[T] private[sql](
    * }}}
    *
    * When no "id" columns are given, the unpivoted DataFrame consists of only the
-   * "variable" and "value" columns. Columns given to both, `ids` and `values`, are ignored
-   * as `values`. This allows to use `"*"` as `values` to melt all non-id columns.
+   * "variable" and "value" columns.
    *
    * All "value" columns must be of compatible data type. If they are not the same data type,
    * all "value" columns are cast to the nearest common data type. For instance,
    * types `IntegerType` and `LongType` are compatible and cast to `LongType`,
    * while `IntegerType` and `StringType` are not compatible and `melt` fails.
    *
-   * @param ids Names of the id columns
-   * @param values Names of the value columns
+   * @param ids Id columns
+   * @param values Value columns to melt
    * @param variableColumnName Name of the variable column
    * @param valueColumnName Name of the value column
    *
@@ -2083,14 +2082,14 @@ class Dataset[T] private[sql](
 
   /**
    * Unpivot a DataFrame from wide format to long format, optionally
-   * leaving identifier variables set.
+   * leaving identifier columns set.
    *
    * @see `org.apache.spark.sql.Dataset.melt(Array, Array, String, String)`
    *
    * This is equivalent to calling `Dataset#melt(Array, Array, String, String)`
-   * with `values = Array(col("*")))`.
+   * where `values` is set to all non-id columns that exist in the DataFrame.
    *
-   * @param ids Names of the id columns
+   * @param ids Id columns
    * @param variableColumnName Name of the variable column
    * @param valueColumnName Name of the value column
    *

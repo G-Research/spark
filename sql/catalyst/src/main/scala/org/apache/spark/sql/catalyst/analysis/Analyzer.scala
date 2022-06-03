@@ -886,13 +886,6 @@ class Analyzer(override val catalogManager: CatalogManager)
 
       // TypeCoercionBase.MeltCoercion determines valueType once values are set and resolved
       case m @ Melt(ids, values, _, _, valueType, child) =>
-        // values should be disjoint to ids
-        if (values.intersect(ids).nonEmpty) {
-          throw new AnalysisException("MELT_ID_AND_VALUE_COLUMNS_NOT_DISJOINT", Array(
-            ids.mkString(", "), values.mkString(", "), values.intersect(ids).mkString(", ")
-          ))
-        }
-
         // construct melt expressions for Expand
         val exprs: Seq[Seq[Expression]] = values.map {
           value => ids ++ Seq(
