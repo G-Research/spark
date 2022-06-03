@@ -18,7 +18,7 @@
 package org.apache.spark.sql
 
 import org.apache.spark.sql.errors.QueryErrorsSuiteBase
-import org.apache.spark.sql.functions.sum
+import org.apache.spark.sql.functions.{length, struct, sum}
 import org.apache.spark.sql.test.SharedSparkSession
 import org.apache.spark.sql.types._
 
@@ -57,12 +57,28 @@ class DatasetMeltSuite extends QueryTest
     StructField("val", StringType, nullable = true)
   ))
 
+  lazy val meltWideStructDataDs: DataFrame = meltWideDataDs.select(
+    struct($"id").as("an"),
+    struct(
+      $"str1".as("one"),
+      $"str2".as("two")
+    ).as("str")
+  )
+  val meltedWideStructDataRows: Seq[Row] = meltedWideDataRows.map(row =>
+    Row(
+      row.getInt(0),
+      row.getString(1) match {
+        case "str1" => "one"
+        case "str2" => "two"
+      },
+      row.getString(2))
+  )
+
   test("overloaded melt without values") {
     val ds = meltWideDataDs.select($"id", $"str1", $"str2")
     checkAnswer(
       ds.melt(Array($"id"), "var", "val"),
-      ds.melt(Array($"id"), Array.empty, "var", "val")
-    )
+      ds.melt(Array($"id"), Array.empty, "var", "val"))
   }
 
   test("melt with single id") {
@@ -71,8 +87,7 @@ class DatasetMeltSuite extends QueryTest
         Array($"id"),
         Array($"str1", $"str2"),
         variableColumnName = "var",
-        valueColumnName = "val"
-      )
+        valueColumnName = "val")
     melted.explain(true)
     assert(melted.schema === meltedSchema)
     checkAnswer(melted, meltedWideDataRows)
@@ -87,22 +102,19 @@ class DatasetMeltSuite extends QueryTest
       Row(3, 3, "str1", null),
       Row(3, 3, "str2", "three"),
       Row(4, null, "str1", null),
-      Row(4, null, "str2", null)
-    )
+      Row(4, null, "str2", null))
 
     val melted = meltWideDataDs
       .melt(
         Array($"id", $"int1"),
         Array($"str1", $"str2"),
         variableColumnName = "var",
-        valueColumnName = "val"
-      )
+        valueColumnName = "val")
     assert(melted.schema === StructType(Seq(
       StructField("id", IntegerType, nullable = false),
       StructField("int1", IntegerType, nullable = true),
       StructField("var", StringType, nullable = false),
-      StructField("val", StringType, nullable = true)
-    )))
+      StructField("val", StringType, nullable = true))))
     checkAnswer(melted, meltedRows)
   }
 
@@ -112,12 +124,10 @@ class DatasetMeltSuite extends QueryTest
         Array.empty,
         Array($"str1", $"str2"),
         variableColumnName = "var",
-        valueColumnName = "val"
-      )
+        valueColumnName = "val")
     assert(melted.schema === StructType(Seq(
       StructField("var", StringType, nullable = false),
-      StructField("val", StringType, nullable = true)
-    )))
+      StructField("val", StringType, nullable = true))))
     checkAnswer(melted, meltedWideDataWithoutIdRows)
   }
 
@@ -126,29 +136,70 @@ class DatasetMeltSuite extends QueryTest
       .melt(
         Array($"id"),
         variableColumnName = "var",
-        valueColumnName = "val"
-      )
+        valueColumnName = "val")
     assert(melted.schema === meltedSchema)
     checkAnswer(melted, meltedWideDataRows)
   }
 
   test("melt without ids or values") {
-    // do not drop nulls
     val melted = meltWideDataDs.select($"str1", $"str2")
       .melt(
         Array.empty,
         Array.empty,
         variableColumnName = "var",
-        valueColumnName = "val"
-      )
+        valueColumnName = "val")
     assert(melted.schema === StructType(Seq(
       StructField("var", StringType, nullable = false),
-      StructField("val", StringType, nullable = true)
-    )))
+      StructField("val", StringType, nullable = true))))
     checkAnswer(melted, meltedWideDataWithoutIdRows)
   }
 
-  test("melt with variable / value value columns") {
+  test("melt with star values") {
+    val melted = meltWideDataDs.select($"str1", $"str2")
+      .melt(
+        Array.empty,
+        Array($"*"),
+        variableColumnName = "var",
+        valueColumnName = "val")
+    assert(melted.schema === StructType(Seq(
+      StructField("var", StringType, nullable = false),
+      StructField("val", StringType, nullable = true))))
+    checkAnswer(melted, meltedWideDataWithoutIdRows)
+  }
+
+  test("melt with expressions") {
+    // ids and values are all expressions (computed)
+    val melted = meltWideDataDs
+      .melt(
+        Array(($"id" * 10).as("primary"), $"str1".as("secondary")),
+        Array(($"int1" + $"long1").as("sum"), length($"str2").as("len")),
+        variableColumnName = "var",
+        valueColumnName = "val")
+
+    assert(melted.schema === StructType(Seq(
+      StructField("primary", IntegerType, nullable = false),
+      StructField("secondary", StringType, nullable = true),
+      StructField("var", StringType, nullable = false),
+      StructField("val", LongType, nullable = true))))
+
+    checkAnswer(melted, meltWideDataDs.collect().flatMap(row => Seq(
+      Row(
+        row.id * 10,
+        row.str1,
+        "sum",
+        // sum of int1 and long1 when both are set, or null otherwise
+        row.int1.flatMap(i => row.long1.map(l => i + l)).orNull
+      ), Row(
+        row.id * 10,
+        row.str1,
+        "len",
+        // length of str2 if set, or null otherwise
+        Option(row.str2).map(_.length).orNull,
+      ))
+    ))
+  }
+
+  test("melt with variable / value columns") {
     // with value column `variable` and `value`
     val melted = meltWideDataDs
       .withColumnRenamed("str1", "var")
@@ -157,16 +208,14 @@ class DatasetMeltSuite extends QueryTest
         Array($"id"),
         Array($"var", $"val"),
         variableColumnName = "var",
-        valueColumnName = "val"
-      )
+        valueColumnName = "val")
     checkAnswer(melted, meltedWideDataRows.map(row => Row(
       row.getInt(0),
       row.getString(1) match {
         case "str1" => "var"
         case "str2" => "val"
       },
-      row.getString(2)
-    )))
+      row.getString(2))))
 
     // with un-referenced column `variable` and `value`
     val melted2 = meltWideDataDs
@@ -176,8 +225,7 @@ class DatasetMeltSuite extends QueryTest
         Array($"id"),
         Array($"str1", $"str2"),
         variableColumnName = "var",
-        valueColumnName = "val"
-      )
+        valueColumnName = "val")
     checkAnswer(melted2, meltedWideDataRows)
   }
 
@@ -188,14 +236,13 @@ class DatasetMeltSuite extends QueryTest
         Array($"str1", $"int1"),
         variableColumnName = "var",
         valueColumnName = "val"
-      ).collect()
+      )
     }
     checkErrorClass(
       exception = e,
       errorClass = "MELT_VALUE_DATA_TYPE_MISMATCH",
       msg = "Melt value columns must have compatible data types, " +
-        "some data types are not compatible: [StringType, IntegerType]"
-    )
+        "some data types are not compatible: [StringType, IntegerType]")
   }
 
   test("melt with compatible value types") {
@@ -203,8 +250,7 @@ class DatasetMeltSuite extends QueryTest
       Array($"id"),
       Array($"int1", $"long1"),
       variableColumnName = "var",
-      valueColumnName = "val"
-    )
+      valueColumnName = "val")
     assert(melted.schema === StructType(Seq(
       StructField("id", IntegerType, nullable = false),
       StructField("var", StringType, nullable = false),
@@ -239,8 +285,7 @@ class DatasetMeltSuite extends QueryTest
       errorClass = "MISSING_COLUMN",
       msg = "Column '`1`' does not exist\\. Did you mean one " +
         "of the following\\? \\[id, int1, str1, str2, long1\\];(\n.*)*",
-      matchMsg = true
-    )
+      matchMsg = true)
 
     // melting where value column does not exist
     val e2 = intercept[AnalysisException] {
@@ -256,8 +301,7 @@ class DatasetMeltSuite extends QueryTest
       errorClass = "MISSING_COLUMN",
       msg = "Column 'does' does not exist\\. Did you mean one " +
         "of the following\\? \\[id, int1, long1, str1, str2\\];(\n.*)*",
-      matchMsg = true
-    )
+      matchMsg = true)
 
     // melting with column in both ids and values
     val e3 = intercept[AnalysisException] {
@@ -274,8 +318,7 @@ class DatasetMeltSuite extends QueryTest
       msg = "The melt id columns \\[id#\\d+, int1#\\d+, long1#\\d+L\\] " +
         "and value columns \\[int1#\\d+, int2#\\d+, long1#\\d+L\\] " +
         "must be disjoint, but these columns are either: \\[int1#\\d+, long1#\\d+L\\]",
-      matchMsg = true
-    )
+      matchMsg = true)
 
     // melting with empty list of value columns
     // where potential value columns are of incompatible types
@@ -291,10 +334,41 @@ class DatasetMeltSuite extends QueryTest
       exception = e4,
       errorClass = "MELT_VALUE_DATA_TYPE_MISMATCH",
       msg = "Melt value columns must have compatible data types, " +
-        "some data types are not compatible: [IntegerType, StringType, LongType]"
-    )
+        "some data types are not compatible: [IntegerType, StringType, LongType]")
 
+    // melting with star id columns so that no value columns are left
     val e5 = intercept[AnalysisException] {
+      meltWideDataDs.melt(
+        Array($"*"),
+        Array.empty,
+        variableColumnName = "var",
+        valueColumnName = "val"
+      )
+    }
+    checkErrorClass(
+      exception = e5,
+      errorClass = "MELT_REQUIRES_VALUE_COLUMNS",
+      msg = "At least one non-id column is required to melt. " +
+        "All columns are id columns: \\[id#\\d+, str1#\\d+, str2#\\d+, int1#\\d+, long1#\\d+L\\]",
+      matchMsg = true)
+
+    // melting with star value columns
+    // where potential value columns are of incompatible types
+    val e6 = intercept[AnalysisException] {
+      meltWideDataDs.melt(
+        Array.empty,
+        Array($"*"),
+        variableColumnName = "var",
+        valueColumnName = "val"
+      )
+    }
+    checkErrorClass(
+      exception = e6,
+      errorClass = "MELT_VALUE_DATA_TYPE_MISMATCH",
+      msg = "Melt value columns must have compatible data types, " +
+        "some data types are not compatible: [IntegerType, StringType, LongType]")
+
+    val e7 = intercept[AnalysisException] {
       meltWideDataDs.melt(
         Array($"id"),
         Array.empty,
@@ -303,14 +377,13 @@ class DatasetMeltSuite extends QueryTest
       )
     }
     checkErrorClass(
-      exception = e5,
+      exception = e7,
       errorClass = "MELT_VALUE_DATA_TYPE_MISMATCH",
       msg = "Melt value columns must have compatible data types, " +
-        "some data types are not compatible: [StringType, IntegerType, LongType]"
-    )
+        "some data types are not compatible: [StringType, IntegerType, LongType]")
 
     // melting without giving values and no non-id columns
-    val e6 = intercept[AnalysisException] {
+    val e8 = intercept[AnalysisException] {
       meltWideDataDs.select($"id", $"str1", $"str2").melt(
         Array($"id", $"str1", $"str2"),
         Array.empty,
@@ -319,12 +392,11 @@ class DatasetMeltSuite extends QueryTest
       )
     }
     checkErrorClass(
-      exception = e6,
+      exception = e8,
       errorClass = "MELT_REQUIRES_VALUE_COLUMNS",
       msg = "At least one non-id column is required to melt. " +
         "All columns are id columns: \\[id#\\d+, str1#\\d+, str2#\\d+\\]",
-      matchMsg = true
-    )
+      matchMsg = true)
   }
 
   test("melt after pivot") {
@@ -334,6 +406,16 @@ class DatasetMeltSuite extends QueryTest
     val melted = pivoted.melt(Array($"year"), "course", "earnings")
     val expected = courseSales.groupBy("year", "course").sum("earnings")
     checkAnswer(melted, expected)
+  }
+
+  test("melt of melt") {
+    checkAnswer(
+      meltWideDataDs
+        .melt(Array($"id"), Array($"str1", $"str2"), "var", "val")
+        .melt(Array($"id"), Array($"var", $"val"), "col", "value"),
+      meltedWideDataRows.flatMap(row => Seq(
+        Row(row.getInt(0), "var", row.getString(1)),
+        Row(row.getInt(0), "val", row.getString(2)))))
   }
 
   test("melt with dot and backtick") {
@@ -346,17 +428,14 @@ class DatasetMeltSuite extends QueryTest
         Array($"`an.id`"),
         Array($"`str.one`", $"`str.two`"),
         variableColumnName = "var",
-        valueColumnName = "val"
-      )
+        valueColumnName = "val")
     checkAnswer(melted, meltedWideDataRows.map(row => Row(
         row.getInt(0),
         row.getString(1) match {
           case "str1" => "str.one"
           case "str2" => "str.two"
         },
-        row.getString(2)
-      ))
-    )
+        row.getString(2))))
 
     // without backticks, this references struct fields, which do not exist
     val e = intercept[AnalysisException] {
@@ -372,33 +451,38 @@ class DatasetMeltSuite extends QueryTest
       errorClass = "MISSING_COLUMN",
       msg = "Column 'an.id' does not exist\\. Did you mean one " +
         "of the following\\? \\[an.id, int1, long1, str.one, str.two\\];(\n.*)*",
-      matchMsg = true
-    )
+      matchMsg = true)
   }
 
-  /** TODO(SPARK-39292): Would be nice to melt on struct fields.
   test("SPARK-39292: melt with struct fields") {
-    val ds = meltWideDataDs.select(
-      struct($"id").as("an"),
-      struct(
-        $"str1".as("one"),
-        $"str2".as("two")
-      ).as("str")
-    )
-    ds.select($"an.id", $"str.one", $"str.two").show()
-
     checkAnswer(
-      ds.melt(Array($"an.id"), Array($"str.one", $"str.two"), "var", "val"),
-      meltedWideDataRows.map(row => Row(
-        row.getInt(0),
-        row.getString(1) match {
-          case "str1" => "str.one"
-          case "str2" => "str.two"
-        },
-        row.getString(2)
-      ))
-    )
-  } */
+      meltWideStructDataDs.melt(
+        Array($"an.id"),
+        Array($"str.one", $"str.two"),
+        "var",
+        "val"),
+      meltedWideStructDataRows)
+  }
+
+  test("SPARK-39292: melt with struct ids star") {
+    checkAnswer(
+      meltWideStructDataDs.melt(
+        Array($"an.*"),
+        Array($"str.one", $"str.two"),
+        "var",
+        "val"),
+      meltedWideStructDataRows)
+  }
+
+  test("SPARK-39292: melt with struct values star") {
+    checkAnswer(
+      meltWideStructDataDs.melt(
+        Array($"an.id"),
+        Array($"str.*"),
+        "var",
+        "val"),
+      meltedWideStructDataRows)
+  }
 }
 
 case class WideData(id: Int, str1: String, str2: String, int1: Option[Int], long1: Option[Long])

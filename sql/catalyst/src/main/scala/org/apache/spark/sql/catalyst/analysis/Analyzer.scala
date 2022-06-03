@@ -894,9 +894,8 @@ class Analyzer(override val catalogManager: CatalogManager)
         }
 
         // construct melt expressions for Expand
-        val idAttrs = m.output.init.init
         val exprs: Seq[Seq[Expression]] = values.map {
-          value => idAttrs ++ Seq(
+          value => ids ++ Seq(
             // TODO: value.prettyName?
             Literal(value.name),
             if (value.dataType == valueType.get) value else Cast(value, valueType.get)
@@ -1418,6 +1417,12 @@ class Analyzer(override val catalogManager: CatalogManager)
       case g: Generate if containsStar(g.generator.children) =>
         throw QueryCompilationErrors.invalidStarUsageError("explode/json_tuple/UDTF",
           extractStar(g.generator.children))
+      // If the Melt ids contain Stars, expand them.
+      case m: Melt if containsStar(m.ids) =>
+        m.copy(ids = buildExpandedProjectList(m.ids, m.child))
+      // If the Melt values contain Stars, expand them.
+      case m: Melt if containsStar(m.values) =>
+        m.copy(values = buildExpandedProjectList(m.values, m.child))
 
       case u @ Union(children, _, _)
         // if there are duplicate output columns, give them unique expr ids
