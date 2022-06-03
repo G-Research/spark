@@ -262,21 +262,9 @@
     ],
     "sqlState" : "42000"
   },
-  "MELT_VALUE_COLUMN_IS_ID_COLUMN" : {
-    "message" : [
-      "The melt value column name '<value>' must not be part of the id column names: [<ids>]"
-    ],
-    "sqlState" : "42000"
-  },
   "MELT_VALUE_DATA_TYPE_MISMATCH" : {
     "message" : [
       "Melt value columns must have compatible data types, some data types are not compatible: [<types>]"
-    ],
-    "sqlState" : "42000"
-  },
-  "MELT_VARIABLE_COLUMN_IS_ID_COLUMN" : {
-    "message" : [
-      "The melt variable column name '<variable>' must not be part of the id column names: [<ids>]"
     ],
     "sqlState" : "42000"
   },
