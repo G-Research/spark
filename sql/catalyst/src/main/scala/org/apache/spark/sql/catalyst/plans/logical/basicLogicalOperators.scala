@@ -18,7 +18,7 @@
 package org.apache.spark.sql.catalyst.plans.logical
 
 import org.apache.spark.sql.catalyst.{AliasIdentifier, SQLConfHelper}
-import org.apache.spark.sql.catalyst.analysis.{AnsiTypeCoercion, MultiInstanceRelation, Resolver, TypeCoercion, TypeCoercionBase, UnresolvedAttribute}
+import org.apache.spark.sql.catalyst.analysis.{AnsiTypeCoercion, MultiInstanceRelation, Resolver, TypeCoercion, TypeCoercionBase}
 import org.apache.spark.sql.catalyst.catalog.{CatalogStorageFormat, CatalogTable}
 import org.apache.spark.sql.catalyst.catalog.CatalogTable.VIEW_STORING_ANALYZED_PLAN
 import org.apache.spark.sql.catalyst.expressions._
@@ -1273,15 +1273,7 @@ case class Melt(
     valueType: Option[DataType],
     child: LogicalPlan) extends UnaryNode {
   override lazy val resolved = false // Melt will be replaced after being resolved.
-  override def output: Seq[Attribute] =
-    ids.map(_.toAttribute) ++ Seq(
-      AttributeReference(variableColumnName, StringType, nullable = false)(),
-      valueType.map(
-        AttributeReference(valueColumnName, _, nullable = values.exists(_.nullable))()
-      ).getOrElse(
-        UnresolvedAttribute.quotedString(valueColumnName)
-      )
-    )
+  override def output: Seq[Attribute] = Nil
   override def metadataOutput: Seq[Attribute] = Nil
   final override val nodePatterns: Seq[TreePattern] = Seq(MELT)
 
