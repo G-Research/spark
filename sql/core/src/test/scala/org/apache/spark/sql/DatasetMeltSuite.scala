@@ -261,7 +261,8 @@ class DatasetMeltSuite extends QueryTest
       exception = e,
       errorClass = "MELT_VALUE_DATA_TYPE_MISMATCH",
       msg = "Melt value columns must have compatible data types, " +
-        "some data types are not compatible: [StringType, IntegerType]")
+        "some data types are not compatible: \\[StringType, IntegerType\\];(\n.*)*",
+      matchMsg = true)
   }
 
   test("melt with compatible value types") {
@@ -338,13 +339,14 @@ class DatasetMeltSuite extends QueryTest
         Array.empty,
         variableColumnName = "var",
         valueColumnName = "val"
-      )
+      ).collect()
     }
     checkErrorClass(
       exception = e3,
       errorClass = "MELT_VALUE_DATA_TYPE_MISMATCH",
       msg = "Melt value columns must have compatible data types, " +
-        "some data types are not compatible: [IntegerType, StringType, LongType]")
+        "some data types are not compatible: \\[IntegerType, StringType, LongType\\];(\n.*)*",
+      matchMsg = true)
 
     // melting with star id columns so that no value columns are left
     val e4 = intercept[AnalysisException] {
@@ -358,8 +360,8 @@ class DatasetMeltSuite extends QueryTest
     checkErrorClass(
       exception = e4,
       errorClass = "MELT_REQUIRES_VALUE_COLUMNS",
-      msg = "At least one non-id column is required to melt. " +
-        "All columns are id columns: \\[id#\\d+, str1#\\d+, str2#\\d+, int1#\\d+, long1#\\d+L\\]",
+      msg = "At least one non-id column is required to melt. All columns are id columns: " +
+        "\\[id#\\d+, str1#\\d+, str2#\\d+, int1#\\d+, long1#\\d+L\\];(\n.*)*",
       matchMsg = true)
 
     // melting with star value columns
@@ -376,7 +378,8 @@ class DatasetMeltSuite extends QueryTest
       exception = e5,
       errorClass = "MELT_VALUE_DATA_TYPE_MISMATCH",
       msg = "Melt value columns must have compatible data types, " +
-        "some data types are not compatible: [IntegerType, StringType, LongType]")
+        "some data types are not compatible: \\[IntegerType, StringType, LongType\\];(\n.*)*",
+      matchMsg = true)
 
     // melting without giving values and no non-id columns
     val e6 = intercept[AnalysisException] {
@@ -391,7 +394,7 @@ class DatasetMeltSuite extends QueryTest
       exception = e6,
       errorClass = "MELT_REQUIRES_VALUE_COLUMNS",
       msg = "At least one non-id column is required to melt. " +
-        "All columns are id columns: \\[id#\\d+, str1#\\d+, str2#\\d+\\]",
+        "All columns are id columns: \\[id#\\d+, str1#\\d+, str2#\\d+\\];(\n.*)*",
       matchMsg = true)
   }
 

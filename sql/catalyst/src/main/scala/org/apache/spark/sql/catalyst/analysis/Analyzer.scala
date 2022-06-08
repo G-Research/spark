@@ -874,12 +874,7 @@ class Analyzer(override val catalogManager: CatalogManager)
 
       // once children and ids are resolved, we can determine values, if non were given
       case m: Melt if m.childrenResolved && m.ids.forall(_.resolved) && m.values.isEmpty =>
-        // if there are no values, we cannot melt
-        val values = m.child.output.diff(m.ids)
-        if (values.isEmpty) {
-          throw new AnalysisException("MELT_REQUIRES_VALUE_COLUMNS", Array(m.ids.mkString(", ")))
-        }
-        m.copy(values = values)
+        m.copy(values = m.child.output.diff(m.ids))
 
       case m: Melt if !m.childrenResolved || !m.ids.forall(_.resolved)
         || m.values.isEmpty || !m.values.forall(_.resolved) || m.valueType.isEmpty => m

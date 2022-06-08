@@ -23,7 +23,6 @@ import scala.annotation.tailrec
 import scala.collection.mutable
 
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.aggregate._
 import org.apache.spark.sql.catalyst.plans.logical._
@@ -744,13 +743,7 @@ abstract class TypeCoercionBase {
     override def apply(plan: LogicalPlan): LogicalPlan =
       plan resolveOperators {
         case m: Melt if m.values.nonEmpty && m.values.forall(_.resolved) && m.valueType.isEmpty =>
-          val valueDataTypes = m.values.map(_.dataType).toSet
-          val valueDataType = findWiderTypeWithoutStringPromotion(valueDataTypes.toSeq)
-          if (valueDataType.isEmpty) {
-            throw new AnalysisException("MELT_VALUE_DATA_TYPE_MISMATCH", Array(
-              valueDataTypes.mkString(", ")
-            ))
-          }
+          val valueDataType = findWiderTypeWithoutStringPromotion(m.values.map(_.dataType))
           m.copy(valueType = valueDataType)
       }
   }
