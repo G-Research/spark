@@ -879,15 +879,12 @@ class Analyzer(override val catalogManager: CatalogManager)
       case m: Melt if !m.childrenResolved || !m.ids.forall(_.resolved)
         || m.values.isEmpty || !m.values.forall(_.resolved) || m.valueType.isEmpty => m
 
-      // TypeCoercionBase.MeltCoercion determines valueType once values are set and resolved
+      // TypeCoercionBase.MeltCoercion determines valueType
+      // and casts values once values are set and resolved
       case Melt(ids, values, variableColumnName, valueColumnName, valueType, child) =>
         // construct melt expressions for Expand
         val exprs: Seq[Seq[Expression]] = values.map {
-          value => ids ++ Seq(
-            // TODO: value.prettyName?
-            Literal(value.name),
-            if (value.dataType == valueType.get) value else Cast(value, valueType.get)
-          )
+          value => ids ++ Seq(Literal(value.name), value)
         }
 
         // construct output attributes

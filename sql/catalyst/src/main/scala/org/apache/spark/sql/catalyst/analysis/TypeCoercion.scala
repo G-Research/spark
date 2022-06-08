@@ -744,7 +744,10 @@ abstract class TypeCoercionBase {
       plan resolveOperators {
         case m: Melt if m.values.nonEmpty && m.values.forall(_.resolved) && m.valueType.isEmpty =>
           val valueDataType = findWiderTypeWithoutStringPromotion(m.values.map(_.dataType))
-          m.copy(valueType = valueDataType)
+          val values = valueDataType.map(valueType =>
+            m.values.map(value => Alias(Cast(value, valueType), value.name)())
+          ).getOrElse(m.values)
+          m.copy(valueType = valueDataType, values = values)
       }
   }
 
