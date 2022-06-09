@@ -38,7 +38,7 @@ trait QueryErrorsSuiteBase extends SharedSparkSession {
     }
     if (matchMsg) {
       assert(exception.getMessage.matches(s"""\\[$fullErrorClass\\] """ + msg),
-        exception.getMessage)
+        "exception is: " + exception.getMessage)
     } else {
       assert(exception.getMessage === s"""[$fullErrorClass] """ + msg)
     }
