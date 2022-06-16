@@ -114,7 +114,7 @@ jobs:
     env:
       GITHUB_PREV_SHA: ${{ github.event.before }}
     outputs:
-      required: ${{ fromJSON( steps.set-outputs.outputs.required ) }}
+      required: ${{ steps.set-outputs.outputs.required }}
       spark-matrix: ${{ steps.spark.outputs.matrix }}
       pyspark-matrix: ${{ steps.pyspark.outputs.matrix }}
     steps:
@@ -148,7 +148,7 @@ jobs:
         # Run scheduled jobs for Apache Spark only
         # Run regular jobs for commit in both Apache Spark and forked repository, but only if changes exist
         RUN: ${{ needs.configure-jobs.outputs.type == 'scheduled' ||
-                (needs.configure-jobs.outputs.type == 'regular' && needs.precondition.outputs.required.build == 'true') }}
+                (needs.configure-jobs.outputs.type == 'regular' && fromJSON(needs.precondition.outputs.required).build == 'true') }}
       # TODO(SPARK-32246): We don't test 'streaming-kinesis-asl' for now.
       # Kinesis tests depends on external Amazon kinesis service.
       # Here, we split Hive and SQL tests into some of slow ones and the rest of them.
@@ -241,7 +241,7 @@ jobs:
           done | jq -n '{ include: [inputs] }' > matrix-with-changes.json
 
           # output json
-          echo "::set-output name=matrix::$(jq -c . < matrixecho.json)"
+          echo "::set-output name=matrix::$(jq -c . < matrix-with-changes.json)"
           jq . < matrix-with-changes.json
 
     - name: Configure PySpark matrix
@@ -252,7 +252,7 @@ jobs:
         # Run regular jobs for commit in both Apache Spark and forked repository, but only if pyspark changes exist
         RUN: ${{ needs.configure-jobs.outputs.type == 'pyspark-coverage-scheduled' ||
                 (needs.configure-jobs.outputs.type == 'scheduled' && needs.configure-jobs.outputs.java == '17') ||
-                (needs.configure-jobs.outputs.type == 'regular' && needs.precondition.outputs.required.pyspark == 'true') }}
+                (needs.configure-jobs.outputs.type == 'regular' && fromJSON(needs.precondition.outputs.required).pyspark == 'true') }}
       run: |
         cat > matrix.json << EOF
         {
@@ -291,7 +291,7 @@ jobs:
         done | jq -n '{ include: [inputs] }' > matrix-with-changes.json
 
         # output json
-        echo "::set-output name=matrix::$(jq -c . < matrixecho.json)"
+        echo "::set-output name=matrix::$(jq -c . < matrix-with-changes.json)"
         jq . < matrix-with-changes.json
 
   # Build: build Spark and run the tests for specified modules.
@@ -303,8 +303,7 @@ jobs:
     runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
-      matrix:
-        include: ${{ fromJSON( needs.precondition.outputs.spark-matrix ) }}
+      matrix: ${{ fromJSON( needs.precondition.outputs.spark-matrix ) }}
     env:
       MODULES_TO_TEST: ${{ matrix.modules }}
       EXCLUDED_TAGS: ${{ matrix.excluded-tags }}
@@ -395,8 +394,7 @@ jobs:
       image: dongjoon/apache-spark-github-action-image:20220207
     strategy:
       fail-fast: false
-      matrix:
-        include: ${{ fromJSON( needs.precondition.outputs.pyspark-matrix ) }}
+      matrix: ${{ fromJSON( needs.precondition.outputs.pyspark-matrix ) }}
     env:
       MODULES_TO_TEST: ${{ matrix.modules }}
       HADOOP_PROFILE: ${{ needs.configure-jobs.outputs.hadoop }}
@@ -485,7 +483,7 @@ jobs:
     # Run regular jobs for commit in both Apache Spark and forked repository, but only if sparkr changes exist
     if: >-
       (needs.configure-jobs.outputs.type == 'scheduled' && needs.configure-jobs.outputs.java == '17')
-      || (needs.configure-jobs.outputs.type == 'regular' && needs.precondition.outputs.required.sparkr == 'true')
+      || (needs.configure-jobs.outputs.type == 'regular' && fromJSON(needs.precondition.outputs.required).sparkr == 'true')
     name: "Build modules: sparkr"
     runs-on: ubuntu-20.04
     container:
@@ -668,7 +666,7 @@ jobs:
   java-11-17:
     needs: [configure-jobs, precondition]
     # Run regular jobs for commit in both Apache Spark and forked repository, but only if changes exist
-    if: needs.configure-jobs.outputs.type == 'regular' && needs.precondition.outputs.required.build == 'true'
+    if: needs.configure-jobs.outputs.type == 'regular' && fromJSON(needs.precondition.outputs.required).build == 'true'
     name: Java ${{ matrix.java }} build with Maven
     strategy:
       fail-fast: false
@@ -724,7 +722,7 @@ jobs:
   scala-213:
     needs: [configure-jobs, precondition]
     # Run regular jobs for commit in both Apache Spark and forked repository, but only if changes exist
-    if: needs.configure-jobs.outputs.type == 'regular' && needs.precondition.outputs.required.build == 'true'
+    if: needs.configure-jobs.outputs.type == 'regular' && fromJSON(needs.precondition.outputs.required).build == 'true'
     name: Scala 2.13 build with SBT
     runs-on: ubuntu-20.04
     steps:
@@ -770,7 +768,7 @@ jobs:
   tpcds-1g:
     needs: [configure-jobs, precondition]
     # Run regular jobs for commit in both Apache Spark and forked repository, but only if tpcds changes exist
-    if: needs.configure-jobs.outputs.type == 'regular' && needs.precondition.outputs.required.tpcds == 'true'
+    if: needs.configure-jobs.outputs.type == 'regular' && fromJSON(needs.precondition.outputs.required).tpcds == 'true'
     name: Run TPC-DS queries with SF=1
     runs-on: ubuntu-20.04
     env:
@@ -866,7 +864,7 @@ jobs:
   docker-integration-tests:
     needs: [configure-jobs, precondition]
     # Run regular jobs for commit in both Apache Spark and forked repository, but only if docker changes exist
-    if: needs.configure-jobs.outputs.type == 'regular' && needs.precondition.outputs.required.docker == 'true'
+    if: needs.configure-jobs.outputs.type == 'regular' && fromJSON(needs.precondition.outputs.required).docker == 'true'
     name: Run Docker integration tests
     runs-on: ubuntu-20.04
     env:
