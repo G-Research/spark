@@ -298,7 +298,6 @@ jobs:
   spark:
     name: "Build modules (${{ format('{0}, {1} job', needs.configure-jobs.outputs.branch, needs.configure-jobs.outputs.type) }}): ${{ matrix.modules }} ${{ matrix.comment }} (JDK ${{ matrix.java }}, ${{ matrix.hadoop }}, ${{ matrix.hive }})"
     needs: [configure-jobs, precondition]
-    if: matrix.run != 'false' && matrix.changed != 'false'
     # Ubuntu 20.04 is the latest LTS. The next LTS is 22.04.
     runs-on: ubuntu-20.04
     strategy:
@@ -387,7 +386,6 @@ jobs:
 
   pyspark:
     needs: [configure-jobs, precondition]
-    if: matrix.run != 'false' && matrix.changed != 'false'
     name: "Build modules (${{ format('{0}, {1} job', needs.configure-jobs.outputs.branch, needs.configure-jobs.outputs.type) }}): ${{ matrix.modules }}"
     runs-on: ubuntu-20.04
     container:
