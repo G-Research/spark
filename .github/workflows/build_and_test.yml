@@ -148,7 +148,7 @@ jobs:
         # Run scheduled jobs for Apache Spark only
         # Run regular jobs for commit in both Apache Spark and forked repository, but only if changes exist
         RUN: ${{ needs.configure-jobs.outputs.type == 'scheduled' ||
-                (needs.configure-jobs.outputs.type == 'regular' && fromJSON(needs.precondition.outputs.required).build == 'true') }}
+                (needs.configure-jobs.outputs.type == 'regular' && fromJSON(steps.set-outputs.outputs.required).build == 'true') }}
       # TODO(SPARK-32246): We don't test 'streaming-kinesis-asl' for now.
       # Kinesis tests depends on external Amazon kinesis service.
       # Here, we split Hive and SQL tests into some of slow ones and the rest of them.
@@ -252,7 +252,7 @@ jobs:
         # Run regular jobs for commit in both Apache Spark and forked repository, but only if pyspark changes exist
         RUN: ${{ needs.configure-jobs.outputs.type == 'pyspark-coverage-scheduled' ||
                 (needs.configure-jobs.outputs.type == 'scheduled' && needs.configure-jobs.outputs.java == '17') ||
-                (needs.configure-jobs.outputs.type == 'regular' && fromJSON(needs.precondition.outputs.required).pyspark == 'true') }}
+                (needs.configure-jobs.outputs.type == 'regular' && fromJSON(steps.set-outputs.outputs.required).pyspark == 'true') }}
       run: |
         cat > matrix.json << EOF
         {
