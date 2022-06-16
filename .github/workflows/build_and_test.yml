@@ -114,7 +114,8 @@ jobs:
     env:
       GITHUB_PREV_SHA: ${{ github.event.before }}
     outputs:
-      required: ${{ steps.set-outputs.outputs.required }}
+      required: ${{ fromJSON( steps.set-outputs.outputs.required ) }}
+      spark-matrix: ${{ fromJSON( steps.spark.outputs.matrix ) }}
     steps:
     - name: Checkout Spark repository
       uses: actions/checkout@v2
@@ -140,72 +141,168 @@ jobs:
         echo "{\"build\": \"$build\", \"pyspark\": \"$pyspark\", \"sparkr\": \"$sparkr\", \"tpcds\": \"$tpcds\", \"docker\": \"$docker\"}" > required.json
         cat required.json
         echo "::set-output name=required::$(cat required.json)"
+    - name: Configure Spark matrix
+      id: spark
+      env:
+        # Run scheduled jobs for Apache Spark only
+        # Run regular jobs for commit in both Apache Spark and forked repository, but only if changes exist
+        RUN: ${{ needs.configure-jobs.outputs.type == 'scheduled' ||
+                (needs.configure-jobs.outputs.type == 'regular' && needs.precondition.outputs.required.build == 'true') }}
+      # TODO(SPARK-32246): We don't test 'streaming-kinesis-asl' for now.
+      # Kinesis tests depends on external Amazon kinesis service.
+      # Here, we split Hive and SQL tests into some of slow ones and the rest of them.
+      # Note that the modules below are from sparktestsupport/modules.py.
+      run: |
+        cat > matrix.json << EOF
+          {
+            "include": [
+              {
+                "modules": "core, unsafe, kvstore, avro, network-common, network-shuffle, repl, launcher, examples, sketch, graphx",
+                "java": "${{ needs.configure-jobs.outputs.java }}",
+                "hadoop": "${{ needs.configure-jobs.outputs.hadoop }}",
+                "hive": "hive2.3",
+                "included-tags": "",
+                "excluded-tags": "",
+                "comment": "",
+                "run": "$RUN"
+              },
+              {
+                "modules": "catalyst, hive-thriftserver",
+                "java": "${{ needs.configure-jobs.outputs.java }}",
+                "hadoop": "${{ needs.configure-jobs.outputs.hadoop }}",
+                "hive": "hive2.3",
+                "included-tags": "",
+                "excluded-tags": "",
+                "comment": "",
+                "run": "$RUN"
+              },
+              {
+                "modules": "streaming, sql-kafka-0-10, streaming-kafka-0-10, mllib-local, mllib, yarn, mesos, kubernetes, hadoop-cloud, spark-ganglia-lgpl",
+                "java": "${{ needs.configure-jobs.outputs.java }}",
+                "hadoop": "${{ needs.configure-jobs.outputs.hadoop }}",
+                "hive": "hive2.3",
+                "included-tags": "",
+                "excluded-tags": "",
+                "comment": "",
+                "run": "$RUN"
+              },
+              {
+                "modules": "hive",
+                "java": "${{ needs.configure-jobs.outputs.java }}",
+                "hadoop": "${{ needs.configure-jobs.outputs.hadoop }}",
+                "hive": "hive2.3",
+                "included-tags": "org.apache.spark.tags.SlowHiveTest",
+                "excluded-tags": "",
+                "comment": "- slow tests",
+                "run": "$RUN"
+              },
+              {
+                "modules": "hive",
+                "java": "${{ needs.configure-jobs.outputs.java }}",
+                "hadoop": "${{ needs.configure-jobs.outputs.hadoop }}",
+                "hive": "hive2.3",
+                "included-tags": "",
+                "excluded-tags": "org.apache.spark.tags.SlowHiveTest",
+                "comment": "- other tests",
+                "run": "$RUN"
+              },
+              {
+                "modules": "sql",
+                "java": "${{ needs.configure-jobs.outputs.java }}",
+                "hadoop": "${{ needs.configure-jobs.outputs.hadoop }}",
+                "hive": "hive2.3",
+                "included-tags": "org.apache.spark.tags.ExtendedSQLTest",
+                "excluded-tags": "",
+                "comment": "- slow tests",
+                "run": "$RUN"
+              },
+              {
+                "modules": "sql",
+                "java": "${{ needs.configure-jobs.outputs.java }}",
+                "hadoop": "${{ needs.configure-jobs.outputs.hadoop }}",
+                "hive": "hive2.3",
+                "included-tags": "",
+                "excluded-tags": "org.apache.spark.tags.ExtendedSQLTest",
+                "comment": "- other tests",
+                "run": "$RUN"
+              }
+            ]
+          }
+          EOF
+
+          # detect changes for each of these module sets
+          echo "The following module sets changed:"
+          jq -c ".include[] | ." < matrix.json | while read line; do
+            modules=$(jq -r .modules <<<"$line")
+            changed="$(./dev/is-changed.py -m "$modules")"
+            echo "$changed: $modules"
+            jq ". + { changed: "" }" <<<"$line"
+          done | jq -n '{ include: [inputs] }' > matrix-with-changes.json
+
+          # output json
+          echo "::set-output name=matrix::$(jq -c . < matrixecho.json)"
+          jq . < matrix-with-changes.json
+
+    - name: Configure PySpark matrix
+      id: pyspark
+      env:
+        # Run PySpark coverage scheduled jobs for Apache Spark only
+        # Run scheduled jobs with JDK 17 in Apache Spark
+        # Run regular jobs for commit in both Apache Spark and forked repository, but only if pyspark changes exist
+        RUN: ${{ needs.configure-jobs.outputs.type == 'pyspark-coverage-scheduled' ||
+                (needs.configure-jobs.outputs.type == 'scheduled' && needs.configure-jobs.outputs.java == '17') ||
+                (needs.configure-jobs.outputs.type == 'regular' && needs.precondition.outputs.required.pyspark == 'true') }}
+      run: |
+        cat > matrix.json << EOF
+        {
+          "include": [
+            {
+              "modules": "pyspark-sql, pyspark-mllib, pyspark-resource",
+              "java": "${{ needs.configure-jobs.outputs.java }}",
+              "run": "$RUN"
+            },
+            {
+              "modules": "pyspark-core, pyspark-streaming, pyspark-ml",
+              "java": "${{ needs.configure-jobs.outputs.java }}",
+              "run": "$RUN"
+            },
+            {
+              "modules": "pyspark-pandas",
+              "java": "${{ needs.configure-jobs.outputs.java }}",
+              "run": "$RUN"
+            },
+            {
+              "modules": "pyspark-pandas-slow",
+              "java": "${{ needs.configure-jobs.outputs.java }}",
+              "run": "$RUN"
+            }
+          ]
+        }
+        EOF
+
+        # detect changes for each of these module sets
+        echo "The following module sets changed:"
+        jq -c ".include[] | ." < matrix.json | while read line; do
+          modules=$(jq -r .modules <<<"$line")
+          changed="$(./dev/is-changed.py -m "$modules")"
+          echo "$changed: $modules"
+          jq ". + { changed: "" }" <<<"$line"
+        done | jq -n '{ include: [inputs] }' > matrix-with-changes.json
+
+        # output json
+        echo "::set-output name=matrix::$(jq -c . < matrixecho.json)"
+        jq . < matrix-with-changes.json
 
   # Build: build Spark and run the tests for specified modules.
-  build:
+  spark:
     name: "Build modules (${{ format('{0}, {1} job', needs.configure-jobs.outputs.branch, needs.configure-jobs.outputs.type) }}): ${{ matrix.modules }} ${{ matrix.comment }} (JDK ${{ matrix.java }}, ${{ matrix.hadoop }}, ${{ matrix.hive }})"
     needs: [configure-jobs, precondition]
-    # Run scheduled jobs for Apache Spark only
-    # Run regular jobs for commit in both Apache Spark and forked repository, but only if changes exist
-    if: >-
-      needs.configure-jobs.outputs.type == 'scheduled'
-      || (needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.precondition.outputs.required).build == 'true')
+    if: matrix.run != 'false' && matrix.changed != 'false'
     # Ubuntu 20.04 is the latest LTS. The next LTS is 22.04.
     runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
-      matrix:
-        java:
-          - ${{ needs.configure-jobs.outputs.java }}
-        hadoop:
-          - ${{ needs.configure-jobs.outputs.hadoop }}
-        hive:
-          - hive2.3
-        # TODO(SPARK-32246): We don't test 'streaming-kinesis-asl' for now.
-        # Kinesis tests depends on external Amazon kinesis service.
-        # Note that the modules below are from sparktestsupport/modules.py.
-        modules:
-          - >-
-            core, unsafe, kvstore, avro,
-            network-common, network-shuffle, repl, launcher,
-            examples, sketch, graphx
-          - >-
-            catalyst, hive-thriftserver
-          - >-
-            streaming, sql-kafka-0-10, streaming-kafka-0-10,
-            mllib-local, mllib,
-            yarn, mesos, kubernetes, hadoop-cloud, spark-ganglia-lgpl
-        # Here, we split Hive and SQL tests into some of slow ones and the rest of them.
-        included-tags: [""]
-        excluded-tags: [""]
-        comment: [""]
-        include:
-          # Hive tests
-          - modules: hive
-            java: ${{ needs.configure-jobs.outputs.java }}
-            hadoop: ${{ needs.configure-jobs.outputs.hadoop }}
-            hive: hive2.3
-            included-tags: org.apache.spark.tags.SlowHiveTest
-            comment: "- slow tests"
-          - modules: hive
-            java: ${{ needs.configure-jobs.outputs.java }}
-            hadoop: ${{ needs.configure-jobs.outputs.hadoop }}
-            hive: hive2.3
-            excluded-tags: org.apache.spark.tags.SlowHiveTest
-            comment: "- other tests"
-          # SQL tests
-          - modules: sql
-            java: ${{ needs.configure-jobs.outputs.java }}
-            hadoop: ${{ needs.configure-jobs.outputs.hadoop }}
-            hive: hive2.3
-            included-tags: org.apache.spark.tags.ExtendedSQLTest
-            comment: "- slow tests"
-          - modules: sql
-            java: ${{ needs.configure-jobs.outputs.java }}
-            hadoop: ${{ needs.configure-jobs.outputs.hadoop }}
-            hive: hive2.3
-            excluded-tags: org.apache.spark.tags.ExtendedSQLTest
-            comment: "- other tests"
+      matrix: ${{ needs.precondition.outputs.spark-matrix }}
     env:
       MODULES_TO_TEST: ${{ matrix.modules }}
       EXCLUDED_TAGS: ${{ matrix.excluded-tags }}
@@ -289,31 +386,14 @@ jobs:
 
   pyspark:
     needs: [configure-jobs, precondition]
-    # Run PySpark coverage scheduled jobs for Apache Spark only
-    # Run scheduled jobs with JDK 17 in Apache Spark
-    # Run regular jobs for commit in both Apache Spark and forked repository, but only if pyspark changes exist
-    if: >-
-      needs.configure-jobs.outputs.type == 'pyspark-coverage-scheduled'
-      || (needs.configure-jobs.outputs.type == 'scheduled' && needs.configure-jobs.outputs.java == '17')
-      || (needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.precondition.outputs.required).pyspark == 'true')
+    if: matrix.run != 'false' && matrix.changed != 'false'
     name: "Build modules (${{ format('{0}, {1} job', needs.configure-jobs.outputs.branch, needs.configure-jobs.outputs.type) }}): ${{ matrix.modules }}"
     runs-on: ubuntu-20.04
     container:
       image: dongjoon/apache-spark-github-action-image:20220207
     strategy:
       fail-fast: false
-      matrix:
-        java:
-          - ${{ needs.configure-jobs.outputs.java }}
-        modules:
-          - >-
-            pyspark-sql, pyspark-mllib, pyspark-resource
-          - >-
-            pyspark-core, pyspark-streaming, pyspark-ml
-          - >-
-            pyspark-pandas
-          - >-
-            pyspark-pandas-slow
+      matrix: ${{ needs.precondition.outputs.pyspark-matrix }}
     env:
       MODULES_TO_TEST: ${{ matrix.modules }}
       HADOOP_PROFILE: ${{ needs.configure-jobs.outputs.hadoop }}
@@ -402,7 +482,7 @@ jobs:
     # Run regular jobs for commit in both Apache Spark and forked repository, but only if sparkr changes exist
     if: >-
       (needs.configure-jobs.outputs.type == 'scheduled' && needs.configure-jobs.outputs.java == '17')
-      || (needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.precondition.outputs.required).sparkr == 'true')
+      || (needs.configure-jobs.outputs.type == 'regular' && needs.precondition.outputs.required.sparkr == 'true')
     name: "Build modules: sparkr"
     runs-on: ubuntu-20.04
     container:
@@ -585,7 +665,7 @@ jobs:
   java-11-17:
     needs: [configure-jobs, precondition]
     # Run regular jobs for commit in both Apache Spark and forked repository, but only if changes exist
-    if: needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.precondition.outputs.required).build == 'true'
+    if: needs.configure-jobs.outputs.type == 'regular' && needs.precondition.outputs.required.build == 'true'
     name: Java ${{ matrix.java }} build with Maven
     strategy:
       fail-fast: false
@@ -641,7 +721,7 @@ jobs:
   scala-213:
     needs: [configure-jobs, precondition]
     # Run regular jobs for commit in both Apache Spark and forked repository, but only if changes exist
-    if: needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.precondition.outputs.required).build == 'true'
+    if: needs.configure-jobs.outputs.type == 'regular' && needs.precondition.outputs.required.build == 'true'
     name: Scala 2.13 build with SBT
     runs-on: ubuntu-20.04
     steps:
@@ -687,7 +767,7 @@ jobs:
   tpcds-1g:
     needs: [configure-jobs, precondition]
     # Run regular jobs for commit in both Apache Spark and forked repository, but only if tpcds changes exist
-    if: needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.precondition.outputs.required).tpcds == 'true'
+    if: needs.configure-jobs.outputs.type == 'regular' && needs.precondition.outputs.required.tpcds == 'true'
     name: Run TPC-DS queries with SF=1
     runs-on: ubuntu-20.04
     env:
@@ -783,7 +863,7 @@ jobs:
   docker-integration-tests:
     needs: [configure-jobs, precondition]
     # Run regular jobs for commit in both Apache Spark and forked repository, but only if docker changes exist
-    if: needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.precondition.outputs.required).docker == 'true'
+    if: needs.configure-jobs.outputs.type == 'regular' && needs.precondition.outputs.required.docker == 'true'
     name: Run Docker integration tests
     runs-on: ubuntu-20.04
     env:
