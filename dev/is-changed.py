@@ -71,8 +71,7 @@ def main():
         print("false")
         if opts.fail:
             sys.exit(1)
-    elif "root" in test_modules or modules.root in changed_modules:
-        print("true")
+    # TO BE REVERTED!
     elif len(set(test_modules).intersection(module_names)) == 0:
         print("false")
         if opts.fail:
