@@ -115,7 +115,8 @@ jobs:
       GITHUB_PREV_SHA: ${{ github.event.before }}
     outputs:
       required: ${{ fromJSON( steps.set-outputs.outputs.required ) }}
-      spark-matrix: ${{ fromJSON( steps.spark.outputs.matrix ) }}
+      spark-matrix: ${{ steps.spark.outputs.matrix }}
+      pyspark-matrix: ${{ steps.pyspark.outputs.matrix }}
     steps:
     - name: Checkout Spark repository
       uses: actions/checkout@v2
@@ -302,7 +303,8 @@ jobs:
     runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
-      matrix: ${{ needs.precondition.outputs.spark-matrix }}
+      matrix:
+        include: ${{ fromJSON( needs.precondition.outputs.spark-matrix ) }}
     env:
       MODULES_TO_TEST: ${{ matrix.modules }}
       EXCLUDED_TAGS: ${{ matrix.excluded-tags }}
@@ -393,7 +395,8 @@ jobs:
       image: dongjoon/apache-spark-github-action-image:20220207
     strategy:
       fail-fast: false
-      matrix: ${{ needs.precondition.outputs.pyspark-matrix }}
+      matrix:
+        include: ${{ fromJSON( needs.precondition.outputs.pyspark-matrix ) }}
     env:
       MODULES_TO_TEST: ${{ matrix.modules }}
       HADOOP_PROFILE: ${{ needs.configure-jobs.outputs.hadoop }}
