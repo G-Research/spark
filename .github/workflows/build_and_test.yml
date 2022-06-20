@@ -55,81 +55,68 @@ jobs:
     # Run all jobs for Apache Spark repository
     # Run only non-scheduled jobs for forked repositories
     if: github.repository == 'apache/spark' || github.event_name != 'schedule'
-    outputs:
-      java: ${{ steps.set-outputs.outputs.java }}
-      branch: ${{ steps.set-outputs.outputs.branch }}
-      hadoop: ${{ steps.set-outputs.outputs.hadoop }}
-      type: ${{ steps.set-outputs.outputs.type }}
-      envs: ${{ steps.set-outputs.outputs.envs }}
-    steps:
-    - name: Configure branch and additional environment variables
-      id: set-outputs
-      run: |
-        if [ "${{ github.event.schedule }}" = "0 1 * * *" ]; then
-          echo '::set-output name=java::8'
-          echo '::set-output name=branch::master'
-          echo '::set-output name=type::scheduled'
-          echo '::set-output name=envs::{}'
-          echo '::set-output name=hadoop::hadoop2'
-        elif [ "${{ github.event.schedule }}" = "0 4 * * *" ]; then
-          echo '::set-output name=java::8'
-          echo '::set-output name=branch::master'
-          echo '::set-output name=type::scheduled'
-          echo '::set-output name=envs::{"SCALA_PROFILE": "scala2.13"}'
-          echo '::set-output name=hadoop::hadoop3'
-        elif [ "${{ github.event.schedule }}" = "0 7 * * *" ]; then
-          echo '::set-output name=java::8'
-          echo '::set-output name=branch::branch-3.2'
-          echo '::set-output name=type::scheduled'
-          echo '::set-output name=envs::{"SCALA_PROFILE": "scala2.13"}'
-          echo '::set-output name=hadoop::hadoop3.2'
-        elif [ "${{ github.event.schedule }}" = "0 10 * * *" ]; then
-          echo '::set-output name=java::8'
-          echo '::set-output name=branch::master'
-          echo '::set-output name=type::pyspark-coverage-scheduled'
-          echo '::set-output name=envs::{"PYSPARK_CODECOV": "true"}'
-          echo '::set-output name=hadoop::hadoop3'
-        elif [ "${{ github.event.schedule }}" = "0 13 * * *" ]; then
-          echo '::set-output name=java::11'
-          echo '::set-output name=branch::master'
-          echo '::set-output name=type::scheduled'
-          echo '::set-output name=envs::{"SKIP_MIMA": "true", "SKIP_UNIDOC": "true"}'
-          echo '::set-output name=hadoop::hadoop3'
-        elif [ "${{ github.event.schedule }}" = "0 16 * * *" ]; then
-          echo '::set-output name=java::17'
-          echo '::set-output name=branch::master'
-          echo '::set-output name=type::scheduled'
-          echo '::set-output name=envs::{"SKIP_MIMA": "true", "SKIP_UNIDOC": "true"}'
-          echo '::set-output name=hadoop::hadoop3'
-        elif [ "${{ github.event.schedule }}" = "0 19 * * *" ]; then
-          echo '::set-output name=java::8'
-          echo '::set-output name=branch::branch-3.3'
-          echo '::set-output name=type::scheduled'
-          echo '::set-output name=envs::{"SCALA_PROFILE": "scala2.13"}'
-          echo '::set-output name=hadoop::hadoop3'
-        else
-          echo '::set-output name=java::8'
-          echo '::set-output name=branch::master'  # NOTE: UPDATE THIS WHEN CUTTING BRANCH
-          echo '::set-output name=type::regular'
-          echo '::set-output name=envs::{"SPARK_ANSI_SQL_MODE": "${{ inputs.ansi_enabled }}"}'
-          echo '::set-output name=hadoop::hadoop3'
-        fi
-
-  precondition:
-    name: Check changes
-    runs-on: ubuntu-20.04
-    needs: configure-jobs
     env:
       GITHUB_PREV_SHA: ${{ github.event.before }}
     outputs:
-      required: ${{ steps.set-outputs.outputs.required }}
+      java: ${{ steps.config.outputs.java }}
+      branch: ${{ steps.config.outputs.branch }}
+      hadoop: ${{ steps.config.outputs.hadoop }}
+      type: ${{ steps.config.outputs.type }}
+      envs: ${{ steps.config.outputs.envs }}
+      required: ${{ steps.changes.outputs.required }}
     steps:
+    - name: Configure branch and additional environment variables
+      id: config
+      run: |
+        # default values
+        java=8
+        branch=master
+        type=scheduled
+        hadoop=hadoop3
+
+        # override default values based on event
+        if [ "${{ github.event.schedule }}" = "0 1 * * *" ]; then
+          envs='{}'
+          hadoop='hadoop2'
+        elif [ "${{ github.event.schedule }}" = "0 4 * * *" ]; then
+          envs='{"SCALA_PROFILE": "scala2.13"}'
+          hadoop='hadoop3'
+        elif [ "${{ github.event.schedule }}" = "0 7 * * *" ]; then
+          branch='branch-3.2'
+          envs='{"SCALA_PROFILE": "scala2.13"}'
+          hadoop='hadoop3.2'
+        elif [ "${{ github.event.schedule }}" = "0 10 * * *" ]; then
+          type=pyspark-coverage-scheduled
+          envs='{"PYSPARK_CODECOV": "true"}'
+        elif [ "${{ github.event.schedule }}" = "0 13 * * *" ]; then
+          java=11
+          envs='{"SKIP_MIMA": "true", "SKIP_UNIDOC": "true"}'
+        elif [ "${{ github.event.schedule }}" = "0 16 * * *" ]; then
+          java=17
+          envs='{"SKIP_MIMA": "true", "SKIP_UNIDOC": "true"}'
+        elif [ "${{ github.event.schedule }}" = "0 19 * * *" ]; then
+          branch='branch-3.3'
+          envs='{"SCALA_PROFILE": "scala2.13"}'
+        else
+          # NOTE: UPDATE THIS WHEN CUTTING BRANCH
+          branch=master
+          type=regular
+          envs='{"SPARK_ANSI_SQL_MODE": "${{ inputs.ansi_enabled }}"}'
+        fi
+
+        # output values
+        echo '::set-output name=java::$java'
+        echo '::set-output name=branch::$branch'
+        echo '::set-output name=type::$type'
+        echo '::set-output name=envs::$env'
+        echo '::set-output name=hadoop::$hadoop'
+
     - name: Checkout Spark repository
       uses: actions/checkout@v2
       with:
         fetch-depth: 0
         repository: apache/spark
-        ref: ${{ needs.configure-jobs.outputs.branch }}
+        ref: ${{ steps.config.outputs.branch }}
     - name: Sync the current branch with the latest in Apache Spark
       if: github.repository != 'apache/spark'
       run: |
@@ -137,8 +124,9 @@ jobs:
         git fetch https://github.com/$GITHUB_REPOSITORY.git ${GITHUB_REF#refs/heads/}
         git -c user.name='Apache Spark Test Account' -c user.email='sparktestacc@gmail.com' merge --no-commit --progress --squash FETCH_HEAD
         git -c user.name='Apache Spark Test Account' -c user.email='sparktestacc@gmail.com' commit -m "Merged commit" --allow-empty
+
     - name: Check all modules
-      id: set-outputs
+      id: changes
       run: |
         # is-changed.py is missing in branch-3.2, and it might run in scheduled build, see also SPARK-39517
         build=true; pyspark=true; sparkr=true; tpcds=true; docker=true;
@@ -156,12 +144,12 @@ jobs:
   # Build: build Spark and run the tests for specified modules.
   build:
     name: "Build modules (${{ format('{0}, {1} job', needs.configure-jobs.outputs.branch, needs.configure-jobs.outputs.type) }}): ${{ matrix.modules }} ${{ matrix.comment }} (JDK ${{ matrix.java }}, ${{ matrix.hadoop }}, ${{ matrix.hive }})"
-    needs: [configure-jobs, precondition]
+    needs: [configure-jobs]
     # Run scheduled jobs for Apache Spark only
     # Run regular jobs for commit in both Apache Spark and forked repository, but only if changes exist
     if: >-
       needs.configure-jobs.outputs.type == 'scheduled'
-      || (needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.precondition.outputs.required).build == 'true')
+      || (needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.configure-jobs.outputs.required).build == 'true')
     # Ubuntu 20.04 is the latest LTS. The next LTS is 22.04.
     runs-on: ubuntu-20.04
     strategy:
@@ -300,14 +288,14 @@ jobs:
         path: "**/target/unit-tests.log"
 
   pyspark:
-    needs: [configure-jobs, precondition]
+    needs: [configure-jobs]
     # Run PySpark coverage scheduled jobs for Apache Spark only
     # Run scheduled jobs with JDK 17 in Apache Spark
     # Run regular jobs for commit in both Apache Spark and forked repository, but only if pyspark changes exist
     if: >-
       needs.configure-jobs.outputs.type == 'pyspark-coverage-scheduled'
       || (needs.configure-jobs.outputs.type == 'scheduled' && needs.configure-jobs.outputs.java == '17')
-      || (needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.precondition.outputs.required).pyspark == 'true')
+      || (needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.configure-jobs.outputs.required).pyspark == 'true')
     name: "Build modules (${{ format('{0}, {1} job', needs.configure-jobs.outputs.branch, needs.configure-jobs.outputs.type) }}): ${{ matrix.modules }}"
     runs-on: ubuntu-20.04
     container:
@@ -409,12 +397,12 @@ jobs:
         path: "**/target/unit-tests.log"
 
   sparkr:
-    needs: [configure-jobs, precondition]
+    needs: [configure-jobs]
     # Run scheduled jobs with JDK 17 in Apache Spark
     # Run regular jobs for commit in both Apache Spark and forked repository, but only if sparkr changes exist
     if: >-
       (needs.configure-jobs.outputs.type == 'scheduled' && needs.configure-jobs.outputs.java == '17')
-      || (needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.precondition.outputs.required).sparkr == 'true')
+      || (needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.configure-jobs.outputs.required).sparkr == 'true')
     name: "Build modules: sparkr"
     runs-on: ubuntu-20.04
     container:
@@ -595,9 +583,9 @@ jobs:
         bundle exec jekyll build
 
   java-11-17:
-    needs: [configure-jobs, precondition]
+    needs: [configure-jobs]
     # Run regular jobs for commit in both Apache Spark and forked repository, but only if changes exist
-    if: needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.precondition.outputs.required).build == 'true'
+    if: needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.configure-jobs.outputs.required).build == 'true'
     name: Java ${{ matrix.java }} build with Maven
     strategy:
       fail-fast: false
@@ -651,9 +639,9 @@ jobs:
         rm -rf ~/.m2/repository/org/apache/spark
 
   scala-213:
-    needs: [configure-jobs, precondition]
+    needs: [configure-jobs]
     # Run regular jobs for commit in both Apache Spark and forked repository, but only if changes exist
-    if: needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.precondition.outputs.required).build == 'true'
+    if: needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.configure-jobs.outputs.required).build == 'true'
     name: Scala 2.13 build with SBT
     runs-on: ubuntu-20.04
     steps:
@@ -697,9 +685,9 @@ jobs:
         ./build/sbt -Pyarn -Pmesos -Pkubernetes -Pvolcano -Phive -Phive-thriftserver -Phadoop-cloud -Pkinesis-asl -Pdocker-integration-tests -Pkubernetes-integration-tests -Pspark-ganglia-lgpl -Pscala-2.13 compile test:compile
 
   tpcds-1g:
-    needs: [configure-jobs, precondition]
+    needs: [configure-jobs]
     # Run regular jobs for commit in both Apache Spark and forked repository, but only if tpcds changes exist
-    if: needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.precondition.outputs.required).tpcds == 'true'
+    if: needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.configure-jobs.outputs.required).tpcds == 'true'
     name: Run TPC-DS queries with SF=1
     runs-on: ubuntu-20.04
     env:
@@ -793,9 +781,9 @@ jobs:
         path: "**/target/unit-tests.log"
 
   docker-integration-tests:
-    needs: [configure-jobs, precondition]
+    needs: [configure-jobs]
     # Run regular jobs for commit in both Apache Spark and forked repository, but only if docker changes exist
-    if: needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.precondition.outputs.required).docker == 'true'
+    if: needs.configure-jobs.outputs.type == 'regular' && fromJson(needs.configure-jobs.outputs.required).docker == 'true'
     name: Run Docker integration tests
     runs-on: ubuntu-20.04
     env:
