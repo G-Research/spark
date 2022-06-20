@@ -46,6 +46,7 @@ runs:
   using: 'composite'
   steps:
     - name: Set env
+      shell: bash
       run: |
         echo "MODULES_TO_TEST=${{ inputs.modules }}" >> $GITHUB_ENV
         echo "EXCLUDED_TAGS=${{ inputs.excluded-tags }}" >> $GITHUB_ENV
@@ -65,6 +66,7 @@ runs:
 
     - name: Sync the current branch with the latest in Apache Spark
       if: github.repository != 'apache/spark'
+      shell: bash
       run: |
         echo "APACHE_SPARK_REF=$(git rev-parse HEAD)" >> $GITHUB_ENV
         git fetch https://github.com/$GITHUB_REPOSITORY.git ${GITHUB_REF#refs/heads/}
@@ -83,6 +85,7 @@ runs:
         key: build-${{ hashFiles('**/pom.xml', 'project/build.properties', 'build/mvn', 'build/sbt', 'build/sbt-launch-lib.bash', 'build/spark-build-info') }}
         restore-keys: |
           build-
+
     - name: Cache Coursier local repository
       uses: actions/cache@v2
       with:
@@ -90,24 +93,32 @@ runs:
         key: pyspark-coursier-${{ hashFiles('**/pom.xml', '**/plugins.sbt') }}
         restore-keys: |
           pyspark-coursier-
+
     - name: Install Java ${{ inputs.java-version }}
       uses: actions/setup-java@v1
       with:
         java-version: ${{ inputs.java-version }}
+
     - name: List Python packages (Python 3.9, PyPy3)
+      shell: bash
       run: |
         python3.9 -m pip list
         pypy3 -m pip list
+
     - name: Install Conda for pip packaging test
+      shell: bash
       run: |
         curl -s https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh > miniconda.sh
         bash miniconda.sh -b -p $HOME/miniconda
+
     # Run the tests.
     - name: Run tests
       env: ${{ inputs.envs }}
+      shell: bash
       run: |
         export PATH=$PATH:$HOME/miniconda/bin
         ./dev/run-tests --parallelism 1 --modules "$MODULES_TO_TEST"
+
     - name: Upload coverage to Codecov
       if: inputs.job-type == 'pyspark-coverage-scheduled'
       uses: codecov/codecov-action@v2
@@ -115,12 +126,14 @@ runs:
         files: ./python/coverage.xml
         flags: unittests
         name: PySpark
+
     - name: Upload test results to report
       if: always()
       uses: actions/upload-artifact@v2
       with:
         name: test-results-${{ input.modules }}--8-${{ inputs.hadoop-version }}-hive2.3
         path: "**/target/test-reports/*.xml"
+
     - name: Upload unit tests log files
       if: failure()
       uses: actions/upload-artifact@v2
