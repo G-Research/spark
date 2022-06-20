@@ -321,38 +321,38 @@ jobs:
       GITHUB_PREV_SHA: ${{ github.event.before }}
       SPARK_LOCAL_IP: localhost
     steps:
-      - name: Checkout Spark repository
-        uses: actions/checkout@v2
-        # In order to fetch changed files
-        with:
-          fetch-depth: 0
-          repository: apache/spark
-          ref: ${{ needs.configure-jobs.outputs.branch }}
+    - name: Checkout Spark repository
+      uses: actions/checkout@v2
+      # In order to fetch changed files
+      with:
+        fetch-depth: 0
+        repository: apache/spark
+        ref: ${{ needs.configure-jobs.outputs.branch }}
 
-      - name: Sync the current branch with the latest in Apache Spark
-        if: github.repository != 'apache/spark'
-        run: |
-          echo "APACHE_SPARK_REF=$(git rev-parse HEAD)" >> $GITHUB_ENV
-          git fetch https://github.com/$GITHUB_REPOSITORY.git ${GITHUB_REF#refs/heads/}
-          git -c user.name='Apache Spark Test Account' -c user.email='sparktestacc@gmail.com' merge --no-commit --progress --squash FETCH_HEAD
-          git -c user.name='Apache Spark Test Account' -c user.email='sparktestacc@gmail.com' commit -m "Merged commit" --allow-empty
+    - name: Sync the current branch with the latest in Apache Spark
+      if: github.repository != 'apache/spark'
+      run: |
+        echo "APACHE_SPARK_REF=$(git rev-parse HEAD)" >> $GITHUB_ENV
+        git fetch https://github.com/$GITHUB_REPOSITORY.git ${GITHUB_REF#refs/heads/}
+        git -c user.name='Apache Spark Test Account' -c user.email='sparktestacc@gmail.com' merge --no-commit --progress --squash FETCH_HEAD
+        git -c user.name='Apache Spark Test Account' -c user.email='sparktestacc@gmail.com' commit -m "Merged commit" --allow-empty
 
-      - name: "Build and test"
-        uses: ./.github/actions/build-and-test-spark
-        # should be 'true' if not 'false', but we want to fall back to running tests if output is unexpected
-        if: matrix.changed != 'false'
-        with:
-          job-type: ${{ needs.configure-jobs.outputs.type }}
-          branch: ${{ needs.configure-jobs.outputs.branch }}
-          java-version: ${{ needs.configure-jobs.outputs.java }}
-          hadoop-version: ${{ needs.configure-jobs.outputs.hadoop }}
-          hive-version: hive2.3
-          envs: ${{ needs.configure-jobs.outputs.envs }}
-          modules: ${{ matrix.modules }}
-          included-tags: ${{ matrix.included-tags }}
-          excluded-tags: ${{ matrix.excluded-tags }}
-          label: ${{ matrix.label }}
-          ansi_enabled: ${{ inputs.ansi_enabled }}
+    - name: "Build and test"
+      uses: ./.github/actions/build-and-test-spark
+      # should be 'true' if not 'false', but we want to fall back to running tests if output is unexpected
+      if: matrix.changed != 'false'
+      with:
+        job-type: ${{ needs.configure-jobs.outputs.type }}
+        branch: ${{ needs.configure-jobs.outputs.branch }}
+        java-version: ${{ needs.configure-jobs.outputs.java }}
+        hadoop-version: ${{ needs.configure-jobs.outputs.hadoop }}
+        hive-version: hive2.3
+        envs: ${{ needs.configure-jobs.outputs.envs }}
+        modules: ${{ matrix.modules }}
+        included-tags: ${{ matrix.included-tags }}
+        excluded-tags: ${{ matrix.excluded-tags }}
+        label: ${{ matrix.label }}
+        ansi_enabled: ${{ inputs.ansi_enabled }}
 
   # Build PySpark and run the tests for specified modules.
   pyspark:
@@ -391,7 +391,6 @@ jobs:
         git fetch https://github.com/$GITHUB_REPOSITORY.git ${GITHUB_REF#refs/heads/}
         git -c user.name='Apache Spark Test Account' -c user.email='sparktestacc@gmail.com' merge --no-commit --progress --squash FETCH_HEAD
         git -c user.name='Apache Spark Test Account' -c user.email='sparktestacc@gmail.com' commit -m "Merged commit" --allow-empty
-
 
     - name: "Build and test"
       uses: ./.github/actions/build-and-test-pyspark
