@@ -18,25 +18,9 @@ inputs:
   hive-version:
     description: "The Hive version"
     required: true
-  envs:
-    description: "Environment vars as JSON object"
-    required: false
-    default: "{}"
   modules:
     description: "The modules to be build and tested as a comma-separated list"
     required: true
-  included-tags:
-    description: "Tags to include for testing"
-    required: false
-    default: ""
-  excluded-tags:
-    description: "Tags to exclude for testing"
-    required: false
-    default: ""
-  label:
-    description: "Job label"
-    required: false
-    default: ""
   ansi_enabled:
     description: "Use ANSI mode: 'true' or 'false'"
     required: false
@@ -96,7 +80,6 @@ runs:
 
     # Run the tests.
     - name: Run tests
-      env: ${{ inputs.envs }}
       shell: bash
       run: |
         export PATH=$PATH:$HOME/miniconda/bin
@@ -114,14 +97,14 @@ runs:
       if: always()
       uses: actions/upload-artifact@v2
       with:
-        name: test-results-${{ input.modules }}--8-${{ inputs.hadoop-version }}-hive2.3
+        name: test-results-${{ inputs.modules }}--8-${{ inputs.hadoop-version }}-hive2.3
         path: "**/target/test-reports/*.xml"
 
     - name: Upload unit tests log files
       if: failure()
       uses: actions/upload-artifact@v2
       with:
-        name: unit-tests-log-${{ input.modules }}--8-${{ inputs.hadoop-version }}-hive2.3
+        name: unit-tests-log-${{ inputs.modules }}--8-${{ inputs.hadoop-version }}-hive2.3
         path: "**/target/unit-tests.log"
 
 branding:

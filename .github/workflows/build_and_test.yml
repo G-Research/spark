@@ -311,7 +311,7 @@ jobs:
     runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON( needs.configure-jobs.outputs.spark-matrix ) }}
+      matrix: ${{fromJSON(needs.configure-jobs.outputs.spark-matrix)}}
     env:
       MODULES_TO_TEST: ${{ matrix.modules }}
       EXCLUDED_TAGS: ${{ matrix.excluded-tags }}
@@ -364,7 +364,7 @@ jobs:
       image: dongjoon/apache-spark-github-action-image:20220207
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON( needs.configure-jobs.outputs.spark-matrix ) }}
+      matrix: ${{fromJSON(needs.configure-jobs.outputs.spark-matrix)}}
     env:
       MODULES_TO_TEST: ${{ matrix.modules }}
       HADOOP_PROFILE: ${{ needs.configure-jobs.outputs.hadoop }}
@@ -402,7 +402,6 @@ jobs:
         java-version: ${{ needs.configure-jobs.outputs.java }}
         hadoop-version: ${{ needs.configure-jobs.outputs.hadoop }}
         hive-version: hive2.3
-        envs: ${{ needs.configure-jobs.outputs.envs }}
         modules: ${{ matrix.modules }}
         ansi_enabled: ${{ inputs.ansi_enabled }}
 

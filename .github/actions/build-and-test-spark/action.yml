@@ -101,7 +101,7 @@ runs:
 
     # Run the tests.
     - name: Run tests
-      env: ${{ fromJSON(inputs.envs) }}
+      env: ${{fromJSON(inputs.envs)}}
       shell: bash
       run: |
         # Hive "other tests" test needs larger metaspace size based on experiment.
