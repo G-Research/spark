@@ -364,7 +364,7 @@ jobs:
       image: dongjoon/apache-spark-github-action-image:20220207
     strategy:
       fail-fast: false
-      matrix: ${{fromJSON(needs.configure-jobs.outputs.spark-matrix)}}
+      matrix: ${{fromJSON(needs.configure-jobs.outputs.pyspark-matrix)}}
     env:
       MODULES_TO_TEST: ${{ matrix.modules }}
       HADOOP_PROFILE: ${{ needs.configure-jobs.outputs.hadoop }}
