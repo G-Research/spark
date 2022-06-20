@@ -64,6 +64,9 @@ jobs:
       type: ${{ steps.config.outputs.type }}
       envs: ${{ steps.config.outputs.envs }}
 
+      spark-matrix: ${{ steps.spark.outputs.matrix }}
+      pyspark-matrix: ${{ steps.pyspark.outputs.matrix }}
+
       # Run scheduled jobs for Apache Spark only
       # Run regular jobs for commit in both Apache Spark and forked repository, but only if changes exist
       spark-required: >-
@@ -184,6 +187,124 @@ jobs:
         echo "::set-output name=tpcds-required::$tpcds"
         echo "::set-output name=docker-required::$docker"
 
+    - name: Configure Spark matrix
+      id: spark
+      # TODO(SPARK-32246): We don't test 'streaming-kinesis-asl' for now.
+      # Kinesis tests depends on external Amazon kinesis service.
+      # Here, we split Hive and SQL tests into some of slow ones and the rest of them.
+      # Note that the modules below are from sparktestsupport/modules.py.
+      run: |
+        cat > matrix.json << EOF
+          {
+            "include": [
+              {
+                "modules": "core, unsafe, kvstore, avro, network-common, network-shuffle, repl, launcher, examples, sketch, graphx",
+                "java": "${{ steps.config.outputs.java }}",
+                "hadoop": "${{ steps.config.outputs.hadoop }}",
+                "hive": "hive2.3"
+              },
+              {
+                "modules": "catalyst, hive-thriftserver",
+                "java": "${{ steps.config.outputs.java }}",
+                "hadoop": "${{ steps.config.outputs.hadoop }}",
+                "hive": "hive2.3"
+              },
+              {
+                "modules": "streaming, sql-kafka-0-10, streaming-kafka-0-10, mllib-local, mllib, yarn, mesos, kubernetes, hadoop-cloud, spark-ganglia-lgpl",
+                "java": "${{ steps.config.outputs.java }}",
+                "hadoop": "${{ steps.config.outputs.hadoop }}",
+                "hive": "hive2.3"
+              },
+              {
+                "modules": "hive",
+                "java": "${{ steps.config.outputs.java }}",
+                "hadoop": "${{ steps.config.outputs.hadoop }}",
+                "hive": "hive2.3",
+                "included-tags": "org.apache.spark.tags.SlowHiveTest",
+                "comment": "- slow tests"
+              },
+              {
+                "modules": "hive",
+                "java": "${{ steps.config.outputs.java }}",
+                "hadoop": "${{ steps.config.outputs.hadoop }}",
+                "hive": "hive2.3",
+                "excluded-tags": "org.apache.spark.tags.SlowHiveTest",
+                "comment": "- other tests"
+              },
+              {
+                "modules": "sql",
+                "java": "${{ steps.config.outputs.java }}",
+                "hadoop": "${{ steps.config.outputs.hadoop }}",
+                "hive": "hive2.3",
+                "included-tags": "org.apache.spark.tags.ExtendedSQLTest",
+                "comment": "- slow tests"
+              },
+              {
+                "modules": "sql",
+                "java": "${{ steps.config.outputs.java }}",
+                "hadoop": "${{ steps.config.outputs.hadoop }}",
+                "hive": "hive2.3",
+                "excluded-tags": "org.apache.spark.tags.ExtendedSQLTest",
+                "comment": "- other tests"
+              }
+            ]
+          }
+          EOF
+
+          # detect changes for each of these module sets
+          echo "The following module sets changed:"
+          jq -c ".include[] | ." < matrix.json | while read line; do
+            modules=$(jq -r .modules <<<"$line")
+            changed="$(./dev/is-changed.py -m "$modules")"
+            echo "$changed: $modules"
+            jq ". + { changed: "" }" <<<"$line"
+          done | jq -n '{ include: [inputs] }' > matrix-with-changes.json
+
+          # output json
+          echo "::set-output name=matrix::$(jq -c . < matrix-with-changes.json)"
+          jq . < matrix-with-changes.json
+
+    - name: Configure PySpark matrix
+      id: pyspark
+      run: |
+        cat > matrix.json << EOF
+        {
+          "include": [
+            {
+              "modules": "pyspark-sql, pyspark-mllib, pyspark-resource",
+              "java": "${{ steps.config.outputs.java }}"
+            },
+            {
+              "modules": "pyspark-core, pyspark-streaming, pyspark-ml",
+              "java": "${{ steps.config.outputs.java }}"
+            },
+            {
+              "modules": "pyspark-pandas",
+              "java": "${{ steps.config.outputs.java }}"
+            },
+            {
+              "modules": "pyspark-pandas-slow",
+              "java": "${{ steps.config.outputs.java }}"
+            }
+          ]
+        }
+        EOF
+
+        # detect changes for each of these module sets
+        echo "The following module sets changed:"
+        jq -c ".include[] | ." < matrix.json | while read line; do
+          modules=$(jq -r .modules <<<"$line")
+          changed="$(./dev/is-changed.py -m "$modules")"
+          echo "$changed: $modules"
+          jq ". + { changed: "" }" <<<"$line"
+        done | jq -n '{ include: [inputs] }' > matrix-with-changes.json
+
+        # output json
+        echo "::set-output name=matrix::$(jq -c . < matrix-with-changes.json)"
+        jq . < matrix-with-changes.json
+
+
+
   # Build Spark and run the tests for specified modules.
   spark:
     name: "Build modules (${{ format('{0}, {1} job', needs.configure-jobs.outputs.branch, needs.configure-jobs.outputs.type) }}): ${{ matrix.modules }} ${{ matrix.comment }} (JDK ${{ matrix.java }}, ${{ matrix.hadoop }}, ${{ matrix.hive }})"
@@ -193,58 +314,7 @@ jobs:
     runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
-      matrix:
-        java:
-          - ${{ needs.configure-jobs.outputs.java }}
-        hadoop:
-          - ${{ needs.configure-jobs.outputs.hadoop }}
-        hive:
-          - hive2.3
-        # TODO(SPARK-32246): We don't test 'streaming-kinesis-asl' for now.
-        # Kinesis tests depends on external Amazon kinesis service.
-        # Note that the modules below are from sparktestsupport/modules.py.
-        modules:
-          - >-
-            core, unsafe, kvstore, avro,
-            network-common, network-shuffle, repl, launcher,
-            examples, sketch, graphx
-          - >-
-            catalyst, hive-thriftserver
-          - >-
-            streaming, sql-kafka-0-10, streaming-kafka-0-10,
-            mllib-local, mllib,
-            yarn, mesos, kubernetes, hadoop-cloud, spark-ganglia-lgpl
-        # Here, we split Hive and SQL tests into some of slow ones and the rest of them.
-        included-tags: [""]
-        excluded-tags: [""]
-        comment: [""]
-        include:
-          # Hive tests
-          - modules: hive
-            java: ${{ needs.configure-jobs.outputs.java }}
-            hadoop: ${{ needs.configure-jobs.outputs.hadoop }}
-            hive: hive2.3
-            included-tags: org.apache.spark.tags.SlowHiveTest
-            comment: "- slow tests"
-          - modules: hive
-            java: ${{ needs.configure-jobs.outputs.java }}
-            hadoop: ${{ needs.configure-jobs.outputs.hadoop }}
-            hive: hive2.3
-            excluded-tags: org.apache.spark.tags.SlowHiveTest
-            comment: "- other tests"
-          # SQL tests
-          - modules: sql
-            java: ${{ needs.configure-jobs.outputs.java }}
-            hadoop: ${{ needs.configure-jobs.outputs.hadoop }}
-            hive: hive2.3
-            included-tags: org.apache.spark.tags.ExtendedSQLTest
-            comment: "- slow tests"
-          - modules: sql
-            java: ${{ needs.configure-jobs.outputs.java }}
-            hadoop: ${{ needs.configure-jobs.outputs.hadoop }}
-            hive: hive2.3
-            excluded-tags: org.apache.spark.tags.ExtendedSQLTest
-            comment: "- other tests"
+      matrix: ${{ fromJSON( needs.configure-jobs.outputs.spark-matrix ) }}
     env:
       MODULES_TO_TEST: ${{ matrix.modules }}
       EXCLUDED_TAGS: ${{ matrix.excluded-tags }}
@@ -336,18 +406,7 @@ jobs:
       image: dongjoon/apache-spark-github-action-image:20220207
     strategy:
       fail-fast: false
-      matrix:
-        java:
-          - ${{ needs.configure-jobs.outputs.java }}
-        modules:
-          - >-
-            pyspark-sql, pyspark-mllib, pyspark-resource
-          - >-
-            pyspark-core, pyspark-streaming, pyspark-ml
-          - >-
-            pyspark-pandas
-          - >-
-            pyspark-pandas-slow
+      matrix: ${{ fromJSON( needs.configure-jobs.outputs.spark-matrix ) }}
     env:
       MODULES_TO_TEST: ${{ matrix.modules }}
       HADOOP_PROFILE: ${{ needs.configure-jobs.outputs.hadoop }}
