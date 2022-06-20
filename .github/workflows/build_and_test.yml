@@ -338,16 +338,16 @@ jobs:
         git -c user.name='Apache Spark Test Account' -c user.email='sparktestacc@gmail.com' commit -m "Merged commit" --allow-empty
 
     - name: "Build and test"
-      uses: ./.github/workflows/build_and_test_spark
+      uses: ./.github/workflows/build_and_test_spark.yml
       # should be 'true' if not 'false', but we want to fall back to running tests if output is unexpected
       if: matrix.changed != 'false'
       with:
-        job-type: ${{ needs.configure-jobs.outputs.type }}
-        branch: ${{ needs.configure-jobs.outputs.branch }}
-        java-version: ${{ needs.configure-jobs.outputs.java }}
-        hadoop-version: ${{ needs.configure-jobs.outputs.hadoop }}
-        hive-version: hive2.3
-        envs: ${{ needs.configure-jobs.outputs.envs }}
+        job-type: ${{ matrix.type }}
+        branch: ${{ matrix.branch }}
+        java-version: ${{ matrix.java }}
+        hadoop-version: ${{ matrix.hadoop }}
+        hive-version: ${{ matrix.hive }}
+        envs: ${{ matrix.envs }}
         modules: ${{ matrix.modules }}
         included-tags: ${{ matrix.included-tags }}
         excluded-tags: ${{ matrix.excluded-tags }}
