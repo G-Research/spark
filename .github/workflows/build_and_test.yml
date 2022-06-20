@@ -252,16 +252,15 @@ jobs:
         EOF
 
         # detect changes for each of these module sets
-        echo "The following module sets changed:"
         jq -c ".include[] | ." < matrix.json | while read line; do
           modules=$(jq -r .modules <<<"$line")
           changed="$(./dev/is-changed.py -m "$modules")"
-          echo "$changed: $modules" >&2
           jq ". + { changed: \"$changed\" }" <<<"$line"
         done | jq -n '{ include: [inputs] }' > matrix-with-changes.json
 
         # output json
         echo "::set-output name=matrix::$(jq -c . < matrix-with-changes.json)"
+        echo "The strategy matrix:"
         jq . < matrix-with-changes.json
 
     - name: Configure PySpark matrix
@@ -291,16 +290,15 @@ jobs:
         EOF
 
         # detect changes for each of these module sets
-        echo "The following module sets changed:"
         jq -c ".include[] | ." < matrix.json | while read line; do
           modules=$(jq -r .modules <<<"$line")
           changed="$(./dev/is-changed.py -m "$modules")"
-          echo "$changed: $modules" >&2
           jq ". + { changed: \"$changed\" }" <<<"$line"
         done | jq -n '{ include: [inputs] }' > matrix-with-changes.json
 
         # output json
         echo "::set-output name=matrix::$(jq -c . < matrix-with-changes.json)"
+        echo "The strategy matrix:"
         jq . < matrix-with-changes.json
 
 
