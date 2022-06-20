@@ -257,7 +257,7 @@ jobs:
             modules=$(jq -r .modules <<<"$line")
             changed="$(./dev/is-changed.py -m "$modules")"
             echo "$changed: $modules"
-            jq ". + { changed: "" }" <<<"$line"
+            jq ". + { \"changed\": \"$changed\" }" <<<"$line"
           done | jq -n '{ include: [inputs] }' > matrix-with-changes.json
 
           # output json
@@ -296,7 +296,7 @@ jobs:
           modules=$(jq -r .modules <<<"$line")
           changed="$(./dev/is-changed.py -m "$modules")"
           echo "$changed: $modules"
-          jq ". + { changed: "" }" <<<"$line"
+          jq ". + { \"changed\": \"$changed\" }" <<<"$line"
         done | jq -n '{ include: [inputs] }' > matrix-with-changes.json
 
         # output json
