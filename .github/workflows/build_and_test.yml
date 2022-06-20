@@ -148,7 +148,7 @@ jobs:
         echo "::set-output name=java::$java"
         echo "::set-output name=branch::$branch"
         echo "::set-output name=type::$type"
-        echo "::set-output name=envs::$env"
+        echo "::set-output name=envs::$envs"
         echo "::set-output name=hadoop::$hadoop"
 
     - name: Checkout Spark repository
