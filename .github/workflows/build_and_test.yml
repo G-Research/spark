@@ -195,74 +195,74 @@ jobs:
       # Note that the modules below are from sparktestsupport/modules.py.
       run: |
         cat > matrix.json << EOF
-          {
-            "include": [
-              {
-                "modules": "core, unsafe, kvstore, avro, network-common, network-shuffle, repl, launcher, examples, sketch, graphx",
-                "java": "${{ steps.config.outputs.java }}",
-                "hadoop": "${{ steps.config.outputs.hadoop }}",
-                "hive": "hive2.3"
-              },
-              {
-                "modules": "catalyst, hive-thriftserver",
-                "java": "${{ steps.config.outputs.java }}",
-                "hadoop": "${{ steps.config.outputs.hadoop }}",
-                "hive": "hive2.3"
-              },
-              {
-                "modules": "streaming, sql-kafka-0-10, streaming-kafka-0-10, mllib-local, mllib, yarn, mesos, kubernetes, hadoop-cloud, spark-ganglia-lgpl",
-                "java": "${{ steps.config.outputs.java }}",
-                "hadoop": "${{ steps.config.outputs.hadoop }}",
-                "hive": "hive2.3"
-              },
-              {
-                "modules": "hive",
-                "java": "${{ steps.config.outputs.java }}",
-                "hadoop": "${{ steps.config.outputs.hadoop }}",
-                "hive": "hive2.3",
-                "included-tags": "org.apache.spark.tags.SlowHiveTest",
-                "comment": "- slow tests"
-              },
-              {
-                "modules": "hive",
-                "java": "${{ steps.config.outputs.java }}",
-                "hadoop": "${{ steps.config.outputs.hadoop }}",
-                "hive": "hive2.3",
-                "excluded-tags": "org.apache.spark.tags.SlowHiveTest",
-                "comment": "- other tests"
-              },
-              {
-                "modules": "sql",
-                "java": "${{ steps.config.outputs.java }}",
-                "hadoop": "${{ steps.config.outputs.hadoop }}",
-                "hive": "hive2.3",
-                "included-tags": "org.apache.spark.tags.ExtendedSQLTest",
-                "comment": "- slow tests"
-              },
-              {
-                "modules": "sql",
-                "java": "${{ steps.config.outputs.java }}",
-                "hadoop": "${{ steps.config.outputs.hadoop }}",
-                "hive": "hive2.3",
-                "excluded-tags": "org.apache.spark.tags.ExtendedSQLTest",
-                "comment": "- other tests"
-              }
-            ]
-          }
-          EOF
+        {
+          "include": [
+            {
+              "modules": "core, unsafe, kvstore, avro, network-common, network-shuffle, repl, launcher, examples, sketch, graphx",
+              "java": "${{ steps.config.outputs.java }}",
+              "hadoop": "${{ steps.config.outputs.hadoop }}",
+              "hive": "hive2.3"
+            },
+            {
+              "modules": "catalyst, hive-thriftserver",
+              "java": "${{ steps.config.outputs.java }}",
+              "hadoop": "${{ steps.config.outputs.hadoop }}",
+              "hive": "hive2.3"
+            },
+            {
+              "modules": "streaming, sql-kafka-0-10, streaming-kafka-0-10, mllib-local, mllib, yarn, mesos, kubernetes, hadoop-cloud, spark-ganglia-lgpl",
+              "java": "${{ steps.config.outputs.java }}",
+              "hadoop": "${{ steps.config.outputs.hadoop }}",
+              "hive": "hive2.3"
+            },
+            {
+              "modules": "hive",
+              "java": "${{ steps.config.outputs.java }}",
+              "hadoop": "${{ steps.config.outputs.hadoop }}",
+              "hive": "hive2.3",
+              "included-tags": "org.apache.spark.tags.SlowHiveTest",
+              "comment": "- slow tests"
+            },
+            {
+              "modules": "hive",
+              "java": "${{ steps.config.outputs.java }}",
+              "hadoop": "${{ steps.config.outputs.hadoop }}",
+              "hive": "hive2.3",
+              "excluded-tags": "org.apache.spark.tags.SlowHiveTest",
+              "comment": "- other tests"
+            },
+            {
+              "modules": "sql",
+              "java": "${{ steps.config.outputs.java }}",
+              "hadoop": "${{ steps.config.outputs.hadoop }}",
+              "hive": "hive2.3",
+              "included-tags": "org.apache.spark.tags.ExtendedSQLTest",
+              "comment": "- slow tests"
+            },
+            {
+              "modules": "sql",
+              "java": "${{ steps.config.outputs.java }}",
+              "hadoop": "${{ steps.config.outputs.hadoop }}",
+              "hive": "hive2.3",
+              "excluded-tags": "org.apache.spark.tags.ExtendedSQLTest",
+              "comment": "- other tests"
+            }
+          ]
+        }
+        EOF
 
-          # detect changes for each of these module sets
-          echo "The following module sets changed:"
-          jq -c ".include[] | ." < matrix.json | while read line; do
-            modules=$(jq -r .modules <<<"$line")
-            changed="$(./dev/is-changed.py -m "$modules")"
-            echo "$changed: $modules"
-            jq ". + { \"changed\": \"$changed\" }" <<<"$line"
-          done | jq -n '{ include: [inputs] }' > matrix-with-changes.json
+        # detect changes for each of these module sets
+        echo "The following module sets changed:"
+        jq -c ".include[] | ." < matrix.json | while read line; do
+          modules=$(jq -r .modules <<<"$line")
+          changed="$(./dev/is-changed.py -m "$modules")"
+          echo "$changed: $modules" >&2
+          jq ". + { changed: \"$changed\" }" <<<"$line"
+        done | jq -n '{ include: [inputs] }' > matrix-with-changes.json
 
-          # output json
-          echo "::set-output name=matrix::$(jq -c . < matrix-with-changes.json)"
-          jq . < matrix-with-changes.json
+        # output json
+        echo "::set-output name=matrix::$(jq -c . < matrix-with-changes.json)"
+        jq . < matrix-with-changes.json
 
     - name: Configure PySpark matrix
       id: pyspark
@@ -295,8 +295,8 @@ jobs:
         jq -c ".include[] | ." < matrix.json | while read line; do
           modules=$(jq -r .modules <<<"$line")
           changed="$(./dev/is-changed.py -m "$modules")"
-          echo "$changed: $modules"
-          jq ". + { \"changed\": \"$changed\" }" <<<"$line"
+          echo "$changed: $modules" >&2
+          jq ". + { changed: \"$changed\" }" <<<"$line"
         done | jq -n '{ include: [inputs] }' > matrix-with-changes.json
 
         # output json
