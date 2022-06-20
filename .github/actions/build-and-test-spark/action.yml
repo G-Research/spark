@@ -113,14 +113,14 @@ runs:
       if: always()
       uses: actions/upload-artifact@v2
       with:
-        name: test-results-${{ inputs.modules }}-${{ inputs.comment }}-${{ inputs.java-version }}-${{ inputs.hadoop-version }}-${{ inputs.hive-version }}
+        name: test-results-${{ inputs.modules }}-${{ inputs.label }}-${{ inputs.java-version }}-${{ inputs.hadoop-version }}-${{ inputs.hive-version }}
         path: "**/target/test-reports/*.xml"
 
     - name: Upload unit tests log files
       if: failure()
       uses: actions/upload-artifact@v2
       with:
-        name: unit-tests-log-${{ inputs.modules }}-${{ inputs.comment }}-${{ inputs.java-version }}-${{ inputs.hadoop-version }}-${{ inputs.hive-version }}
+        name: unit-tests-log-${{ inputs.modules }}-${{ inputs.label }}-${{ inputs.java-version }}-${{ inputs.hadoop-version }}-${{ inputs.hive-version }}
         path: "**/target/unit-tests.log"
 
 branding:
