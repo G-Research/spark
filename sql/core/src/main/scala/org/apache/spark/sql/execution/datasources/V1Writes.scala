@@ -172,8 +172,10 @@ object V1WritesUtils {
     // Static partition must to be ahead of dynamic partition
     val dynamicPartitionColumns = partitionColumns.drop(numStaticPartitionCols)
 
-    if (SQLConf.get.maxConcurrentOutputFileWriters > 0 && sortColumns.isEmpty) {
-      // Do not insert logical sort when concurrent output writers are enabled.
+    if (SQLConf.get.maxConcurrentOutputFileWriters > 0 && sortColumns.isEmpty
+      || writerBucketSpec.isEmpty) {
+      // Do not insert logical sort when concurrent output writers are enabled
+      // or no bucket spec exists.
       Seq.empty
     } else {
       // We should first sort by dynamic partition columns, then bucket id, and finally sorting

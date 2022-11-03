@@ -140,10 +140,16 @@ object FileFormatWriter extends Logging {
       statsTrackers = statsTrackers
     )
 
-    // We should first sort by dynamic partition columns, then bucket id, and finally sorting
-    // columns.
-    val requiredOrdering = partitionColumns.drop(numStaticPartitionCols) ++
-        writerBucketSpec.map(_.bucketIdExpression) ++ sortColumns
+    // Only require order when bucket spec is given
+    val requiredOrdering = if (writerBucketSpec.isEmpty) {
+      Seq.empty
+    } else {
+      // We should first sort by dynamic partition columns, then bucket id, and finally sorting
+      // columns.
+      partitionColumns.drop(numStaticPartitionCols) ++ writerBucketSpec.map(_.bucketIdExpression) ++
+        sortColumns
+    }
+
     // the sort order doesn't matter
     // Use the output ordering from the original plan before adding the empty2null projection.
     val actualOrdering = plan.outputOrdering.map(_.child)
@@ -171,6 +177,9 @@ object FileFormatWriter extends Logging {
 
     try {
       val (rdd, concurrentOutputWriterSpec) = if (orderingMatched) {
+        // scalastyle:off println
+        scala.Console.println(empty2NullPlan.treeString)
+        // scalastyle:on println
         (empty2NullPlan.execute(), None)
       } else {
         // SPARK-21165: the `requiredOrdering` is based on the attributes from analyzed plan, and
@@ -189,6 +198,9 @@ object FileFormatWriter extends Logging {
           (empty2NullPlan.execute(),
             Some(ConcurrentOutputWriterSpec(maxWriters, () => sortPlan.createSorter())))
         } else {
+          // scalastyle:off println
+          scala.Console.println(sortPlan.treeString)
+          // scalastyle:on println
           (sortPlan.execute(), None)
         }
       }
