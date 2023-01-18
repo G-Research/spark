@@ -2881,6 +2881,26 @@ class DataFrameSuite extends QueryTest
       parameters = Map("objectName" -> "`d`", "proposal" -> "`a`, `b`, `c`"))
   }
 
+    test("groupBy.as: cogroup two grouped dataframes") {
+      val df1 = Seq((1, 2, 3), (2, 3, 4)).toDF("a", "b", "c")
+        .repartition($"a", $"b").sortWithinPartitions("a", "b").cache()
+      val df2 = Seq((1, 2, 4), (2, 3, 5)).toDF("a", "b", "c")
+        .repartition($"a", $"b").sortWithinPartitions("a", "b").cache()
+
+      val window = Window.partitionBy("b", "a")
+
+      implicit val valueEncoder = RowEncoder(df1.schema)
+
+      val df3 = df1.groupBy("a", "b").as[GroupByKey, Row]
+        .cogroup(df2.withColumn("c", sum($"c").over(window)).groupBy("a", "b").as[GroupByKey, Row]) { case (_, data1, data2) =>
+          data1.zip(data2).map { p =>
+            p._1.getInt(2) + p._2.getInt(2)
+          }
+        }.toDF
+      df3.show()
+      checkAnswer(df3.sort("value"), Row(7) :: Row(9) :: Nil)
+    }
+
   test("SPARK-40601: flatMapCoGroupsInPandas should fail with different number of keys") {
     val df1 = Seq((1, 2, "A1"), (2, 1, "A2")).toDF("key1", "key2", "value")
     val df2 = df1.filter($"value" === "A2")
