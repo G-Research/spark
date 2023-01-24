@@ -1876,6 +1876,25 @@ class Dataset[T] private[sql](
   def reduce(func: ReduceFunction[T]): T = reduce(func.call(_, _))
 
   /**
+   * Add unique grouping key columns that do not conflict with existing output attributes of plan.
+   */
+  private[this] def addUniqueGroupingKey[K: Encoder](plan: LogicalPlan, func: T => K):
+      (LogicalPlan, Seq[Attribute]) = {
+    // materialize func result as new column
+    val withGroupingKey = AppendColumns(func, plan)
+
+    // `AppendColumns`'s serializer might produce conflict attribute names
+    // leading to ambiguous references exception
+    // we prefix new columns with as many _ as needed, to make them distinct to existing attributes
+    val prefix = '_'.toString * (plan.output.map(_.name.takeWhile(_.equals('_')).length).max + 1)
+    val prefixedGroupingKey = withGroupingKey.newColumns
+      .map(a => Alias(a, prefix + a.name)())
+      .map(_.toAttribute)
+
+    (Project(plan.output ++ prefixedGroupingKey, withGroupingKey), prefixedGroupingKey)
+  }
+
+  /**
    * (Scala-specific)
    * Returns a [[KeyValueGroupedDataset]] where the data is grouped by the given key `func`.
    *
@@ -1883,7 +1902,7 @@ class Dataset[T] private[sql](
    * @since 2.0.0
    */
   def groupByKey[K: Encoder](func: T => K): KeyValueGroupedDataset[K, T] = {
-    val withGroupingKey = AppendColumns(func, logicalPlan)
+    val (withGroupingKey, groupingKey) = addUniqueGroupingKey(logicalPlan, func)
     val executed = sparkSession.sessionState.executePlan(withGroupingKey)
 
     new KeyValueGroupedDataset(
@@ -1891,7 +1910,7 @@ class Dataset[T] private[sql](
       encoderFor[T],
       executed,
       logicalPlan.output,
-      withGroupingKey.newColumns)
+      groupingKey)
   }
 
   /**
