@@ -573,7 +573,7 @@ class DatasetSuite extends QueryTest
       "a", "30", "b", "3", "c", "1")
   }
 
-  test("groupBy function, flatMapSorted") {
+  test("groupBy, flatMapSorted") {
     val ds = Seq(("a", 1, 10), ("a", 2, 20), ("b", 2, 1), ("b", 1, 2), ("c", 1, 1))
       .toDF("key", "seq", "value")
     val grouped = ds.groupBy($"key").as[String, (String, Int, Int)]
@@ -599,7 +599,7 @@ class DatasetSuite extends QueryTest
       parameters = Map("elem" -> "'*'", "prettyName" -> "MapGroups"))
   }
 
-  test("groupByKey function, flatMapSorted") {
+  test("groupBy function, flatMapSorted") {
     val ds = Seq(("a", 1, 10), ("a", 2, 20), ("b", 2, 1), ("b", 1, 2), ("c", 1, 1))
       .toDF("key", "seq", "value")
     // groupByKey Row => String adds key columns `_value` to the dataframe
@@ -627,7 +627,7 @@ class DatasetSuite extends QueryTest
       parameters = Map("elem" -> "'*'", "prettyName" -> "MapGroups"))
   }
 
-  test("groupByKey function, mapValues, flatMapSorted") {
+  test("groupBy function, mapValues, flatMapSorted") {
     val ds = Seq(("a", 1, 10), ("a", 2, 20), ("b", 2, 1), ("b", 1, 2), ("c", 1, 1))
       .toDF("key", "seq", "value")
     // groupByKey Row => String adds key columns `_value` to the dataframe
@@ -645,7 +645,7 @@ class DatasetSuite extends QueryTest
     )
   }
 
-  test("groupBy function, flatMapSorted desc") {
+  test("groupBy, flatMapSorted desc") {
     val ds = Seq(("a", 1, 10), ("a", 2, 20), ("b", 2, 1), ("b", 1, 2), ("c", 1, 1))
       .toDF("key", "seq", "value")
     val grouped = ds.groupBy($"key").as[String, (String, Int, Int)]
@@ -661,7 +661,7 @@ class DatasetSuite extends QueryTest
     )
   }
 
-  test("groupByKey function, flatMapSorted desc") {
+  test("groupBy function, flatMapSorted desc") {
     val ds = Seq(("a", 1, 10), ("a", 2, 20), ("b", 2, 1), ("b", 1, 2), ("c", 1, 1))
       .toDF("key", "seq", "value")
     // groupByKey Row => String adds key columns `_value` to the dataframe
@@ -682,11 +682,11 @@ class DatasetSuite extends QueryTest
   test("groupBy function, mapValues, flatMap") {
     val ds = Seq(("a", 10), ("a", 20), ("b", 1), ("b", 2), ("c", 1)).toDS()
     val keyValue = ds.groupByKey(_._1).mapValues(_._2)
-    val aggregated = keyValue.mapGroups { (g, iter) => (g, iter.sum) }
+    val aggregated = keyValue.flatMapGroups { (g, iter) => Iterator((g, iter.sum)) }
     checkDataset(aggregated, ("a", 30), ("b", 3), ("c", 1))
 
     val keyValue1 = ds.groupByKey(t => (t._1, "key")).mapValues(t => (t._2, "value"))
-    val aggregated1 = keyValue1.mapGroups { (g, iter) => (g._1, iter.map(_._1).sum) }
+    val aggregated1 = keyValue1.flatMapGroups { (g, iter) => Iterator((g._1, iter.map(_._1).sum)) }
     checkDataset(aggregated1, ("a", 30), ("b", 3), ("c", 1))
   }
 
