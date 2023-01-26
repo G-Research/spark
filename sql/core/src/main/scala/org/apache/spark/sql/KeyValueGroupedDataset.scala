@@ -205,7 +205,7 @@ class KeyValueGroupedDataset[K, V] private[sql](
         case expr: Expression => SortOrder(expr, Ascending)
       }
     }
-      // SPARK-42199: resolve sort expressions only against data attributes, not grouping attributes
+      // SPARK-42199: resolve these sort expressions only against dataAttributes
       .map(scopeSortOrder(dataAttributes))
 
     Dataset[U](
@@ -680,7 +680,7 @@ class KeyValueGroupedDataset[K, V] private[sql](
     val encoders = columns.map(_.encoder)
     val namedColumns =
       columns
-        // SPARK-42199: resolve these columns only against dataAttributes
+        // SPARK-42199: resolve these sort expressions only against dataAttributes
         .map(scopeTypedColumn(dataAttributes))
         .map(_.withInputType(vExprEnc, dataAttributes).named)
     val keyColumn = if (!kExprEnc.isSerializedAsStructForTopLevel) {
@@ -882,7 +882,7 @@ class KeyValueGroupedDataset[K, V] private[sql](
       case expr: Expression => SortOrder(expr, Ascending)
     }
 
-    // SPARK-42199: resolve these columns only against the respective dataAttributes
+    // SPARK-42199: resolve these sort expressions only against dataAttributes
     val thisSortOrder: Seq[SortOrder] = thisSortExprs.map(toSortOrder)
       .map(scopeSortOrder(dataAttributes))
     val otherSortOrder: Seq[SortOrder] = otherSortExprs.map(toSortOrder)
