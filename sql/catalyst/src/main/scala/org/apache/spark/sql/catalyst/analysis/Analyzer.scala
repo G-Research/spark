@@ -1634,20 +1634,12 @@ class Analyzer(override val catalogManager: CatalogManager)
       // groupByExpressions in `ResolveGroupingAnalytics.constructAggregateExprs()`, we trim
       // unnecessary alias of GetStructField here.
       case a: Aggregate =>
-        val planForResolve = a.child match {
-          // SPARK-25942: Resolves aggregate expressions with `AppendColumns`'s children, instead of
-          // `AppendColumns`, because `AppendColumns`'s serializer might produce conflict attribute
-          // names leading to ambiguous references exception.
-          case appendColumns: AppendColumns => appendColumns
-          case _ => a
-        }
-
         val resolvedGroupingExprs = a.groupingExpressions
-          .map(resolveExpressionByPlanChildren(_, planForResolve, allowOuter = true))
+          .map(resolveExpressionByPlanChildren(_, a, allowOuter = true))
           .map(trimTopLevelGetStructFieldAlias)
 
         val resolvedAggExprsNoOuter = a.aggregateExpressions
-          .map(resolveExpressionByPlanChildren(_, planForResolve, allowOuter = false))
+          .map(resolveExpressionByPlanChildren(_, a, allowOuter = false))
         // Aggregate supports Lateral column alias, which has higher priority than outer reference.
         val resolvedAggExprsWithLCA = resolveLateralColumnAlias(resolvedAggExprsNoOuter)
         val resolvedAggExprsWithOuter = resolvedAggExprsWithLCA.map(resolveOuterRef)
