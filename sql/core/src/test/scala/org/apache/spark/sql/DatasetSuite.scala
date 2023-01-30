@@ -1011,14 +1011,16 @@ class DatasetSuite extends QueryTest
     assert(actual === Seq((0, 0), (1, 1), (2, 2)))
   }
 
-
   test("SPARK-42132: cogroup with sorted and same plan on both sides") {
-    val df = spark.range(3).join(spark.range(2)).as[(Long, Long)]
+    val df = spark.range(3)
+      .join(spark.range(2))
+      .withColumn("value", lit(1))
+      .as[(Long, Long, Int)]
 
     val left_grouped_df = df.groupByKey(_._1)
     val right_grouped_df = df.groupByKey(_._1)
 
-    val cogroup_df = left_grouped_df.cogroupSorted(right_grouped_df)($"id")($"id".desc) {
+    val cogroup_df = left_grouped_df.cogroupSorted(right_grouped_df)($"value")($"value".desc) {
       case (key, left, right) => left.zip(right)
     }
 
@@ -1028,7 +1030,29 @@ class DatasetSuite extends QueryTest
       ((1, 0), (1, 1)), ((1, 1), (1, 0)),
       ((2, 0), (2, 1)), ((2, 1), (2, 0))
     ))
+
+    // column 'id' is ambiguous in each side of the cogroup
+    Seq(
+      ($"id", $"value"),
+      ($"value", $"id"),
+      ($"id", $"id"),
+    ).foreach { case (leftOrder, rightOrder) =>
+      withClue(s"left=$leftOrder right=$rightOrder") {
+        checkError(
+          exception = intercept[AnalysisException] {
+            left_grouped_df.cogroupSorted(right_grouped_df)(leftOrder)(rightOrder) {
+              case (key, left, right) => left.zip(right)
+            }
+          },
+          errorClass = "AMBIGUOUS_REFERENCE",
+          parameters = Map(
+            "sqlExpr" -> "\"a\"",
+            "srcType" -> "\"DOUBLE\"",
+            "targetType" -> "\"BINARY\""))
+      }
+    }
   }
+
 
   test("SPARK-34806: observation on datasets") {
     val namedObservation = Observation("named")
