@@ -48,7 +48,6 @@ class CogroupedApplyInPandasTests(ReusedSQLTestCase):
     def data1(self):
         return (
             self.spark.range(10)
-            .toDF("id")
             .withColumn("ks", array([lit(i) for i in range(20, 30)]))
             .withColumn("k", explode(col("ks")))
             .withColumn("v", col("k") * 10)
@@ -59,7 +58,6 @@ class CogroupedApplyInPandasTests(ReusedSQLTestCase):
     def data2(self):
         return (
             self.spark.range(10)
-            .toDF("id")
             .withColumn("ks", array([lit(i) for i in range(20, 30)]))
             .withColumn("k", explode(col("ks")))
             .withColumn("v2", col("k") * 100)

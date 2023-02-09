@@ -167,7 +167,6 @@ class MapInPandasTests(ReusedSQLTestCase):
                 (
                     self.spark.range(10, numPartitions=3)
                     .withColumn("value", lit(0))
-                    .toDF("id", "value")
                     .mapInPandas(dataframes_with_other_column_names, "id int, value int")
                     .collect()
                 )
@@ -187,7 +186,6 @@ class MapInPandasTests(ReusedSQLTestCase):
                     self.spark.range(10, numPartitions=3)
                         .withColumn("id2", lit(0))
                         .withColumn("value", lit(1))
-                        .toDF("id", "id2", "value")
                         .mapInPandas(dataframes_with_other_column_names, "id int, id2 long, value int")
                         .collect()
                 )
@@ -223,7 +221,6 @@ class MapInPandasTests(ReusedSQLTestCase):
             self.spark.range(10, numPartitions=3)
             .withColumn("id2", lit(0))
             .withColumn("value", lit(1))
-            .toDF("id", "id2", "value")
         )
 
         with QuietTest(self.sc):
@@ -309,7 +306,6 @@ class MapInPandasTests(ReusedSQLTestCase):
     def test_empty_dataframes_without_columns(self):
         mapped = (
             self.spark.range(10, numPartitions=3)
-            .toDF("id")
             .mapInPandas(self.dataframes_and_empty_dataframe_iter(), "id int")
         )
         self.assertEqual(mapped.count(), 10)
@@ -325,7 +321,6 @@ class MapInPandasTests(ReusedSQLTestCase):
                 (
                     self.spark.range(10, numPartitions=3)
                     .withColumn("value", lit(0))
-                    .toDF("id", "value")
                     .mapInPandas(f, "id int, value int")
                     .collect()
                 )
@@ -344,7 +339,6 @@ class MapInPandasTests(ReusedSQLTestCase):
                 (
                     self.spark.range(10, numPartitions=3)
                         .withColumn("value", lit(0))
-                        .toDF("id", "value")
                         .mapInPandas(empty_dataframes_with_other_columns, "id int, value int")
                         .collect()
                 )

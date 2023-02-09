@@ -78,7 +78,6 @@ class GroupedApplyInPandasTests(ReusedSQLTestCase):
     def data(self):
         return (
             self.spark.range(10)
-            .toDF("id")
             .withColumn("vs", array([lit(i) for i in range(20, 30)]))
             .withColumn("v", explode(col("vs")))
             .drop("vs")
