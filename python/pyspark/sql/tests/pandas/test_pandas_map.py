@@ -70,6 +70,7 @@ class MapInPandasTests(ReusedSQLTestCase):
                 assert isinstance(pdf, pd.DataFrame)
                 assert pdf.columns.tolist() == list(columns)
                 yield pdf
+
         return func
 
     @staticmethod
@@ -79,6 +80,7 @@ class MapInPandasTests(ReusedSQLTestCase):
                 assert isinstance(pdf, pd.DataFrame)
                 assert pdf.columns.tolist() == list(columns)
                 yield pdf.rename(columns=list(pdf.columns).index)
+
         return func
 
     @staticmethod
@@ -88,6 +90,7 @@ class MapInPandasTests(ReusedSQLTestCase):
                 yield pdf
             # after yielding all elements, also yield an empty dataframe with given columns
             yield pd.DataFrame([], columns=list(columns))
+
         return func
 
     def test_map_in_pandas(self):
@@ -184,10 +187,10 @@ class MapInPandasTests(ReusedSQLTestCase):
             ):
                 (
                     self.spark.range(10, numPartitions=3)
-                        .withColumn("id2", lit(0))
-                        .withColumn("value", lit(1))
-                        .mapInPandas(dataframes_with_other_column_names, "id int, id2 long, value int")
-                        .collect()
+                    .withColumn("id2", lit(0))
+                    .withColumn("value", lit(1))
+                    .mapInPandas(dataframes_with_other_column_names, "id int, id2 long, value int")
+                    .collect()
                 )
 
     def test_dataframes_with_less_columns(self):
@@ -200,10 +203,7 @@ class MapInPandasTests(ReusedSQLTestCase):
                 "specified schema. Missing: id2.\n",
             ):
                 f = self.identity_dataframes_iter("id", "value")
-                (
-                    df.mapInPandas(f, "id int, id2 long, value int")
-                    .collect()
-                )
+                (df.mapInPandas(f, "id int, id2 long, value int").collect())
 
             with self.assertRaisesRegex(
                 PythonException,
@@ -211,15 +211,11 @@ class MapInPandasTests(ReusedSQLTestCase):
                 "specified schema. Expected: 3 Actual: 2\n",
             ):
                 f = self.identity_dataframes_wo_column_names_iter("id", "value")
-                (
-                    df.mapInPandas(f, "id int, id2 long, value int")
-                    .collect()
-                )
+                (df.mapInPandas(f, "id int, id2 long, value int").collect())
 
     def test_dataframes_with_more_columns(self):
-        df = (
-            self.spark.range(10, numPartitions=3)
-            .select("id", col("id").alias("value"), col("id").alias("extra"))
+        df = self.spark.range(10, numPartitions=3).select(
+            "id", col("id").alias("value"), col("id").alias("extra")
         )
         expected = df.select("id", "value").collect()
 
@@ -269,7 +265,8 @@ class MapInPandasTests(ReusedSQLTestCase):
                             r"with name 'id' to Arrow Array \(string\).\n",
                         ):
                             (
-                                self.spark.range(10, numPartitions=3).select(col("id").cast("double"))
+                                self.spark.range(10, numPartitions=3)
+                                .select(col("id").cast("double"))
                                 .mapInPandas(self.identity_dataframes_iter("id"), "id string")
                                 .collect()
                             )
@@ -289,9 +286,8 @@ class MapInPandasTests(ReusedSQLTestCase):
         self.assertEqual(mapped.count(), 0)
 
     def test_empty_dataframes_without_columns(self):
-        mapped = (
-            self.spark.range(10, numPartitions=3)
-            .mapInPandas(self.dataframes_and_empty_dataframe_iter(), "id int")
+        mapped = self.spark.range(10, numPartitions=3).mapInPandas(
+            self.dataframes_and_empty_dataframe_iter(), "id int"
         )
         self.assertEqual(mapped.count(), 10)
 
@@ -311,9 +307,8 @@ class MapInPandasTests(ReusedSQLTestCase):
                 )
 
     def test_empty_dataframes_with_more_columns(self):
-        mapped = (
-            self.spark.range(10, numPartitions=3)
-            .mapInPandas(self.dataframes_and_empty_dataframe_iter("id", "extra"), "id int")
+        mapped = self.spark.range(10, numPartitions=3).mapInPandas(
+            self.dataframes_and_empty_dataframe_iter("id", "extra"), "id int"
         )
         self.assertEqual(mapped.count(), 10)
 
@@ -324,15 +319,15 @@ class MapInPandasTests(ReusedSQLTestCase):
 
         with QuietTest(self.sc):
             with self.assertRaisesRegex(
-                    PythonException,
-                    "RuntimeError: Column names of the returned pandas.DataFrame do not match "
-                    "specified schema. Missing: id. Unexpected: iid.\n",
+                PythonException,
+                "RuntimeError: Column names of the returned pandas.DataFrame do not match "
+                "specified schema. Missing: id. Unexpected: iid.\n",
             ):
                 (
                     self.spark.range(10, numPartitions=3)
-                        .withColumn("value", lit(0))
-                        .mapInPandas(empty_dataframes_with_other_columns, "id int, value int")
-                        .collect()
+                    .withColumn("value", lit(0))
+                    .mapInPandas(empty_dataframes_with_other_columns, "id int, value int")
+                    .collect()
                 )
 
     def test_chain_map_partitions_in_pandas(self):
