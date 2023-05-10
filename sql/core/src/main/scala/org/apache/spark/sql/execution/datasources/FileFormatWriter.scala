@@ -139,10 +139,18 @@ object FileFormatWriter extends Logging {
       statsTrackers = statsTrackers
     )
 
-    // We should first sort by dynamic partition columns, then bucket id, and finally sorting
-    // columns.
-    val requiredOrdering = partitionColumns.drop(numStaticPartitionCols) ++
-        writerBucketSpec.map(_.bucketIdExpression) ++ sortColumns
+    // We only sort when doing bucketing, or the conf tells us to
+    // This is to not sort when there is no bucketing
+    // conf.sortPartitionedFileFormatOutput is there to allow for backward compatibility
+    val sortWithoutBucketing = sparkSession.sessionState.conf.sortPartitionedFileFormatOutput
+    val bucketOrdering = writerBucketSpec.map(_.bucketIdExpression) ++ sortColumns
+    val requiredOrdering = if (sortWithoutBucketing || bucketOrdering.nonEmpty) {
+      // We should first sort by dynamic partition columns, then bucket id, and finally sorting
+      // columns.
+        partitionColumns.drop(numStaticPartitionCols) ++ bucketOrdering
+      } else {
+        Seq.empty
+      }
     val writeFilesOpt = V1WritesUtils.getWriteFilesOpt(plan)
 
     // SPARK-40588: when planned writing is disabled and AQE is enabled,

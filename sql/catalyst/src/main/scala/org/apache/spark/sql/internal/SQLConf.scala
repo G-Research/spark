@@ -3047,6 +3047,20 @@ object SQLConf {
       .booleanConf
       .createWithDefault(false)
 
+  val SORT_PARTITIONED_FILEFORMAT_OUTPUT =
+    buildConf("spark.sql.execution.sortPartitionedFileFormatOutput")
+      .internal()
+      .doc("Whether to sort when writing output with dynamic partitioning to FileFormat " +
+        "datasource. If this is enabled, in `FileFormatWriter` we will sort data by dynamic " +
+        "partition columns before writing. This is the default behaviour before Spark 3.5.0. " +
+        "Note that writing with bucketing always sorts by dynamic partition columns and hence " +
+        "ignores this option. " +
+        "This is enabled by default.")
+      .version("3.5.0")
+      .booleanConf
+      // TODO: set to false for Spark 3.6.0
+      .createWithDefault(true)
+
   object PartitionOverwriteMode extends Enumeration {
     val STATIC, DYNAMIC = Value
   }
@@ -4901,6 +4915,8 @@ class SQLConf extends Serializable with Logging {
     getConf(DISABLED_V2_STREAMING_MICROBATCH_READERS)
 
   def fastFailFileFormatOutput: Boolean = getConf(FASTFAIL_ON_FILEFORMAT_OUTPUT)
+
+  def sortPartitionedFileFormatOutput: Boolean = getConf(SORT_PARTITIONED_FILEFORMAT_OUTPUT)
 
   def concatBinaryAsString: Boolean = getConf(CONCAT_BINARY_AS_STRING)
 
