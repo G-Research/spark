@@ -133,6 +133,34 @@ object JdbcUtils extends Logging with SQLConfHelper {
   }
 
   /**
+   * Returns an Upsert SQL statement for updating / inserting a row into the target table via JDBC conn.
+   */
+  def getUpsertStatement(
+                          table: String,
+                          rddSchema: StructType,
+                          tableSchema: Option[StructType],
+                          isCaseSensitive: Boolean,
+                          dialect: JdbcDialect): String = {
+    val columns = if (tableSchema.isEmpty) {
+      rddSchema.fields.map(x => dialect.quoteIdentifier(x.name)).mkString(",")
+    } else {
+      // The generated insert statement needs to follow rddSchema's column sequence and
+      // tableSchema's column names. When appending data into some case-sensitive DBMSs like
+      // PostgreSQL/Oracle, we need to respect the existing case-sensitive column names instead of
+      // RDD column names for user convenience.
+      val tableColumnNames = tableSchema.get.fieldNames
+      rddSchema.fields.map { col =>
+        val normalizedName = tableColumnNames.find(f => conf.resolver(f, col.name)).getOrElse {
+          throw QueryCompilationErrors.columnNotFoundInSchemaError(col, tableSchema)
+        }
+        dialect.quoteIdentifier(normalizedName)
+      }.mkString(",")
+    }
+    val placeholders = rddSchema.fields.map(_ => "?").mkString(",")
+    s"INSERT INTO $table ($columns) VALUES ($placeholders)"
+  }
+
+  /**
    * Retrieve standard jdbc types.
    *
    * @param dt The datatype (e.g. [[org.apache.spark.sql.types.StringType]])
@@ -886,7 +914,12 @@ object JdbcUtils extends Logging with SQLConfHelper {
     val batchSize = options.batchSize
     val isolationLevel = options.isolationLevel
 
-    val insertStmt = getInsertStatement(table, rddSchema, tableSchema, isCaseSensitive, dialect)
+    val stmt = if (options.upsert) {
+      getUpsertStatement(table, rddSchema, tableSchema, isCaseSensitive, dialect)
+    } else {
+      getInsertStatement(table, rddSchema, tableSchema, isCaseSensitive, dialect)
+    }
+
     val repartitionedDF = options.numPartitions match {
       case Some(n) if n <= 0 => throw QueryExecutionErrors.invalidJdbcNumPartitionsError(
         n, JDBCOptions.JDBC_NUM_PARTITIONS)
@@ -894,7 +927,7 @@ object JdbcUtils extends Logging with SQLConfHelper {
       case _ => df
     }
     repartitionedDF.rdd.foreachPartition { iterator => savePartition(
-      table, iterator, rddSchema, insertStmt, batchSize, dialect, isolationLevel, options)
+      table, iterator, rddSchema, stmt, batchSize, dialect, isolationLevel, options)
     }
   }
 

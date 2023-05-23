@@ -17,10 +17,8 @@
 package org.apache.spark.sql
 
 import java.util.{Locale, UUID}
-
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.Future
-
 import org.apache.spark.{MapOutputStatistics, SparkFunSuite, TaskContext}
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.internal.Logging
@@ -31,22 +29,60 @@ import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.parser.{CatalystSqlParser, ParserInterface}
 import org.apache.spark.sql.catalyst.plans.SQLHelper
-import org.apache.spark.sql.catalyst.plans.logical.{ColumnStat, Limit, LocalRelation, LogicalPlan, Statistics, UnresolvedHint}
+import org.apache.spark.sql.catalyst.plans.logical.{ColumnStat, Limit, LocalRelation, LogicalPlan, Statistics, UnaryNode, UnresolvedHint}
 import org.apache.spark.sql.catalyst.plans.physical.Partitioning
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreeNodeTag
 import org.apache.spark.sql.connector.write.WriterCommitMessage
 import org.apache.spark.sql.execution._
-import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, AQEShuffleReadExec, QueryStageExec, ShuffleQueryStageExec}
-import org.apache.spark.sql.execution.datasources.{FileFormat, WriteFilesExec, WriteFilesSpec}
+import org.apache.spark.sql.execution.adaptive.{AQEShuffleReadExec, AdaptiveSparkPlanExec, QueryStageExec, ShuffleQueryStageExec}
+import org.apache.spark.sql.execution.datasources.{FileFormat, FileFormatWriter, WriteFilesExec, WriteFilesSpec}
 import org.apache.spark.sql.execution.exchange.{BroadcastExchangeExec, BroadcastExchangeLike, ShuffleExchangeExec, ShuffleExchangeLike, ShuffleOrigin}
 import org.apache.spark.sql.execution.vectorized.OnHeapColumnVector
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.internal.SQLConf.COLUMN_BATCH_SIZE
 import org.apache.spark.sql.internal.StaticSQLConf.SPARK_SESSION_EXTENSIONS
 import org.apache.spark.sql.types.{DataType, Decimal, IntegerType, LongType, Metadata, StructType}
-import org.apache.spark.sql.vectorized.{ColumnarArray, ColumnarBatch, ColumnarMap, ColumnVector}
+import org.apache.spark.sql.vectorized.{ColumnVector, ColumnarArray, ColumnarBatch, ColumnarMap}
 import org.apache.spark.unsafe.types.UTF8String
+
+import java.io.File
+
+case class SortedNode(ordering: Seq[SortOrder], child: LogicalPlan) extends UnaryNode {
+  override def output: Seq[Attribute] = child.output
+  override def outputOrdering: Seq[SortOrder] = ordering
+
+  override protected def withNewChildInternal(newChild: LogicalPlan): LogicalPlan =
+    copy(child = child)
+}
+
+object SortedNode {
+  def apply(child: LogicalPlan, sortExprs: Column*): SortedNode = {
+    val sortOrder: Seq[SortOrder] = sortExprs.map { col =>
+      col.expr match {
+        case expr: SortOrder =>
+          expr
+        case expr: Expression =>
+          SortOrder(expr, Ascending)
+      }
+    }
+    SortedNode(sortOrder, child)
+  }
+}
+
+case class SortedNodeExec(child: SparkPlan) extends UnaryExecNode {
+  override protected def doExecute(): RDD[InternalRow] = child.execute()
+  override protected def withNewChildInternal(newChild: SparkPlan): SparkPlan =
+    copy(child = newChild)
+  override def output: Seq[Attribute] = child.output
+}
+
+case class SortedNodeSparkStrategy(spark: SparkSession) extends SparkStrategy {
+  override def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
+    case s: SortedNode => Seq(SortedNodeExec(PlanLater(s.child)))
+    case _ => Seq.empty
+  }
+}
 
 /**
  * Test cases for the [[SparkSessionExtensions]].
