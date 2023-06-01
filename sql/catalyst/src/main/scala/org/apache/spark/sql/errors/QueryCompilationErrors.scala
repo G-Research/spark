@@ -1344,6 +1344,14 @@ private[sql] object QueryCompilationErrors extends QueryErrorsBase {
     tableDoesNotSupportError("truncates", table)
   }
 
+  def tableDoesNotSupportUpsertsError(table: String): Throwable = {
+    new AnalysisException(
+      errorClass = "_LEGACY_ERROR_TEMP_1121",
+      messageParameters = Map(
+        "cmd" -> "upserts",
+        "table" -> table))
+  }
+
   def tableDoesNotSupportPartitionManagementError(table: Table): Throwable = {
     tableDoesNotSupportError("partition management", table)
   }

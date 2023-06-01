@@ -104,17 +104,12 @@ object JdbcUtils extends Logging with SQLConfHelper {
     JdbcDialects.get(url).isCascadingTruncateTable()
   }
 
-  /**
-   * Returns an Insert SQL statement for inserting a row into the target table via JDBC conn.
-   */
-  def getInsertStatement(
-      table: String,
+  protected def getInsertColumns(
       rddSchema: StructType,
       tableSchema: Option[StructType],
-      isCaseSensitive: Boolean,
-      dialect: JdbcDialect): String = {
-    val columns = if (tableSchema.isEmpty) {
-      rddSchema.fields.map(x => dialect.quoteIdentifier(x.name)).mkString(",")
+      dialect: JdbcDialect): Array[String] = {
+    if (tableSchema.isEmpty) {
+      rddSchema.fields.map(x => dialect.quoteIdentifier(x.name))
     } else {
       // The generated insert statement needs to follow rddSchema's column sequence and
       // tableSchema's column names. When appending data into some case-sensitive DBMSs like
@@ -126,10 +121,33 @@ object JdbcUtils extends Logging with SQLConfHelper {
           throw QueryCompilationErrors.columnNotFoundInSchemaError(col, tableSchema)
         }
         dialect.quoteIdentifier(normalizedName)
-      }.mkString(",")
+      }
     }
-    val placeholders = rddSchema.fields.map(_ => "?").mkString(",")
-    s"INSERT INTO $table ($columns) VALUES ($placeholders)"
+  }
+
+  /**
+   * Returns an Insert SQL statement for inserting a row into the target table via JDBC conn.
+   */
+  def getInsertStatement(
+      table: String,
+      rddSchema: StructType,
+      tableSchema: Option[StructType],
+      isCaseSensitive: Boolean,
+      dialect: JdbcDialect): String = {
+    val columns = getInsertColumns(rddSchema, tableSchema, dialect)
+    val placeholders = columns.map(_ => "?")
+    s"INSERT INTO $table (${columns.mkString(",")}) VALUES (${placeholders.mkString(",")})"
+  }
+
+  def getUpsertStatement(
+    table: String,
+    rddSchema: StructType,
+    tableSchema: Option[StructType],
+    isCaseSensitive: Boolean,
+    dialect: JdbcDialect,
+    options: JDBCOptions): String = {
+    val columns = getInsertColumns(rddSchema, tableSchema, dialect)
+    dialect.getUpsertStatement(table, columns, isCaseSensitive, options)
   }
 
   /**
@@ -878,6 +896,7 @@ object JdbcUtils extends Logging with SQLConfHelper {
       df: DataFrame,
       tableSchema: Option[StructType],
       isCaseSensitive: Boolean,
+      upsert: Boolean,
       options: JdbcOptionsInWrite): Unit = {
     val url = options.url
     val table = options.table
@@ -886,7 +905,12 @@ object JdbcUtils extends Logging with SQLConfHelper {
     val batchSize = options.batchSize
     val isolationLevel = options.isolationLevel
 
-    val insertStmt = getInsertStatement(table, rddSchema, tableSchema, isCaseSensitive, dialect)
+    val insertStmt = if (upsert) {
+      getUpsertStatement(table, rddSchema, tableSchema, isCaseSensitive, dialect, options)
+    } else {
+      getInsertStatement(table, rddSchema, tableSchema, isCaseSensitive, dialect)
+    }
+
     val repartitionedDF = options.numPartitions match {
       case Some(n) if n <= 0 => throw QueryExecutionErrors.invalidJdbcNumPartitionsError(
         n, JDBCOptions.JDBC_NUM_PARTITIONS)
