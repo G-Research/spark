@@ -181,16 +181,17 @@ abstract class JdbcDialect extends Serializable with Logging {
   }
 
   def supportsCreateTempTableFromTable(): Boolean = false
-
   /**
    * Create a temporary table with the schema of an existing table.
    * @param statement
    * @param existingTableName
+   * @param keyColumns
    * @param options
    */
   def createTempTableFromTable(
       statement: Statement,
       existingTableName: String,
+      keyColumns: Array[String],
       options: JdbcOptionsInWrite): String = {
     throw new UnsupportedOperationException("createTableFromTable is not supported")
   }
@@ -199,9 +200,10 @@ abstract class JdbcDialect extends Serializable with Logging {
 
   def updateTableFromTable(
       statement: Statement,
-      sourceTableName: String,
       destinationTableName: String,
-      upsertKeyColumns: Array[String]): Unit = {
+      sourceTableName: String,
+      columns: Array[String],
+      keyColumns: Array[String]): Int = {
     throw new UnsupportedOperationException("updateTableFromTable is not supported")
   }
 
@@ -209,9 +211,10 @@ abstract class JdbcDialect extends Serializable with Logging {
 
   def insertTableFromTable(
       statement: Statement,
-      sourceTableName: String,
       destinationTableName: String,
-      upsertKeyColumns: Array[String]): Unit = {
+      sourceTableName: String,
+      columns: Array[String],
+      keyColumns: Array[String]): Int = {
     throw new UnsupportedOperationException("insertTableFromTable is not supported")
   }
 

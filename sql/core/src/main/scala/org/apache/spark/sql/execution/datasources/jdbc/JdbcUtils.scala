@@ -105,19 +105,14 @@ object JdbcUtils extends Logging with SQLConfHelper {
     JdbcDialects.get(url).isCascadingTruncateTable()
   }
 
-  /**
-   * Returns an Insert SQL statement for inserting a row into the target table via JDBC conn.
-   */
-  def getInsertStatement(
-      table: String,
+  def getColumns(
       rddSchema: StructType,
       tableSchema: Option[StructType],
-      isCaseSensitive: Boolean,
-      dialect: JdbcDialect): String = {
-    val columns = if (tableSchema.isEmpty) {
-      rddSchema.fields.map(x => dialect.quoteIdentifier(x.name)).mkString(",")
+      dialect: JdbcDialect): Array[String] = {
+    if (tableSchema.isEmpty) {
+      rddSchema.fields.map(x => dialect.quoteIdentifier(x.name))
     } else {
-      // The generated insert statement needs to follow rddSchema's column sequence and
+      // The column sequence needs to follow rddSchema's column sequence and
       // tableSchema's column names. When appending data into some case-sensitive DBMSs like
       // PostgreSQL/Oracle, we need to respect the existing case-sensitive column names instead of
       // RDD column names for user convenience.
@@ -127,8 +122,20 @@ object JdbcUtils extends Logging with SQLConfHelper {
           throw QueryCompilationErrors.columnNotFoundInSchemaError(col, tableSchema)
         }
         dialect.quoteIdentifier(normalizedName)
-      }.mkString(",")
+      }
     }
+  }
+
+  /**
+   * Returns an Insert SQL statement for inserting a row into the target table via JDBC conn.
+   */
+  def getInsertStatement(
+      table: String,
+      rddSchema: StructType,
+      tableSchema: Option[StructType],
+      isCaseSensitive: Boolean,
+      dialect: JdbcDialect): String = {
+    val columns = getColumns(rddSchema, tableSchema, dialect).mkString(",")
     val placeholders = rddSchema.fields.map(_ => "?").mkString(",")
     s"INSERT INTO $table ($columns) VALUES ($placeholders)"
   }
@@ -804,38 +811,44 @@ object JdbcUtils extends Logging with SQLConfHelper {
       table: String,
       iterator: Iterator[Row],
       rddSchema: StructType,
-      insertStmt: String,
+      tableSchema: Option[StructType],
+      isCaseSensitive: Boolean,
       batchSize: Int,
       dialect: JdbcDialect,
       isolationLevel: Int,
       options: JdbcOptionsInWrite): Unit = {
     val conn = dialect.createConnectionFactory(options)(-1)
     val stmt = conn.createStatement()
-    val tempTable = dialect.createTempTableFromTable(stmt, table, options)
+    val tempTable = dialect.createTempTableFromTable(stmt, table, options.upsertKeyColumns, options)
+    val insertStmt = getInsertStatement(tempTable, rddSchema, tableSchema, isCaseSensitive, dialect)
     val tempParams = options.parameters.updated(JDBC_TABLE_NAME, tempTable)
     val tempOptions = new JdbcOptionsInWrite(tempParams)
+    val columns = getColumns(rddSchema, tableSchema, dialect)
 
     savePartition(conn, table, iterator, rddSchema, insertStmt, batchSize, dialect, isolationLevel,
-      tempOptions, upsertBatch(conn, table, tempTable, options.upsertKeyColumns, dialect))
+      tempOptions, upsertBatch(conn, table, tempTable, columns, options.upsertKeyColumns, dialect))
+
+    // dialect.dropTempTable(stmt, tempTable)
   }
 
   def upsertBatch(
       conn: Connection,
       table: String,
       tempTable: String,
+      columns: Array[String],
       upsertKeyColumns: Array[String],
       dialect: JdbcDialect)(): Unit = {
     // upsert batch into table from tempTable by
     val stmt = conn.createStatement()
 
     // 1. updating existing rows
-    dialect.updateTableFromTable(stmt, table, tempTable, upsertKeyColumns)
+    val updated = dialect.updateTableFromTable(stmt, table, tempTable, columns, upsertKeyColumns)
 
     // 2. inserting new rows
-    dialect.insertTableFromTable(stmt, table, tempTable, upsertKeyColumns)
+    val inserted = dialect.insertTableFromTable(stmt, table, tempTable, columns, upsertKeyColumns)
 
     // finally, truncate tempTable
-    conn.prepareStatement(dialect.getTruncateQuery(tempTable)).executeQuery()
+    conn.prepareStatement(dialect.getTruncateQuery(tempTable)).executeUpdate()
   }
 
   /**
@@ -965,6 +978,16 @@ object JdbcUtils extends Logging with SQLConfHelper {
       throw QueryCompilationErrors.tableDoesNotSupportInsertTableFromTableError(options.table)
     }
 
+    if (options.upsertKeyColumns.isEmpty) {
+      throw QueryCompilationErrors.upsertKeyColumnsRequiredError(options.table)
+    }
+
+    val columns = getColumns(rddSchema, tableSchema, dialect)
+    if (columns.forall(options.upsertKeyColumns.contains)) {
+      throw QueryCompilationErrors.upsertNotAllowedError(options.table,
+        "table has only key columns")
+    }
+
     val repartitionedDF = options.numPartitions match {
       case Some(n) if n <= 0 => throw QueryExecutionErrors.invalidJdbcNumPartitionsError(
         n, JDBCOptions.JDBC_NUM_PARTITIONS)
@@ -972,7 +995,8 @@ object JdbcUtils extends Logging with SQLConfHelper {
       case _ => df
     }
     repartitionedDF.rdd.foreachPartition { iterator => upsertPartition(
-      table, iterator, rddSchema, batchSize, dialect, isolationLevel, options)
+      table, iterator, rddSchema, tableSchema, isCaseSensitive, batchSize, dialect, isolationLevel,
+      options)
     }
   }
 

@@ -163,7 +163,8 @@ class JDBCOptions(
   // if to upsert the table in the JDBC database
   val isUpsert = parameters.getOrElse(JDBC_UPSERT, "false").toBoolean
   // the columns used to identify update and insert rows in upsert mode
-  val upsertKeyColumns = parameters.getOrElse(JDBC_UPSERT_KEY_COLUMNS, "").split(",").map(_.trim)
+  val upsertKeyColumns = parameters.get(JDBC_UPSERT_KEY_COLUMNS).map(_.split(",").map(_.trim))
+    .getOrElse(Array.empty)
 
   // the create table option , which can be table_options or partition_options.
   // E.g., "CREATE TABLE t (name string) ENGINE=InnoDB DEFAULT CHARSET=utf8"

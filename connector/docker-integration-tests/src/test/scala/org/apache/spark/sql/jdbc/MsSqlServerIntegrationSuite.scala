@@ -21,7 +21,7 @@ import java.math.BigDecimal
 import java.sql.{Connection, Date, Timestamp}
 import java.util.Properties
 
-import org.apache.spark.sql.Row
+import org.apache.spark.sql.{Row, SaveMode}
 import org.apache.spark.sql.catalyst.util.DateTimeTestUtils._
 import org.apache.spark.sql.functions.col
 import org.apache.spark.sql.internal.SQLConf
@@ -38,6 +38,9 @@ import org.apache.spark.tags.DockerTest
  */
 @DockerTest
 class MsSqlServerIntegrationSuite extends DockerJDBCIntegrationSuite {
+
+  import testImplicits._
+
   override val db = new DatabaseOnDocker {
     override val imageName = sys.env.getOrElse("MSSQLSERVER_DOCKER_IMAGE_NAME",
       "mcr.microsoft.com/mssql/server:2019-CU13-ubuntu-20.04")
@@ -150,7 +153,14 @@ class MsSqlServerIntegrationSuite extends DockerJDBCIntegrationSuite {
       """
         |INSERT INTO bits VALUES (1, 2, 1)
       """.stripMargin).executeUpdate()
-  }
+
+    conn.prepareStatement("CREATE TABLE upsert (id INT, ts DATETIME, v1 FLOAT, v2 FLOAT, " +
+      "CONSTRAINT pk_upsert PRIMARY KEY (id, ts))").executeUpdate()
+    conn.prepareStatement("INSERT INTO upsert VALUES " +
+      "(1, '1996-01-01 01:23:45', 1.234, 1.234567), " +
+      "(1, '1996-01-01 01:23:46', 1.235, 1.234568), " +
+      "(2, '1996-01-01 01:23:45', 2.345, 2.345678), " +
+      "(2, '1996-01-01 01:23:46', 2.346, 2.345679)").executeUpdate()  }
 
   test("Basic test") {
     val df = spark.read.jdbc(jdbcUrl, "tbl", new Properties)
@@ -429,4 +439,41 @@ class MsSqlServerIntegrationSuite extends DockerJDBCIntegrationSuite {
       .load()
     assert(df.collect.toSet === expectedResult)
   }
+
+  Seq(false, true).foreach { exists =>
+    test(s"Upsert ${if (exists) "" else "non-"}existing table") {
+      val df = Seq(
+        (1, Timestamp.valueOf("1996-01-01 01:23:46"), 1.235, 1.234568), // row unchanged
+        (2, Timestamp.valueOf("1996-01-01 01:23:45"), 2.346, 2.345678), // updates v1
+        (2, Timestamp.valueOf("1996-01-01 01:23:46"), 2.347, 2.345680), // updates v1 and v2
+        (3, Timestamp.valueOf("1996-01-01 01:23:45"), 3.456, 3.456789) // inserts new row
+      ).toDF("id", "ts", "v1", "v2").repartition(1) // .repartition(10)
+
+      val table = if (exists) "upsert" else "new_table"
+      val options = Map("numPartitions" -> "10", "upsert" -> "true", "upsertKeyColumns" -> "id, ts")
+      df.write.mode(SaveMode.Append).options(options).jdbc(jdbcUrl, table, new Properties)
+
+      val actual = spark.read.jdbc(jdbcUrl, table, new Properties).collect.toSet
+      val existing = if (exists) {
+        Set((1, Timestamp.valueOf("1996-01-01 01:23:45"), 1.234, 1.234567))
+      } else {
+        Set.empty
+      }
+      val upsertedRows = Set(
+        (1, Timestamp.valueOf("1996-01-01 01:23:46"), 1.235, 1.234568),
+        (2, Timestamp.valueOf("1996-01-01 01:23:45"), 2.346, 2.345678),
+        (2, Timestamp.valueOf("1996-01-01 01:23:46"), 2.347, 2.345680),
+        (3, Timestamp.valueOf("1996-01-01 01:23:45"), 3.456, 3.456789)
+      )
+      val expected = (existing ++ upsertedRows).map { case (id, ts, v1, v2) =>
+        Row(Integer.valueOf(id), ts, v1.doubleValue(), v2.doubleValue())
+      }
+      assert(actual === expected)
+    }
+  }
+
+  test("Write with unspecified mode with upsert") { }
+  test("Write with overwrite mode with upsert") { }
+  test("Write with error-if-exists mode with upsert") { }
+  test("Write with ignore mode with upsert") { }
 }

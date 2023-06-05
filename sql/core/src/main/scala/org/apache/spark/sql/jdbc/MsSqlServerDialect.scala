@@ -17,8 +17,8 @@
 
 package org.apache.spark.sql.jdbc
 
-import java.sql.SQLException
-import java.util.Locale
+import java.sql.{SQLException, Statement}
+import java.util.{Locale, UUID}
 
 import scala.util.control.NonFatal
 
@@ -27,7 +27,7 @@ import org.apache.spark.sql.catalyst.analysis.NonEmptyNamespaceException
 import org.apache.spark.sql.connector.catalog.Identifier
 import org.apache.spark.sql.connector.expressions.{Expression, NullOrdering, SortDirection}
 import org.apache.spark.sql.errors.QueryExecutionErrors
-import org.apache.spark.sql.execution.datasources.jdbc.JDBCOptions
+import org.apache.spark.sql.execution.datasources.jdbc.{JDBCOptions, JdbcOptionsInWrite}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 
@@ -130,6 +130,77 @@ private object MsSqlServerDialect extends JdbcDialect {
   }
 
   override def isCascadingTruncateTable(): Option[Boolean] = Some(false)
+
+  override def supportsCreateTempTableFromTable(): Boolean = true
+
+  override def createTempTableFromTable(
+      statement: Statement,
+      existingTableName: String,
+      keyColumns: Array[String],
+      options: JdbcOptionsInWrite): String = {
+    val tempId = UUID.randomUUID().toString
+    val tempTable = quoteIdentifier("#" + tempId)
+    val tempIndex = quoteIdentifier("pk_" + tempId)
+    statement.executeUpdate(s"SELECT * INTO $tempTable FROM $existingTableName WHERE 1=0")
+    if (keyColumns.nonEmpty) {
+      val indexColumns = {keyColumns.map(quoteIdentifier).mkString(", ")}
+      statement.executeUpdate(s"ALTER TABLE $tempTable " +
+          s"ADD CONSTRAINT $tempIndex PRIMARY KEY CLUSTERED ($indexColumns)")
+    }
+    tempTable
+  }
+
+  override def supportsUpdateTableFromTable(): Boolean = true
+
+  override def updateTableFromTable(
+      statement: Statement,
+      destinationTableName: String,
+      sourceTableName: String,
+      columns: Array[String],
+      keyColumns: Array[String]): Int = {
+    val indexColumns = keyColumns.map(quoteIdentifier)
+    val updates = columns.filterNot(indexColumns.contains)
+      .map(c => s"dst.$c = src.$c").mkString(", ")
+    val joinCondition = indexColumns.map(c => s"dst.$c = src.$c").mkString(" AND ")
+    statement.executeUpdate(
+      s"""
+         |UPDATE dst
+         |SET $updates
+         |FROM $destinationTableName dst
+         |JOIN $sourceTableName src ON $joinCondition
+         |""".stripMargin)
+  }
+
+  override def supportsInsertTableFromTable(): Boolean = true
+
+  override def insertTableFromTable(
+      statement: Statement,
+      destinationTableName: String,
+      sourceTableName: String,
+      columns: Array[String],
+      keyColumns: Array[String]): Int = {
+    val srcColumns = columns.map(c => s"src.$c").mkString(", ")
+    val joinCondition = keyColumns.map(c => s"dst.$c = src.$c").mkString(" AND ")
+    /*
+    val tempColumn = UUID.randomUUID().toString
+    statement.executeUpdate(
+      s"""
+         |INSERT INTO dst
+         |SELECT $srcColumns FROM $sourceTableName
+         |JOIN (
+         |  SELECT *, 1 AS ${quoteIdentifier(tempColumn)}
+         |  FROM $destinationTableName
+         |) dst ON $joinCondition
+         |WHERE dst.${quoteIdentifier(tempColumn)} IS NULL
+         |""".stripMargin)
+*/
+    statement.executeUpdate(
+      s"""
+         |INSERT INTO $destinationTableName
+         |SELECT $srcColumns FROM $sourceTableName src
+         |WHERE NOT EXISTS (SELECT 1 FROM $destinationTableName dst WHERE $joinCondition)
+         |""".stripMargin)
+  }
 
   // scalastyle:off line.size.limit
   // See https://docs.microsoft.com/en-us/sql/relational-databases/system-stored-procedures/sp-rename-transact-sql?view=sql-server-ver15

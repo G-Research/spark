@@ -1367,6 +1367,18 @@ private[sql] object QueryCompilationErrors extends QueryErrorsBase {
     tableNameDoesNotSupportError("insert table from table", table)
   }
 
+  def upsertKeyColumnsRequiredError(table: String): Throwable = {
+    new AnalysisException(
+      errorClass = "UPSERT_KEY_COLUMNS_REQUIRED",
+      messageParameters = Map.empty)
+  }
+
+  def upsertNotAllowedError(table: String, reason: String): Throwable = {
+    new AnalysisException(
+      errorClass = "UPSERT_NOT_ALLOWED",
+      messageParameters = Map("table" -> table, "reason" -> reason))
+  }
+
   def tableIsNotRowLevelOperationTableError(table: Table): Throwable = {
     new AnalysisException(
       errorClass = "_LEGACY_ERROR_TEMP_1122",
