@@ -2550,6 +2550,16 @@
       "3. set \"spark.sql.legacy.allowUntypedScalaUDF\" to \"true\" and use this API with caution."
     ]
   },
+  "UPSERT_KEY_COLUMNS_REQUIRED" : {
+    "message" : [
+      "Upsert requires key columns."
+    ]
+  },
+  "UPSERT_NOT_ALLOWED" : {
+    "message" : [
+      "Upsert is not allowed for table <table>: <reason>."
+    ]
+  },
   "VIEW_ALREADY_EXISTS" : {
     "message" : [
       "Cannot create view <relationName> because it already exists.",
