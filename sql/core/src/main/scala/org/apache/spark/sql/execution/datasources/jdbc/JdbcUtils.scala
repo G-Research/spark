@@ -43,6 +43,7 @@ import org.apache.spark.sql.connector.catalog.{Identifier, TableChange}
 import org.apache.spark.sql.connector.catalog.index.{SupportsIndex, TableIndex}
 import org.apache.spark.sql.connector.expressions.NamedReference
 import org.apache.spark.sql.errors.{QueryCompilationErrors, QueryExecutionErrors}
+import org.apache.spark.sql.execution.datasources.jdbc.JDBCOptions.JDBC_TABLE_NAME
 import org.apache.spark.sql.jdbc.{JdbcDialect, JdbcDialects, JdbcType, NoopDialect}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.SchemaUtils
@@ -665,6 +666,7 @@ object JdbcUtils extends Logging with SQLConfHelper {
    * updated even with error if it doesn't support transaction, as there're dirty outputs.
    */
   def savePartition(
+      conn: Connection,
       table: String,
       iterator: Iterator[Row],
       rddSchema: StructType,
@@ -672,7 +674,8 @@ object JdbcUtils extends Logging with SQLConfHelper {
       batchSize: Int,
       dialect: JdbcDialect,
       isolationLevel: Int,
-      options: JDBCOptions): Unit = {
+      options: JDBCOptions,
+      batchExecuted: () => Unit = () => ()): Unit = {
 
     if (iterator.isEmpty) {
       return
@@ -680,7 +683,6 @@ object JdbcUtils extends Logging with SQLConfHelper {
 
     val outMetrics = TaskContext.get().taskMetrics().outputMetrics
 
-    val conn = dialect.createConnectionFactory(options)(-1)
     var committed = false
 
     var finalIsolationLevel = Connection.TRANSACTION_NONE
@@ -739,11 +741,13 @@ object JdbcUtils extends Logging with SQLConfHelper {
           totalRowCount += 1
           if (rowCount % batchSize == 0) {
             stmt.executeBatch()
+            batchExecuted()
             rowCount = 0
           }
         }
         if (rowCount > 0) {
           stmt.executeBatch()
+          batchExecuted()
         }
       } finally {
         stmt.close()
@@ -794,6 +798,44 @@ object JdbcUtils extends Logging with SQLConfHelper {
         }
       }
     }
+  }
+
+  def upsertPartition(
+      table: String,
+      iterator: Iterator[Row],
+      rddSchema: StructType,
+      insertStmt: String,
+      batchSize: Int,
+      dialect: JdbcDialect,
+      isolationLevel: Int,
+      options: JdbcOptionsInWrite): Unit = {
+    val conn = dialect.createConnectionFactory(options)(-1)
+    val stmt = conn.createStatement()
+    val tempTable = dialect.createTempTableFromTable(stmt, table, options)
+    val tempParams = options.parameters.updated(JDBC_TABLE_NAME, tempTable)
+    val tempOptions = new JdbcOptionsInWrite(tempParams)
+
+    savePartition(conn, table, iterator, rddSchema, insertStmt, batchSize, dialect, isolationLevel,
+      tempOptions, upsertBatch(conn, table, tempTable, options.upsertKeyColumns, dialect))
+  }
+
+  def upsertBatch(
+      conn: Connection,
+      table: String,
+      tempTable: String,
+      upsertKeyColumns: Array[String],
+      dialect: JdbcDialect)(): Unit = {
+    // upsert batch into table from tempTable by
+    val stmt = conn.createStatement()
+
+    // 1. updating existing rows
+    dialect.updateTableFromTable(stmt, table, tempTable, upsertKeyColumns)
+
+    // 2. inserting new rows
+    dialect.insertTableFromTable(stmt, table, tempTable, upsertKeyColumns)
+
+    // finally, truncate tempTable
+    conn.prepareStatement(dialect.getTruncateQuery(tempTable)).executeQuery()
   }
 
   /**
@@ -893,8 +935,44 @@ object JdbcUtils extends Logging with SQLConfHelper {
       case Some(n) if n < df.rdd.getNumPartitions => df.coalesce(n)
       case _ => df
     }
-    repartitionedDF.rdd.foreachPartition { iterator => savePartition(
-      table, iterator, rddSchema, insertStmt, batchSize, dialect, isolationLevel, options)
+    repartitionedDF.rdd.foreachPartition { iterator =>
+      val conn = dialect.createConnectionFactory(options)(-1)
+      savePartition(conn, table, iterator, rddSchema, insertStmt, batchSize, dialect,
+        isolationLevel, options)
+    }
+  }
+
+  def upsertTable(
+      df: DataFrame,
+      tableSchema: Option[StructType],
+      isCaseSensitive: Boolean,
+      options: JdbcOptionsInWrite): Unit = {
+    val url = options.url
+    val table = options.table
+    val dialect = JdbcDialects.get(url)
+    val rddSchema = df.schema
+    val batchSize = options.batchSize
+    val isolationLevel = options.isolationLevel
+
+    if (!dialect.supportsCreateTempTableFromTable()) {
+      throw QueryCompilationErrors.tableDoesNotSupportCreateTempTableFromTableError(
+        options.table)
+    }
+    if (!dialect.supportsUpdateTableFromTable()) {
+      throw QueryCompilationErrors.tableDoesNotSupportUpdateTableFromTableError(options.table)
+    }
+    if (!dialect.supportsInsertTableFromTable()) {
+      throw QueryCompilationErrors.tableDoesNotSupportInsertTableFromTableError(options.table)
+    }
+
+    val repartitionedDF = options.numPartitions match {
+      case Some(n) if n <= 0 => throw QueryExecutionErrors.invalidJdbcNumPartitionsError(
+        n, JDBCOptions.JDBC_NUM_PARTITIONS)
+      case Some(n) if n < df.rdd.getNumPartitions => df.coalesce(n)
+      case _ => df
+    }
+    repartitionedDF.rdd.foreachPartition { iterator => upsertPartition(
+      table, iterator, rddSchema, batchSize, dialect, isolationLevel, options)
     }
   }
 

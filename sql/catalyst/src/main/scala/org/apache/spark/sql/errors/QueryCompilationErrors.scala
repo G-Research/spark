@@ -1320,12 +1320,15 @@ private[sql] object QueryCompilationErrors extends QueryErrorsBase {
       messageParameters = Map("changes" -> changes.toString()))
   }
 
-  private def tableDoesNotSupportError(cmd: String, table: Table): Throwable = {
+  private def tableDoesNotSupportError(cmd: String, table: Table): Throwable =
+    tableNameDoesNotSupportError(cmd, table.name)
+
+  private def tableNameDoesNotSupportError(cmd: String, table: String): Throwable = {
     new AnalysisException(
       errorClass = "_LEGACY_ERROR_TEMP_1121",
       messageParameters = Map(
         "cmd" -> cmd,
-        "table" -> table.name))
+        "table" -> table))
   }
 
   def tableDoesNotSupportReadsError(table: Table): Throwable = {
@@ -1350,6 +1353,18 @@ private[sql] object QueryCompilationErrors extends QueryErrorsBase {
 
   def tableDoesNotSupportAtomicPartitionManagementError(table: Table): Throwable = {
     tableDoesNotSupportError("atomic partition management", table)
+  }
+
+  def tableDoesNotSupportCreateTempTableFromTableError(table: String): Throwable = {
+    tableNameDoesNotSupportError("create temp table from table", table)
+  }
+
+  def tableDoesNotSupportUpdateTableFromTableError(table: String): Throwable = {
+    tableNameDoesNotSupportError("update table from table", table)
+  }
+
+  def tableDoesNotSupportInsertTableFromTableError(table: String): Throwable = {
+    tableNameDoesNotSupportError("insert table from table", table)
   }
 
   def tableIsNotRowLevelOperationTableError(table: Table): Throwable = {

@@ -17,8 +17,9 @@
 
 package org.apache.spark.sql.execution.datasources.jdbc
 
-import org.apache.spark.sql.{DataFrame, SaveMode, SQLContext}
+import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
 import org.apache.spark.sql.errors.QueryCompilationErrors
+import org.apache.spark.sql.execution.datasources.jdbc.JDBCOptions.JDBC_TABLE_NAME
 import org.apache.spark.sql.execution.datasources.jdbc.JdbcUtils._
 import org.apache.spark.sql.jdbc.JdbcDialects
 import org.apache.spark.sql.sources.{BaseRelation, CreatableRelationProvider, DataSourceRegister, RelationProvider}
@@ -67,7 +68,11 @@ class JdbcRelationProvider extends CreatableRelationProvider
 
           case SaveMode.Append =>
             val tableSchema = JdbcUtils.getSchemaOption(conn, options)
-            saveTable(df, tableSchema, isCaseSensitive, options)
+            if (options.isUpsert) {
+              upsertTable(df, tableSchema, isCaseSensitive, options)
+            } else {
+              saveTable(df, tableSchema, isCaseSensitive, options)
+            }
 
           case SaveMode.ErrorIfExists =>
             throw QueryCompilationErrors.tableOrViewAlreadyExistsError(options.table)

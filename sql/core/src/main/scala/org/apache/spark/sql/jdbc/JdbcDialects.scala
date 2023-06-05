@@ -180,6 +180,41 @@ abstract class JdbcDialect extends Serializable with Logging {
     statement.executeUpdate(s"CREATE TABLE $tableName ($strSchema) $createTableOptions")
   }
 
+  def supportsCreateTempTableFromTable(): Boolean = false
+
+  /**
+   * Create a temporary table with the schema of an existing table.
+   * @param statement
+   * @param existingTableName
+   * @param options
+   */
+  def createTempTableFromTable(
+      statement: Statement,
+      existingTableName: String,
+      options: JdbcOptionsInWrite): String = {
+    throw new UnsupportedOperationException("createTableFromTable is not supported")
+  }
+
+  def supportsUpdateTableFromTable(): Boolean = false
+
+  def updateTableFromTable(
+      statement: Statement,
+      sourceTableName: String,
+      destinationTableName: String,
+      upsertKeyColumns: Array[String]): Unit = {
+    throw new UnsupportedOperationException("updateTableFromTable is not supported")
+  }
+
+  def supportsInsertTableFromTable(): Boolean = false
+
+  def insertTableFromTable(
+      statement: Statement,
+      sourceTableName: String,
+      destinationTableName: String,
+      upsertKeyColumns: Array[String]): Unit = {
+    throw new UnsupportedOperationException("insertTableFromTable is not supported")
+  }
+
   /**
    * Get the SQL query that should be used to find if the given table exists. Dialects can
    * override this method to return a query that works best in a particular database.
