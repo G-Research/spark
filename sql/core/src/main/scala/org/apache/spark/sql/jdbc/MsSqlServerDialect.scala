@@ -17,7 +17,7 @@
 
 package org.apache.spark.sql.jdbc
 
-import java.sql.{SQLException, Statement}
+import java.sql.SQLException
 import java.util.{Locale, UUID}
 
 import scala.util.control.NonFatal
@@ -27,12 +27,12 @@ import org.apache.spark.sql.catalyst.analysis.NonEmptyNamespaceException
 import org.apache.spark.sql.connector.catalog.Identifier
 import org.apache.spark.sql.connector.expressions.{Expression, NullOrdering, SortDirection}
 import org.apache.spark.sql.errors.QueryExecutionErrors
-import org.apache.spark.sql.execution.datasources.jdbc.{JDBCOptions, JdbcOptionsInWrite}
+import org.apache.spark.sql.execution.datasources.jdbc.JDBCOptions
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 
 
-private object MsSqlServerDialect extends JdbcDialect {
+private object MsSqlServerDialect extends JdbcDialect with UpsertByTempTable {
 
   // Special JDBC types in Microsoft SQL Server.
   // https://github.com/microsoft/mssql-jdbc/blob/v9.4.1/src/main/java/microsoft/sql/Types.java
@@ -131,56 +131,46 @@ private object MsSqlServerDialect extends JdbcDialect {
 
   override def isCascadingTruncateTable(): Option[Boolean] = Some(false)
 
-  override def supportsCreateTempTableFromTable(): Boolean = true
-
-  override def createTempTableFromTable(
-      statement: Statement,
+  override def getCreateTempTableFromTableQuery(
       existingTableName: String,
       keyColumns: Array[String],
-      options: JdbcOptionsInWrite): String = {
-    val tempId = UUID.randomUUID().toString
-    val tempTable = quoteIdentifier("#" + tempId)
-    val tempIndex = quoteIdentifier("pk_" + tempId)
-    statement.executeUpdate(s"SELECT * INTO $tempTable FROM $existingTableName WHERE 1=0")
+      options: JDBCOptions): (String, String) = {
+    val tempTable = quoteIdentifier(s"#${UUID.randomUUID()}")
+    val sql = new StringBuilder(s"SELECT * INTO $tempTable FROM $existingTableName WHERE 1=0")
     if (keyColumns.nonEmpty) {
       val indexColumns = {keyColumns.map(quoteIdentifier).mkString(", ")}
-      statement.executeUpdate(s"ALTER TABLE $tempTable " +
-          s"ADD CONSTRAINT $tempIndex PRIMARY KEY CLUSTERED ($indexColumns)")
+      sql ++= "; "
+      sql ++= s"ALTER TABLE $tempTable ADD PRIMARY KEY CLUSTERED ($indexColumns)"
     }
-    tempTable
+    (tempTable, sql.toString())
   }
 
-  override def supportsUpdateTableFromTable(): Boolean = true
-
-  override def updateTableFromTable(
-      statement: Statement,
+  override def getUpdateTableFromTableQuery(
       destinationTableName: String,
       sourceTableName: String,
       columns: Array[String],
-      keyColumns: Array[String]): Int = {
+      keyColumns: Array[String]): String = {
     val indexColumns = keyColumns.map(quoteIdentifier)
     val updates = columns.filterNot(indexColumns.contains)
       .map(c => s"dst.$c = src.$c").mkString(", ")
     val joinCondition = indexColumns.map(c => s"dst.$c = src.$c").mkString(" AND ")
-    statement.executeUpdate(
-      s"""
-         |UPDATE dst
-         |SET $updates
-         |FROM $destinationTableName dst
-         |JOIN $sourceTableName src ON $joinCondition
-         |""".stripMargin)
+
+    s"""
+       |UPDATE dst
+       |SET $updates
+       |FROM $destinationTableName dst
+       |JOIN $sourceTableName src ON $joinCondition
+       |""".stripMargin
   }
 
-  override def supportsInsertTableFromTable(): Boolean = true
-
-  override def insertTableFromTable(
-      statement: Statement,
+  override def getInsertTableFromTableQuery(
       destinationTableName: String,
       sourceTableName: String,
       columns: Array[String],
-      keyColumns: Array[String]): Int = {
+      keyColumns: Array[String]): String = {
+    val indexColumns = keyColumns.map(quoteIdentifier)
     val srcColumns = columns.map(c => s"src.$c").mkString(", ")
-    val joinCondition = keyColumns.map(c => s"dst.$c = src.$c").mkString(" AND ")
+    val joinCondition = indexColumns.map(c => s"dst.$c = src.$c").mkString(" AND ")
     /*
     val tempColumn = UUID.randomUUID().toString
     statement.executeUpdate(
@@ -194,12 +184,13 @@ private object MsSqlServerDialect extends JdbcDialect {
          |WHERE dst.${quoteIdentifier(tempColumn)} IS NULL
          |""".stripMargin)
 */
-    statement.executeUpdate(
-      s"""
-         |INSERT INTO $destinationTableName
-         |SELECT $srcColumns FROM $sourceTableName src
-         |WHERE NOT EXISTS (SELECT 1 FROM $destinationTableName dst WHERE $joinCondition)
-         |""".stripMargin)
+    s"""
+       |INSERT INTO $destinationTableName
+       |SELECT $srcColumns FROM $sourceTableName src
+       |WHERE NOT EXISTS (
+       |  SELECT 1 FROM $destinationTableName dst WHERE $joinCondition
+       |)
+       |""".stripMargin
   }
 
   // scalastyle:off line.size.limit

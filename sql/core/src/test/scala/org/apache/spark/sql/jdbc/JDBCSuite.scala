@@ -1268,6 +1268,45 @@ class JDBCSuite extends QueryTest with SharedSparkSession {
     }
   }
 
+  test("Upsert by temp table") {
+    val msSqlServerDialect = JdbcDialects.get("jdbc:sqlserver")
+    assert(msSqlServerDialect.isInstanceOf[UpsertByTempTable])
+    val upsert = msSqlServerDialect.asInstanceOf[UpsertByTempTable]
+    val options = new JDBCOptions(url, "upsert", CaseInsensitiveMap[String](Map.empty))
+
+    val (tmp1, sql1) = upsert.getCreateTempTableFromTableQuery("upsert", Array("id", "ts"), options)
+    assert(tmp1.nonEmpty)
+    assert(sql1.replaceAll(tmp1, "#TEMP") ===
+      """SELECT * INTO #TEMP FROM upsert WHERE 1=0; """ +
+      """ALTER TABLE #TEMP ADD PRIMARY KEY CLUSTERED ("id", "ts")""")
+
+    val (tmp2, sql2) = upsert.getCreateTempTableFromTableQuery("upsert", Array("id", "ts"), options)
+    assert(tmp2.nonEmpty)
+    assert(tmp2 !== tmp1)
+    assert(sql2.replaceAll(tmp2, "#TEMP") === sql1.replaceAll(tmp1, "#TEMP"))
+
+    val sql3 = upsert.getUpdateTableFromTableQuery("upsert", "temp",
+      Array("id", "ts", "v1", "v2").map(msSqlServerDialect.quoteIdentifier), Array("id", "ts"))
+    assert(sql3 ===
+      """
+        |UPDATE dst
+        |SET dst."v1" = src."v1", dst."v2" = src."v2"
+        |FROM upsert dst
+        |JOIN temp src ON dst."id" = src."id" AND dst."ts" = src."ts"
+        |""".stripMargin)
+
+    val sql4 = upsert.getInsertTableFromTableQuery("upsert", "temp",
+      Array("id", "ts", "v1", "v2").map(msSqlServerDialect.quoteIdentifier), Array("id", "ts"))
+    assert(sql4 ===
+      """
+        |INSERT INTO upsert
+        |SELECT src."id", src."ts", src."v1", src."v2" FROM temp src
+        |WHERE NOT EXISTS (
+        |  SELECT 1 FROM upsert dst WHERE dst."id" = src."id" AND dst."ts" = src."ts"
+        |)
+        |""".stripMargin)
+  }
+
   test("SPARK 12941: The data type mapping for StringType to Oracle") {
     val oracleDialect = JdbcDialects.get("jdbc:oracle://127.0.0.1/db")
     assert(oracleDialect.getJDBCType(StringType).

@@ -44,7 +44,7 @@ import org.apache.spark.sql.connector.catalog.index.{SupportsIndex, TableIndex}
 import org.apache.spark.sql.connector.expressions.NamedReference
 import org.apache.spark.sql.errors.{QueryCompilationErrors, QueryExecutionErrors}
 import org.apache.spark.sql.execution.datasources.jdbc.JDBCOptions.JDBC_TABLE_NAME
-import org.apache.spark.sql.jdbc.{JdbcDialect, JdbcDialects, JdbcType, NoopDialect}
+import org.apache.spark.sql.jdbc.{JdbcDialect, JdbcDialects, JdbcType, NoopDialect, UpsertByTempTable}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.SchemaUtils
 import org.apache.spark.unsafe.types.UTF8String
@@ -814,7 +814,7 @@ object JdbcUtils extends Logging with SQLConfHelper {
       tableSchema: Option[StructType],
       isCaseSensitive: Boolean,
       batchSize: Int,
-      dialect: JdbcDialect,
+      dialect: JdbcDialect with UpsertByTempTable,
       isolationLevel: Int,
       options: JdbcOptionsInWrite): Unit = {
     val conn = dialect.createConnectionFactory(options)(-1)
@@ -837,7 +837,7 @@ object JdbcUtils extends Logging with SQLConfHelper {
       tempTable: String,
       columns: Array[String],
       upsertKeyColumns: Array[String],
-      dialect: JdbcDialect)(): Unit = {
+      dialect: JdbcDialect with UpsertByTempTable)(): Unit = {
     // upsert batch into table from tempTable by
     val stmt = conn.createStatement()
 
@@ -967,19 +967,13 @@ object JdbcUtils extends Logging with SQLConfHelper {
     val batchSize = options.batchSize
     val isolationLevel = options.isolationLevel
 
-    if (!dialect.supportsCreateTempTableFromTable()) {
-      throw QueryCompilationErrors.tableDoesNotSupportCreateTempTableFromTableError(
-        options.table)
+    if (!dialect.isInstanceOf[UpsertByTempTable]) {
+      throw QueryCompilationErrors.tableDoesNotSupportUpsertError(options.table)
     }
-    if (!dialect.supportsUpdateTableFromTable()) {
-      throw QueryCompilationErrors.tableDoesNotSupportUpdateTableFromTableError(options.table)
-    }
-    if (!dialect.supportsInsertTableFromTable()) {
-      throw QueryCompilationErrors.tableDoesNotSupportInsertTableFromTableError(options.table)
-    }
+    val dialectWithUpsert = dialect.asInstanceOf[JdbcDialect with UpsertByTempTable]
 
     if (options.upsertKeyColumns.isEmpty) {
-      throw QueryCompilationErrors.upsertKeyColumnsRequiredError(options.table)
+      throw QueryCompilationErrors.upsertKeyColumnsRequiredError()
     }
 
     val columns = getColumns(rddSchema, tableSchema, dialect)
@@ -995,8 +989,8 @@ object JdbcUtils extends Logging with SQLConfHelper {
       case _ => df
     }
     repartitionedDF.rdd.foreachPartition { iterator => upsertPartition(
-      table, iterator, rddSchema, tableSchema, isCaseSensitive, batchSize, dialect, isolationLevel,
-      options)
+      table, iterator, rddSchema, tableSchema, isCaseSensitive, batchSize,
+      dialectWithUpsert, isolationLevel, options)
     }
   }
 

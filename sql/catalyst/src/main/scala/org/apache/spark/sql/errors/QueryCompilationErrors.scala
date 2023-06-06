@@ -1355,19 +1355,11 @@ private[sql] object QueryCompilationErrors extends QueryErrorsBase {
     tableDoesNotSupportError("atomic partition management", table)
   }
 
-  def tableDoesNotSupportCreateTempTableFromTableError(table: String): Throwable = {
-    tableNameDoesNotSupportError("create temp table from table", table)
+  def tableDoesNotSupportUpsertError(table: String): Throwable = {
+    tableNameDoesNotSupportError("upsert", table)
   }
 
-  def tableDoesNotSupportUpdateTableFromTableError(table: String): Throwable = {
-    tableNameDoesNotSupportError("update table from table", table)
-  }
-
-  def tableDoesNotSupportInsertTableFromTableError(table: String): Throwable = {
-    tableNameDoesNotSupportError("insert table from table", table)
-  }
-
-  def upsertKeyColumnsRequiredError(table: String): Throwable = {
+  def upsertKeyColumnsRequiredError(): Throwable = {
     new AnalysisException(
       errorClass = "UPSERT_KEY_COLUMNS_REQUIRED",
       messageParameters = Map.empty)

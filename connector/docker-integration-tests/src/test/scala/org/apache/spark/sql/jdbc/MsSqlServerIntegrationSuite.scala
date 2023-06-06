@@ -447,7 +447,7 @@ class MsSqlServerIntegrationSuite extends DockerJDBCIntegrationSuite {
         (2, Timestamp.valueOf("1996-01-01 01:23:45"), 2.346, 2.345678), // updates v1
         (2, Timestamp.valueOf("1996-01-01 01:23:46"), 2.347, 2.345680), // updates v1 and v2
         (3, Timestamp.valueOf("1996-01-01 01:23:45"), 3.456, 3.456789) // inserts new row
-      ).toDF("id", "ts", "v1", "v2").repartition(1) // .repartition(10)
+      ).toDF("id", "ts", "v1", "v2").repartition(10)
 
       val table = if (exists) "upsert" else "new_table"
       val options = Map("numPartitions" -> "10", "upsert" -> "true", "upsertKeyColumns" -> "id, ts")
