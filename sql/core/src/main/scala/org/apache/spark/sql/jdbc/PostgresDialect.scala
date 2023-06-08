@@ -169,6 +169,7 @@ private case class PostgresDialect() extends JdbcDialect with SQLConfHelper {
   override def getUpsertStatement(
       tableName: String,
       columns: Array[String],
+      types: Array[DataType],
       isCaseSensitive: Boolean,
       options: JDBCOptions): String = {
     val insertColumns = columns.mkString(", ")
