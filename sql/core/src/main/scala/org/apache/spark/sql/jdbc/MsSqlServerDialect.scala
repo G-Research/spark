@@ -156,10 +156,10 @@ private object MsSqlServerDialect extends JdbcDialect with UpsertByTempTable {
     val joinCondition = indexColumns.map(c => s"dst.$c = src.$c").mkString(" AND ")
 
     s"""
-       |UPDATE dst
+       |UPDATE dst WITH (XLOCK)
        |SET $updates
        |FROM $destinationTableName dst
-       |JOIN $sourceTableName src ON $joinCondition
+       |JOIN $sourceTableName src WITH (XLOCK) ON $joinCondition
        |""".stripMargin
   }
 

@@ -651,6 +651,8 @@ object JdbcUtils extends Logging with SQLConfHelper {
         throw QueryExecutionErrors.cannotTranslateNonNullValueForFieldError(pos)
   }
 
+  def noop(): Unit = {}
+
   /**
    * Saves a partition of a DataFrame to the JDBC database.  This is done in
    * a single database transaction (unless isolation level is "NONE")
@@ -682,7 +684,8 @@ object JdbcUtils extends Logging with SQLConfHelper {
       dialect: JdbcDialect,
       isolationLevel: Int,
       options: JDBCOptions,
-      batchExecuted: () => Unit = () => ()): Unit = {
+      partitionCommitted: () => Unit = noop): Unit = {
+    val batchExecuted: () => Unit = noop
 
     if (iterator.isEmpty) {
       return
@@ -761,6 +764,7 @@ object JdbcUtils extends Logging with SQLConfHelper {
       }
       if (supportsTransactions) {
         conn.commit()
+        partitionCommitted()
       }
       committed = true
     } catch {
@@ -825,8 +829,11 @@ object JdbcUtils extends Logging with SQLConfHelper {
     val tempOptions = new JdbcOptionsInWrite(tempParams)
     val columns = getColumns(rddSchema, tableSchema, dialect)
 
+    def upsert: () => Unit =
+      () => upsertBatch(conn, table, tempTable, columns, options.upsertKeyColumns, dialect)()
+
     savePartition(conn, table, iterator, rddSchema, insertStmt, batchSize, dialect, isolationLevel,
-      tempOptions, upsertBatch(conn, table, tempTable, columns, options.upsertKeyColumns, dialect))
+      tempOptions, partitionCommitted = upsert)
 
     // dialect.dropTempTable(stmt, tempTable)
   }
@@ -849,6 +856,7 @@ object JdbcUtils extends Logging with SQLConfHelper {
 
     // finally, truncate tempTable
     conn.prepareStatement(dialect.getTruncateQuery(tempTable)).executeUpdate()
+    conn.commit()
   }
 
   /**

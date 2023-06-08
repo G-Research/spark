@@ -2476,7 +2476,7 @@
   },
   "UPSERT_KEY_COLUMNS_REQUIRED" : {
     "message" : [
-      "Upsert requires key columns."
+      "Upsert requires key columns. Please specify option upsertKeyColumns."
     ]
   },
   "UPSERT_NOT_ALLOWED" : {

@@ -23,7 +23,7 @@ import java.util.Properties
 
 import org.apache.spark.sql.{Row, SaveMode}
 import org.apache.spark.sql.catalyst.util.DateTimeTestUtils._
-import org.apache.spark.sql.functions.col
+import org.apache.spark.sql.functions.{col, lit, rand, when}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.tags.DockerTest
 
@@ -155,12 +155,16 @@ class MsSqlServerIntegrationSuite extends DockerJDBCIntegrationSuite {
       """.stripMargin).executeUpdate()
 
     conn.prepareStatement("CREATE TABLE upsert (id INT, ts DATETIME, v1 FLOAT, v2 FLOAT, " +
-      "CONSTRAINT pk_upsert PRIMARY KEY (id, ts))").executeUpdate()
+      "PRIMARY KEY (id, ts))").executeUpdate()
     conn.prepareStatement("INSERT INTO upsert VALUES " +
       "(1, '1996-01-01 01:23:45', 1.234, 1.234567), " +
       "(1, '1996-01-01 01:23:46', 1.235, 1.234568), " +
       "(2, '1996-01-01 01:23:45', 2.345, 2.345678), " +
-      "(2, '1996-01-01 01:23:46', 2.346, 2.345679)").executeUpdate()  }
+      "(2, '1996-01-01 01:23:46', 2.346, 2.345679)").executeUpdate()
+
+    conn.prepareStatement("CREATE TABLE large (id INT, v FLOAT NULL, " +
+      "PRIMARY KEY (id))").executeUpdate()
+  }
 
   test("Basic test") {
     val df = spark.read.jdbc(jdbcUrl, "tbl", new Properties)
@@ -472,6 +476,40 @@ class MsSqlServerIntegrationSuite extends DockerJDBCIntegrationSuite {
     }
   }
 
+  test(s"Upsert large dataset") {
+    val init =
+      spark.range(1000000).repartition(10)
+        .withColumn("v", rand())
+
+    val patch =
+      spark.range(1000)
+        .join(spark.range(10).select(($"id" * 100000).as("offset")))
+        .repartition(32)
+        .select(($"id" + $"offset").as("id"), lit(-1.0).as("v"))
+
+    spark.sparkContext.setJobDescription("init")
+    init
+      .write
+      .mode(SaveMode.Overwrite)
+      .jdbc(jdbcUrl, "large", new Properties)
+
+    spark.sparkContext.setJobDescription("patch")
+    patch
+      .write
+      .mode(SaveMode.Append)
+      .option("upsert", true)
+      .option("upsertKeyColumns", "id")
+      .jdbc(jdbcUrl, "large", new Properties)
+
+    spark.sparkContext.setJobDescription("show")
+    spark.read.jdbc(jdbcUrl, "large", new Properties)
+      .select($"id", when($"v" === -1.0, true).otherwise(false).as("patched"))
+      .groupBy($"patched")
+      .count()
+      .show()
+  }
+
+  test("upsert NULLs") { }
   test("Write with unspecified mode with upsert") { }
   test("Write with overwrite mode with upsert") { }
   test("Write with error-if-exists mode with upsert") { }
