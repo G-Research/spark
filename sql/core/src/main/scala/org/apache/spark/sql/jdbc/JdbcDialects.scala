@@ -237,6 +237,7 @@ abstract class JdbcDialect extends Serializable with Logging {
   def getUpsertStatement(
       tableName: String,
       columns: Array[String],
+      types: Array[DataType],
       isCaseSensitive: Boolean,
       options: JDBCOptions): String =
     throw new UnsupportedOperationException("upserts are not supported")

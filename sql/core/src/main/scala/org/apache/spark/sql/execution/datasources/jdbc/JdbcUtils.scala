@@ -147,7 +147,7 @@ object JdbcUtils extends Logging with SQLConfHelper {
     dialect: JdbcDialect,
     options: JDBCOptions): String = {
     val columns = getInsertColumns(rddSchema, tableSchema, dialect)
-    dialect.getUpsertStatement(table, columns, isCaseSensitive, options)
+    dialect.getUpsertStatement(table, columns, rddSchema.fields.map(_.dataType), isCaseSensitive, options)
   }
 
   /**
