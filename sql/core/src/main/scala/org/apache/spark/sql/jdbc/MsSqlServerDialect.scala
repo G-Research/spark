@@ -32,7 +32,7 @@ import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 
 
-private object MsSqlServerDialect extends JdbcDialect {
+private object MsSqlServerDialect extends JdbcDialect with MergeByTempTable {
 
   // Special JDBC types in Microsoft SQL Server.
   // https://github.com/microsoft/mssql-jdbc/blob/v9.4.1/src/main/java/microsoft/sql/Types.java
@@ -215,4 +215,12 @@ private object MsSqlServerDialect extends JdbcDialect {
     new MsSqlServerSQLQueryBuilder(this, options)
 
   override def supportsLimit: Boolean = true
+
+  override def createTempTableName(): String = "##" + super.createTempTableName()
+
+  override def getCreatePrimaryIndex(tableName: String, columns: Array[String]): String = {
+    val indexColumns = columns.map(quoteIdentifier).mkString(", ")
+    s"ALTER TABLE $tableName ADD PRIMARY KEY CLUSTERED ($indexColumns)"
+  }
+
 }
