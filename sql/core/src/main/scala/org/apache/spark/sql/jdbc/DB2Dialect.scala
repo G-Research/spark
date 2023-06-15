@@ -17,7 +17,7 @@
 
 package org.apache.spark.sql.jdbc
 
-import java.sql.{SQLException, Types}
+import java.sql.{SQLException, Statement, Types}
 import java.util.Locale
 
 import scala.util.control.NonFatal
@@ -26,10 +26,10 @@ import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.catalyst.analysis.NonEmptyNamespaceException
 import org.apache.spark.sql.connector.catalog.Identifier
 import org.apache.spark.sql.connector.expressions.Expression
-import org.apache.spark.sql.execution.datasources.jdbc.JDBCOptions
+import org.apache.spark.sql.execution.datasources.jdbc.{JDBCOptions, JdbcOptionsInWrite}
 import org.apache.spark.sql.types._
 
-private object DB2Dialect extends JdbcDialect {
+private object DB2Dialect extends JdbcDialect with MergeByTempTable {
 
   override def canHandle(url: String): Boolean =
     url.toLowerCase(Locale.ROOT).startsWith("jdbc:db2")
@@ -101,6 +101,29 @@ private object DB2Dialect extends JdbcDialect {
   }
 
   override def isCascadingTruncateTable(): Option[Boolean] = Some(false)
+
+  override def createTempTable(
+      statement: Statement,
+      tableName: String,
+      strSchema: String,
+      options: JdbcOptionsInWrite): Unit = {
+    try {
+      statement.executeUpdate(s"CREATE GLOBAL TEMPORARY TABLE $tableName ($strSchema)")
+    } catch {
+      case e: SQLException if e.getErrorCode == -286 =>
+        throw new SQLException(s"Could not create temporary $tableName. " +
+          "Creating a temporary table requires a USER TEMPORARY TABLESPACE. " +
+          "Please create one first.", e)
+      case t: Throwable => throw t
+    }
+  }
+
+  // primary index used by MergeByTempTable only,
+  // used for temporary tables, which is not supported by DB2
+  override def createPrimaryIndex(
+      stmt: Statement,
+      tableName: String,
+      indexColumns: Array[String]): Unit = { }
 
   // scalastyle:off line.size.limit
   // See https://www.ibm.com/support/knowledgecenter/en/SSEPGG_11.5.0/com.ibm.db2.luw.sql.ref.doc/doc/r0053474.html

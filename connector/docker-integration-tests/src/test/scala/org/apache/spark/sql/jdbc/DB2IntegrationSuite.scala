@@ -37,7 +37,7 @@ import org.apache.spark.tags.DockerTest
  * }}}
  */
 @DockerTest
-class DB2IntegrationSuite extends DockerJDBCIntegrationSuite {
+class DB2IntegrationSuite extends DockerJDBCIntegrationSuite with UpsertTests {
   override val db = new DatabaseOnDocker {
     override val imageName = sys.env.getOrElse("DB2_DOCKER_IMAGE_NAME", "ibmcom/db2:11.5.6.0a")
     override val env = Map(
@@ -57,6 +57,10 @@ class DB2IntegrationSuite extends DockerJDBCIntegrationSuite {
   override val connectionTimeout = timeout(3.minutes)
 
   override def dataPreparation(conn: Connection): Unit = {
+    // required to create temporary tables needed by upsert tests
+    conn.prepareStatement("CREATE USER TEMPORARY TABLESPACE usr_tbsp MANAGED BY AUTOMATIC STORAGE")
+      .executeUpdate()
+
     conn.prepareStatement("CREATE TABLE tbl (x INTEGER, y VARCHAR(8))").executeUpdate()
     conn.prepareStatement("INSERT INTO tbl VALUES (42,'fred')").executeUpdate()
     conn.prepareStatement("INSERT INTO tbl VALUES (17,'dave')").executeUpdate()
