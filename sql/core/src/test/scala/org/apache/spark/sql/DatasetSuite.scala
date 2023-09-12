@@ -993,6 +993,21 @@ class DatasetSuite extends QueryTest
     assert(err2.getMessage.contains("Name must not be empty"))
   }
 
+  test("SPARK-XXXXX: Observation with udaf") {
+    val namedObservation = Observation("named")
+    val unnamedObservation = Observation()
+
+    functions.udaf(ComplexResultAgg)
+    val agg = ComplexResultAgg.toColumn.name("agg")
+    val ds = Seq("a" -> 1, "a" -> 3, "b" -> 3).toDS()
+
+    val observed_df = ds.observe(namedObservation, agg).observe(unnamedObservation, agg)
+    observed_df.collect()
+
+    assert(namedObservation.get === Map("agg" -> (1, 2)))
+    assert(unnamedObservation.get === Map("agg" -> (1, 2)))
+  }
+
   test("SPARK-37203: Fix NotSerializableException when observe with TypedImperativeAggregate") {
     def observe[T](df: Dataset[T], expected: Map[String, _]): Unit = {
       val namedObservation = Observation("named")
