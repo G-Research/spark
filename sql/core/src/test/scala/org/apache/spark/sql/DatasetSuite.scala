@@ -27,7 +27,6 @@ import org.apache.hadoop.fs.{Path, PathFilter}
 import org.scalatest.Assertions._
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.prop.TableDrivenPropertyChecks._
-
 import org.apache.spark.{SparkConf, SparkException, TaskContext}
 import org.apache.spark.TestUtils.withListener
 import org.apache.spark.internal.config.MAX_RESULT_SIZE
@@ -38,9 +37,10 @@ import org.apache.spark.sql.catalyst.encoders.AgnosticEncoders.BoxedIntEncoder
 import org.apache.spark.sql.catalyst.expressions.{CodegenObjectFactoryMode, GenericRowWithSchema}
 import org.apache.spark.sql.catalyst.plans.{LeftAnti, LeftSemi}
 import org.apache.spark.sql.catalyst.util.sideBySide
-import org.apache.spark.sql.execution.{LogicalRDD, RDDScanExec, SQLExecution}
+import org.apache.spark.sql.execution.{LogicalRDD, RDDScanExec, SQLExecution, ShowMetricsExec}
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.execution.exchange.{BroadcastExchangeExec, ShuffleExchangeExec}
+import org.apache.spark.sql.execution.metric.SQLMetrics
 import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.expressions.UserDefinedFunction
 import org.apache.spark.sql.functions._
@@ -1021,6 +1021,31 @@ class DatasetSuite extends QueryTest
     val expected = Map("percentile_approx_val" -> 49)
 
     assert(namedObservation.get === expected)
+  }
+
+  test("show metrics") {
+    val metrics = Seq(
+      SQLMetrics.createMetric(sparkContext, "sum"),
+      SQLMetrics.createSizeMetric(sparkContext, "size"),
+      SQLMetrics.createTimingMetric(sparkContext, "time"),
+      SQLMetrics.createNanoTimingMetric(sparkContext, "ns"),
+      SQLMetrics.createAverageMetric(sparkContext, "avg")
+    )
+    val df = spark.range(10).as[Long]
+      .map { v: Long => metrics.foreach(_.add(v)); v }
+      .showMetrics("label", metrics: _*)
+      .showMetrics(metrics: _*)
+    df.collect()
+    assert(metrics.map(_.value) === Seq.fill(metrics.length)(45))
+
+    val plans = collect(df.queryExecution.sparkPlan) {
+      case s: ShowMetricsExec => s
+    }
+    assert(plans.length === 2)
+    assert(plans.head.metrics === metrics.map(metric => metric.name.get -> metric).toMap)
+    assert(plans.head.nodeName === "ShowMetrics")
+    assert(plans.last.metrics === metrics.map(metric => metric.name.get -> metric).toMap)
+    assert(plans.last.nodeName === "label")
   }
 
   test("sample with replacement") {

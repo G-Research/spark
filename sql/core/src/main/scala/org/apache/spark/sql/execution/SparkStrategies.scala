@@ -937,6 +937,8 @@ abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
         throw QueryExecutionErrors.ddlUnsupportedTemporarilyError("MERGE INTO TABLE")
       case logical.CollectMetrics(name, metrics, child, _) =>
         execution.CollectMetricsExec(name, metrics, planLater(child)) :: Nil
+      case logical.ShowMetrics(label, metrics, child) =>
+        execution.ShowMetricsExec(label, metrics, planLater(child)) :: Nil
       case WriteFiles(child, fileFormat, partitionColumns, bucket, options, staticPartitions) =>
         WriteFilesExec(planLater(child), fileFormat, partitionColumns, bucket, options,
           staticPartitions) :: Nil

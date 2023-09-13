@@ -1985,6 +1985,13 @@ case class CollectMetrics(
     copy(child = newChild)
 }
 
+case class ShowMetrics(label: Option[String], metricsIds: Seq[Long], child: LogicalPlan) extends UnaryNode {
+  override def output: Seq[Attribute] = child.output
+
+  override protected def withNewChildInternal(newChild: LogicalPlan): ShowMetrics =
+    copy(child = newChild)
+}
+
 /**
  * A placeholder for domain join that can be added when decorrelating subqueries.
  * It should be rewritten during the optimization phase.

@@ -56,6 +56,7 @@ import org.apache.spark.sql.execution.arrow.{ArrowBatchStreamWriter, ArrowConver
 import org.apache.spark.sql.execution.command._
 import org.apache.spark.sql.execution.datasources.LogicalRelation
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation, FileTable}
+import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.execution.python.EvaluatePython
 import org.apache.spark.sql.execution.stat.StatFunctions
 import org.apache.spark.sql.internal.SQLConf
@@ -2245,6 +2246,14 @@ class Dataset[T] private[sql](
   @varargs
   def observe(observation: Observation, expr: Column, exprs: Column*): Dataset[T] = {
     observation.on(this, expr, exprs: _*)
+  }
+
+  def showMetrics(metrics: SQLMetric*): Dataset[T] = withTypedPlan {
+    ShowMetrics(None, metrics.map(_.id), logicalPlan)
+  }
+
+  def showMetrics(label: String, metrics: SQLMetric*): Dataset[T] = withTypedPlan {
+    ShowMetrics(Some(label), metrics.map(_.id), logicalPlan)
   }
 
   /**
