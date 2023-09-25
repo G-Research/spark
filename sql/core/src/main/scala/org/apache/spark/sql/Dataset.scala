@@ -2248,10 +2248,62 @@ class Dataset[T] private[sql](
     observation.on(this, expr, exprs: _*)
   }
 
+  /**
+   * Show metrics in the Spark UI. This adds a node to the Spark query plan
+   * that shows values of given SQLMetrics:
+   *
+   * {{{
+   *   val metric = SQLMetrics.createMetric(sparkContext, "sum")
+   *   val df = spark.range(10).as[Long]
+   *    .map { v: Long => metric.add(v); v }
+   *    .showMetrics(metric)
+   *    .collect()
+   * }}}
+   *
+   * The query plan in the Spark UI then contains this node:
+   *
+   *          ↓
+   *   ╔═════════════╗
+   *   ║ShowMetrics  ║
+   *   ║             ║
+   *   ║ sum: 45     ║
+   *   ╚══════╤══════╝
+   *          ↓
+   *
+   *
+   * @group typedrel
+   * @since 4.0.0
+   */
   def showMetrics(metrics: SQLMetric*): Dataset[T] = withTypedPlan {
     ShowMetrics(None, metrics.map(_.id), logicalPlan)
   }
 
+  /**
+   * Show metrics in the Spark UI. This adds a node to the Spark query plan
+   * that shows values of given SQLMetrics:
+   *
+   * {{{
+   *   val metric = SQLMetrics.createMetric(sparkContext, "sum")
+   *   val df = spark.range(10).as[Long]
+   *    .map { v: Long => metric.add(v); v }
+   *    .showMetrics("My metrics", metric)
+   *    .collect()
+   * }}}
+   *
+   * The query plan in the Spark UI then contains this node:
+   *
+   *          ↓
+   *   ╔═════════════╗
+   *   ║My metrics   ║
+   *   ║             ║
+   *   ║ sum: 45     ║
+   *   ╚══════╤══════╝
+   *          ↓
+   *
+   *
+   * @group typedrel
+   * @since 4.0.0
+   */
   def showMetrics(label: String, metrics: SQLMetric*): Dataset[T] = withTypedPlan {
     ShowMetrics(Some(label), metrics.map(_.id), logicalPlan)
   }
