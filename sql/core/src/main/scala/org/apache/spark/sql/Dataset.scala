@@ -2262,13 +2262,13 @@ class Dataset[T] private[sql](
    *
    * The query plan in the Spark UI then contains this node:
    *
-   *          ↓
-   *   ╔═════════════╗
-   *   ║ShowMetrics  ║
-   *   ║             ║
-   *   ║ sum: 45     ║
-   *   ╚══════╤══════╝
-   *          ↓
+   *          |
+   *   +======+======+
+   *   |ShowMetrics  |
+   *   |             |
+   *   | sum: 45     |
+   *   +======+======+
+   *          |
    *
    *
    * @group typedrel
@@ -2292,13 +2292,13 @@ class Dataset[T] private[sql](
    *
    * The query plan in the Spark UI then contains this node:
    *
-   *          ↓
-   *   ╔═════════════╗
-   *   ║My metrics   ║
-   *   ║             ║
-   *   ║ sum: 45     ║
-   *   ╚══════╤══════╝
-   *          ↓
+   *          |
+   *   +======+======+
+   *   |My metrics   |
+   *   |             |
+   *   | sum: 45     |
+   *   +======+======+
+   *          |
    *
    *
    * @group typedrel
