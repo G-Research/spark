@@ -36,6 +36,7 @@ import org.apache.spark.unsafe.bitset.BitSetMethods;
 import org.apache.spark.unsafe.hash.Murmur3_x86_32;
 import org.apache.spark.unsafe.types.CalendarInterval;
 import org.apache.spark.unsafe.types.UTF8String;
+import scala.collection.immutable.Seq;
 
 import static org.apache.spark.unsafe.Platform.BYTE_ARRAY_OFFSET;
 
@@ -557,7 +558,7 @@ public final class UnsafeRow extends InternalRow implements Externalizable, Kryo
   // This is for debugging
   @Override
   public String toString() {
-    StringBuilder build = new StringBuilder("[");
+    StringBuilder build = new StringBuilder("UnsafeRow[");
     for (int i = 0; i < sizeInBytes; i += 8) {
       if (i != 0) build.append(',');
       build.append(java.lang.Long.toHexString(Platform.getLong(baseObject, baseOffset + i)));

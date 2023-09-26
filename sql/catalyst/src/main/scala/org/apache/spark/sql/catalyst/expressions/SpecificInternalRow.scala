@@ -220,17 +220,7 @@ final class SpecificInternalRow(val values: Array[MutableValue]) extends BaseGen
 
   def this() = this(Seq.empty)
 
-  def this(schema: StructType) = {
-    // SPARK-32550: use while loop instead of map
-    this(new Array[MutableValue](schema.fields.length))
-    val length = values.length
-    val fields = schema.fields
-    var i = 0
-    while (i < length) {
-      values(i) = dataTypeToMutableValue(fields(i).dataType)
-      i += 1
-    }
-  }
+  def this(schema: StructType) = this(schema.fields.map(_.dataType))
 
   override def numFields: Int = values.length
 
@@ -318,5 +308,9 @@ final class SpecificInternalRow(val values: Array[MutableValue]) extends BaseGen
 
   override def getByte(i: Int): Byte = {
     values(i).asInstanceOf[MutableByte].value
+  }
+
+  override def toString: String = {
+    s"specrow=${0.to(numFields).map(i => values(i).boxed.toString).mkString("[", ", ", "]")}"
   }
 }

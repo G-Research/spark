@@ -178,3 +178,14 @@ class GenericInternalRow(val values: Array[Any]) extends BaseGenericInternalRow 
 
   override def update(i: Int, value: Any): Unit = { values(i) = value }
 }
+
+/**
+ * An internal row implementation as GenericInternalRow plus data type information.
+ */
+class GenericInternalRowWithDataType(override val values: Array[Any], val dataTypes: Seq[DataType])
+  extends GenericInternalRow {
+  /** No-arg constructor for serialization. */
+  protected def this() = this(null, null)
+
+  override def toString: String = "GenericInternalRowWithDataType: " + toSeq(dataTypes).mkString("[", ", ", "]")
+}

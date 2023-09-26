@@ -38,7 +38,7 @@ case class CollectMetricsExec(
 
   private lazy val accumulator: AggregatingAccumulator = {
     val acc = AggregatingAccumulator(metricExpressions, child.output)
-    acc.register(sparkContext, Option("Collected metrics"))
+    acc.register(sparkContext, Option(name))
     acc
   }
 

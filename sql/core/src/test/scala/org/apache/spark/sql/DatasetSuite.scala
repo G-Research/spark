@@ -19,10 +19,8 @@ package org.apache.spark.sql
 
 import java.io.{Externalizable, ObjectInput, ObjectOutput}
 import java.sql.{Date, Timestamp}
-
 import scala.reflect.ClassTag
 import scala.util.Random
-
 import org.apache.hadoop.fs.{Path, PathFilter}
 import org.scalatest.Assertions._
 import org.scalatest.exceptions.TestFailedException
@@ -446,6 +444,18 @@ class DatasetSuite extends QueryTest
     val ds = spark.range(10)
     val ds2 = ds.filter(_ > 3)
     assert(ds.schema.equals(ds2.schema))
+  }
+
+  test("accumulators") {
+    val ds = Seq(("a", 1), ("b", 2), ("c", 3)).toDS()
+    val d = spark.sparkContext.doubleAccumulator("double")
+    val c = spark.sparkContext.collectionAccumulator("coll")
+    val l = spark.sparkContext.longAccumulator("long")
+    spark.sparkContext
+    ds.observe(Observation("Rows"), count("*"))
+      .observe(Observation(), count("*"))
+      .foreach(v => d.add(v._2))
+    Thread.sleep(60000)
   }
 
   test("foreach") {

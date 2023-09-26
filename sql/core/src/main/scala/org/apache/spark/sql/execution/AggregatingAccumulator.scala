@@ -17,8 +17,8 @@
 package org.apache.spark.sql.execution
 
 import scala.collection.mutable
-
-import org.apache.spark.TaskContext
+import org.apache.spark.{InternalAccumulator, TaskContext}
+import org.apache.spark.scheduler.AccumulableInfo
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, AttributeSeq, BindReferences, Expression, InterpretedMutableProjection, InterpretedUnsafeProjection, JoinedRow, MutableProjection, NamedExpression, Projection, SpecificInternalRow}
 import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateExpression, DeclarativeAggregate, ImperativeAggregate, NoOp, TypedImperativeAggregate}
@@ -229,6 +229,26 @@ class AggregatingAccumulator private(
     assert(buffer == null || (buffer eq other.buffer))
     buffer = other.buffer
     joinedRow = other.joinedRow
+  }
+
+  /**
+   * Creates an [[AccumulableInfo]] representation of this [[AccumulatorV2]] with the provided
+   * values.
+   */
+  override private[spark] def toInfo(update: Option[Any], value: Option[Any]): AccumulableInfo = {
+    if (update.exists(!_.isInstanceOf[InternalRow])) {
+      throw new IllegalArgumentException(s"AggregatingAccumulator has InternalRow values, " +
+        s"not ${update.get.getClass}")
+    }
+    if (value.exists(!_.isInstanceOf[InternalRow])) {
+      throw new IllegalArgumentException(s"AggregatingAccumulator has InternalRow values, " +
+        s"not ${value.get.getClass}")
+    }
+    val isInternal = name.exists(_.startsWith(InternalAccumulator.METRICS_PREFIX))
+    val updateStrings = update.map(_.asInstanceOf[InternalRow].toSeq(schema))
+    val valueStrings = value.map(_.asInstanceOf[InternalRow].toSeq(schema))
+    AccumulableInfo(id, name, updateStrings.map(_.mkString("[", ", ", "]")),
+      valueStrings.map(_.mkString("[", ", ", "]")), isInternal, countFailedValues)
   }
 }
 
