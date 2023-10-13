@@ -19,9 +19,9 @@ package org.apache.spark.sql.catalyst.plans.physical
 
 import scala.annotation.tailrec
 import scala.collection.mutable
-
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
+import org.apache.spark.sql.catalyst.plans.logical.LeafNode
 import org.apache.spark.sql.catalyst.util.InternalRowComparableWrapper
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.{DataType, IntegerType}
@@ -256,6 +256,20 @@ case object SinglePartition extends Partitioning {
 
   override def createShuffleSpec(distribution: ClusteredDistribution): ShuffleSpec =
     SinglePartitionShuffleSpec
+}
+
+case class AsIsPartitioning(numPartitions: Int)
+  extends LeafExpression with Partitioning with Unevaluable {
+
+  override def nullable: Boolean = false
+  override def dataType: DataType = IntegerType
+
+  override def satisfies0(required: Distribution): Boolean = false
+
+  override def createShuffleSpec(distribution: ClusteredDistribution): ShuffleSpec =
+    AsIsShuffleSpec(this, distribution)
+
+  def partitionIdExpression: Expression = SparkPartitionID()
 }
 
 /**
@@ -640,6 +654,13 @@ case class RangeShuffleSpec(
     // data are co-partitioned for all the children, as range boundaries are randomly sampled.
     case _ => false
   }
+}
+
+case class AsIsShuffleSpec(
+    partitioning: AsIsPartitioning, distribution: ClusteredDistribution) extends ShuffleSpec {
+  override def numPartitions: Int = partitioning.numPartitions
+  override def isCompatibleWith(other: ShuffleSpec): Boolean = false
+  override def canCreatePartitioning: Boolean = false
 }
 
 case class HashShuffleSpec(

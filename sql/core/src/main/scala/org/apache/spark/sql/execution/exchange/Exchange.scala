@@ -91,3 +91,11 @@ case class ReusedExchangeExec(override val output: Seq[Attribute], child: Exchan
        |""".stripMargin
   }
 }
+
+case class AsIsExchangeExec(override val child: SparkPlan) extends Exchange {
+  override def outputOrdering: Seq[SortOrder] = child.outputOrdering
+  override def outputPartitioning: Partitioning = child.outputPartitioning
+  override protected def doExecute(): RDD[InternalRow] = child.doExecute()
+  override protected def withNewChildInternal(newChild: SparkPlan): SparkPlan =
+    copy(child = newChild)
+}

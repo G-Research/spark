@@ -116,6 +116,86 @@ case object REBALANCE_PARTITIONS_BY_NONE extends ShuffleOrigin
 // the output needs to be partitioned by the given columns.
 case object REBALANCE_PARTITIONS_BY_COL extends ShuffleOrigin
 
+case class AsIsShuffleExchangeExec(override val child: SparkPlan) extends ShuffleExchangeLike {
+  private lazy val writeMetrics =
+    SQLShuffleWriteMetricsReporter.createShuffleWriteMetrics(sparkContext)
+  private[sql] lazy val readMetrics =
+    SQLShuffleReadMetricsReporter.createShuffleReadMetrics(sparkContext)
+  override lazy val metrics = Map(
+    "dataSize" -> SQLMetrics.createSizeMetric(sparkContext, "data size"),
+    "numPartitions" -> SQLMetrics.createMetric(sparkContext, "number of partitions")
+  ) ++ readMetrics ++ writeMetrics
+
+  override def numMappers: Int = child.outputPartitioning.numPartitions
+  override def numPartitions: Int = child.outputPartitioning.numPartitions
+  override def advisoryPartitionSize: Option[Long] = None
+  override def shuffleOrigin: ShuffleOrigin = REPARTITION_BY_NUM
+
+  override def outputPartitioning: Partitioning =
+    AsIsPartitioning(child.outputPartitioning.numPartitions)
+
+  override def getShuffleRDD(partitionSpecs: Array[ShufflePartitionSpec]): RDD[InternalRow] = {
+    new ShuffledRowRDD(shuffleDependency, readMetrics, partitionSpecs)
+  }
+
+  private lazy val serializer: Serializer =
+    new UnsafeRowSerializer(child.output.size, longMetric("dataSize"))
+
+  @transient lazy val inputRDD: RDD[InternalRow] = child.execute()
+
+  // 'mapOutputStatisticsFuture' is only needed when enable AQE.
+  @transient
+  override lazy val mapOutputStatisticsFuture: Future[MapOutputStatistics] = {
+    if (inputRDD.getNumPartitions == 0) {
+      Future.successful(null)
+    } else {
+      sparkContext.submitMapStage(shuffleDependency)
+    }
+  }
+
+  override def runtimeStatistics: Statistics = {
+    val dataSize = metrics("dataSize").value
+    val rowCount = metrics(SQLShuffleWriteMetricsReporter.SHUFFLE_RECORDS_WRITTEN).value
+    Statistics(dataSize, Some(rowCount))
+  }
+
+  /**
+   * A [[ShuffleDependency]] that will partition rows of its child based on
+   * the partitioning scheme defined in `newPartitioning`. Those partitions of
+   * the returned ShuffleDependency will be the input of shuffle.
+   */
+  @transient
+  lazy val shuffleDependency : ShuffleDependency[Int, InternalRow, InternalRow] = {
+    val dep = ShuffleExchangeExec.prepareShuffleDependency(
+      inputRDD,
+      child.output,
+      outputPartitioning,
+      serializer,
+      writeMetrics)
+    metrics("numPartitions").set(dep.partitioner.numPartitions)
+    val executionId = sparkContext.getLocalProperty(SQLExecution.EXECUTION_ID_KEY)
+    SQLMetrics.postDriverMetricUpdates(
+      sparkContext, executionId, metrics("numPartitions") :: Nil)
+    dep
+  }
+
+  /**
+   * Caches the created ShuffleRowRDD so we can reuse that.
+   */
+  private var cachedShuffleRDD: ShuffledRowRDD = null
+
+  protected override def doExecute(): RDD[InternalRow] = {
+    // Returns the same ShuffleRowRDD if this plan is used by multiple plans.
+    if (cachedShuffleRDD == null) {
+      cachedShuffleRDD = new ShuffledRowRDD(shuffleDependency, readMetrics)
+    }
+    cachedShuffleRDD
+  }
+
+  override protected def withNewChildInternal(newChild: SparkPlan): SparkPlan =
+    copy(child = newChild)
+}
+
 /**
  * Performs a shuffle that will result in the desired partitioning.
  */
@@ -275,6 +355,7 @@ object ShuffleExchangeExec {
     : ShuffleDependency[Int, InternalRow, InternalRow] = {
     val part: Partitioner = newPartitioning match {
       case RoundRobinPartitioning(numPartitions) => new HashPartitioner(numPartitions)
+      case AsIsPartitioning(n) => new PartitionIdPassthrough(n)
       case HashPartitioning(_, n) =>
         // For HashPartitioning, the partitioning key is already a valid partition ID, as we use
         // `HashPartitioning.partitionIdExpression` to produce partitioning key.
