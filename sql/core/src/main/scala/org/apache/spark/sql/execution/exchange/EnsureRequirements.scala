@@ -588,8 +588,8 @@ case class EnsureRequirements(
   def apply(plan: SparkPlan): SparkPlan = {
     val newPlan = plan.transformUp {
       case operator @ ShuffleExchangeExec(_: RangePartitioning, child, _, _)
-          if ! child.isInstanceOf[AsIsExchangeExec] =>
-        operator.withNewChildren(Seq(AsIsExchangeExec(child)))
+          if ! child.isInstanceOf[AsIsShuffleExchangeExec] =>
+        operator.withNewChildren(Seq(AsIsShuffleExchangeExec(child)))
       case operator @ ShuffleExchangeExec(upper: HashPartitioning, child, shuffleOrigin, _)
           if optimizeOutRepartition &&
             (shuffleOrigin == REPARTITION_BY_COL || shuffleOrigin == REPARTITION_BY_NUM) =>
@@ -635,5 +635,13 @@ case class EnsureRequirements(
     } else {
       newPlan
     }
+  }
+}
+
+object ReuseSampledStage extends Rule[SparkPlan] {
+  override def apply(plan: SparkPlan): SparkPlan = plan.transformUp {
+    case operator @ ShuffleExchangeExec(_: RangePartitioning, child, _, _)
+      if !child.isInstanceOf[AsIsShuffleExchangeExec] =>
+      operator.withNewChildren(Seq(AsIsShuffleExchangeExec(child)))
   }
 }

@@ -123,6 +123,7 @@ case class AdaptiveSparkPlanExec(
       CoalesceBucketsInJoin,
       RemoveRedundantProjects,
       ensureRequirements,
+      ReuseSampledStage,
       AdjustShuffleExchangePosition,
       ValidateSparkPlan,
       ReplaceHashWithSortAgg,

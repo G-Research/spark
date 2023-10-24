@@ -406,6 +406,9 @@ object ShuffleExchangeExec {
           position += 1
           position
         }
+      case a: AsIsPartitioning =>
+        val projection = UnsafeProjection.create(a.partitionIdExpression :: Nil, outputAttributes)
+        row => projection(row).getInt(0)
       case h: HashPartitioning =>
         val projection = UnsafeProjection.create(h.partitionIdExpression :: Nil, outputAttributes)
         row => projection(row).getInt(0)
