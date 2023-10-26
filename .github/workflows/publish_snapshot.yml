@@ -63,6 +63,14 @@ jobs:
       with:
         distribution: temurin
         java-version: 17
+    - name: Add swap
+      run: |
+        sudo dd if=/dev/zero of=swap.img bs=1024 count=4M
+        sudo chmod 0600 swap.img
+        sudo mkswap swap.img
+        cat /proc/swaps
+        sudo swapon swap.img
+        cat /proc/swaps
     - name: Publish snapshot
       env:
         ASF_USERNAME: ${{ secrets.NEXUS_USER }}
