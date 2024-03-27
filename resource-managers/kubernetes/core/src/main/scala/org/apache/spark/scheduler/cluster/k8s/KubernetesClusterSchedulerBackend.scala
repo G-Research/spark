@@ -69,6 +69,8 @@ private[spark] class KubernetesClusterSchedulerBackend(
 
   private val defaultProfile = scheduler.sc.resourceProfileManager.defaultResourceProfile
 
+  private val namespace = conf.get(KUBERNETES_NAMESPACE)
+
   // Allow removeExecutor to be accessible by ExecutorPodsLifecycleEventHandler
   private[k8s] def doRemoveExecutor(executorId: String, reason: ExecutorLossReason): Unit = {
     removeExecutor(executorId, reason)
@@ -98,6 +100,13 @@ private[spark] class KubernetesClusterSchedulerBackend(
   override def applicationId(): String = {
     conf.getOption("spark.app.id").getOrElse(appId)
   }
+
+  override def getDriverAttributes: Option[Map[String, String]] = Some(Map(
+    "LOG_FILES" -> "log",
+    "APP_ID" -> applicationId(),
+    "KUBERNETES_NAMESPACE" -> namespace,
+    "KUBERNETES_POD_NAME" -> Option(System.getenv(ENV_DRIVER_POD_NAME)).getOrElse("[null]")
+  ))
 
   override def start(): Unit = {
     super.start()
