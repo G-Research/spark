@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: spark-external-shuffle-service
+  labels:
+    k8s-app: spark-ess
+spec:
+  selector:
+    matchLabels:
+      name: spark-ess
+  template:
+    metadata:
+      labels:
+        name: spark-ess
+    spec:
+      nodeSelector:
+        # run on all nodes with label 'spark'
+        #name: spark
+        #kubernetes.io/hostname: minikube-m02
+      # instead of nodeSelector, use affinity.nodeAffinity
+
+      tolerations:
+      # these tolerations are to have the daemonset runnable on control plane nodes
+      # remove them if your control plane nodes should not run pods
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/master
+        operator: Exists
+        effect: NoSchedule
+      containers:
+      - name: spark-ess
+        image: spark:k8s
+        resources:
+          limits:
+            memory: 1024Mi
+          requests:
+            cpu: 1
+            memory: 1024Mi
+        args: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.ExternalShuffleService"]
+        ports:
+        - containerPort: 7337
+          hostPort: 7337
+          name: ess-rpc-port
+          protocol: TCP
+        volumeMounts:
+        - name: shuffle-data
+          mountPath: /var/data/
+      # it may be desirable to set a high priority class to ensure that a DaemonSet Pod
+      # preempts running Pods
+      #priorityClassName: important
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: shuffle-data
+        hostPath:
+          path: /tmp/spark-ess/shuffle-data

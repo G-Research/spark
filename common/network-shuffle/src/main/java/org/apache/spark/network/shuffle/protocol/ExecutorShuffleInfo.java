@@ -37,9 +37,10 @@ public class ExecutorShuffleInfo implements Encodable {
   public final int subDirsPerLocalDir;
   /**
    * Shuffle manager (SortShuffleManager) that the executor is using.
-   * If this string contains semicolon, it will also include the meta information
-   * for push based shuffle in JSON format. Example of the string with semicolon would be:
+   * If this string contains a colon (":"), it will also include the meta information
+   * for push based shuffle in JSON format. Example of the colon would be:
    * SortShuffleManager:{"mergeDir": "mergeDirectory_1", "attemptId": 1}
+   * The colon delimiter is configured in RemoteBlockPushResolver.SHUFFLE_META_DELIMITER.
    */
   public final String shuffleManager;
 
