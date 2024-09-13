@@ -244,6 +244,7 @@ private[spark] class BlockManager(
   private lazy val maxOnHeapMemory = memoryManager.maxOnHeapStorageMemory
   private lazy val maxOffHeapMemory = memoryManager.maxOffHeapStorageMemory
 
+  private[spark] val externalShuffleServiceHost = StorageUtils.externalShuffleServiceHost(conf)
   private[spark] val externalShuffleServicePort = StorageUtils.externalShuffleServicePort(conf)
 
   var blockManagerId: BlockManagerId = _
@@ -547,8 +548,13 @@ private[spark] class BlockManager(
     // the registration with the ESS. Therefore, this registration should be prior to
     // the BlockManager registration. See SPARK-39647.
     if (externalShuffleServiceEnabled) {
+      externalShuffleServiceHost.foreach { host =>
+        logInfo(log"external shuffle service host = ${MDC(HOST, host)}")
+      }
+      logInfo("external shuffle host " + conf.get("spark.shuffle.service.host", "<not-set>"))
       logInfo(log"external shuffle service port = ${MDC(PORT, externalShuffleServicePort)}")
-      shuffleServerId = BlockManagerId(executorId, blockTransferService.hostName,
+      shuffleServerId = BlockManagerId(executorId,
+        externalShuffleServiceHost.getOrElse(blockTransferService.hostName),
         externalShuffleServicePort)
       if (!isDriver && !(Utils.isTesting && conf.get(Tests.TEST_SKIP_ESS_REGISTER))) {
         registerWithExternalShuffleServer()

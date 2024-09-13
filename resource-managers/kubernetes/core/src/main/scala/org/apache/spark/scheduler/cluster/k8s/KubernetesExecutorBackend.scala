@@ -107,6 +107,10 @@ private[spark] object KubernetesExecutorBackend extends Logging {
 
       // Create SparkEnv using properties we fetched from the driver.
       val driverConf = new SparkConf()
+      sys.env.get("EXECUTOR_EXTERNAL_SHUFFLE_SERVICE_HOST").foreach { host =>
+        log.info(s"Using external shuffle service on '$host'")
+        driverConf.set(SHUFFLE_SERVICE_HOST, host)
+      }
       for ((key, value) <- props) {
         // this is required for SSL in standalone mode
         if (SparkConf.isExecutorStartupConf(key)) {
