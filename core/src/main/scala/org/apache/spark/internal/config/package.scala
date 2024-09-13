@@ -800,6 +800,8 @@ package object config {
       .checkValues(DBBackend.values.map(_.toString).toSet)
       .createWithDefault(DBBackend.ROCKSDB.name)
 
+  private[spark] val SHUFFLE_SERVICE_HOST =
+    ConfigBuilder("spark.shuffle.service.host").version("4.0.0").stringConf.createOptional
   private[spark] val SHUFFLE_SERVICE_PORT =
     ConfigBuilder("spark.shuffle.service.port").version("1.2.0").intConf.createWithDefault(7337)
 

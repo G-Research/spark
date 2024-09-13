@@ -219,6 +219,13 @@ private[spark] object StorageUtils extends Logging {
   }
 
   /**
+   * Get the host used by the external shuffle service.
+   */
+  def externalShuffleServiceHost(conf: SparkConf): Option[String] = {
+    conf.getOption(config.SHUFFLE_SERVICE_HOST.key)
+  }
+
+  /**
    * Get the port used by the external shuffle service. In Yarn mode, this may be already be
    * set through the Hadoop configuration as the server is launched in the Yarn NM.
    */
