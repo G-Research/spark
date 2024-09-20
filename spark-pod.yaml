@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: spark-shell
+spec:
+  containers:
+  - name: spark-shell
+    image: spark:k8s
+    command: ["/usr/bin/sleep"]
+    args: ["3600"]
+    env:
+    - name: EXECUTOR_EXTERNAL_SHUFFLE_SERVICE_HOST
+      valueFrom:
+        fieldRef:
+          fieldPath: status.hostIP
+    volumeMounts:
+    - name: shuffle-data
+      mountPath: /var/data/
+  volumes:
+  - name: shuffle-data
+    hostPath:
+      path: /tmp/spark-ess/shuffle-data

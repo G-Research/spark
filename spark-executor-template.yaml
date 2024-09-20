@@ -1,0 +1,11 @@
+apiVersion: v1
+Kind: Pod
+spec:
+  containers:
+  - name: container
+    env:
+    - name: EXECUTOR_EXTERNAL_SHUFFLE_SERVICE_HOST
+      valueFrom:
+        fieldRef:
+          fieldPath: status.hostIP
+
