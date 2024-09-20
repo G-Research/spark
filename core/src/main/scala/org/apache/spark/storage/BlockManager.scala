@@ -551,7 +551,6 @@ private[spark] class BlockManager(
       externalShuffleServiceHost.foreach { host =>
         logInfo(log"external shuffle service host = ${MDC(HOST, host)}")
       }
-      logInfo("external shuffle host " + conf.get("spark.shuffle.service.host", "<not-set>"))
       logInfo(log"external shuffle service port = ${MDC(PORT, externalShuffleServicePort)}")
       shuffleServerId = BlockManagerId(executorId,
         externalShuffleServiceHost.getOrElse(blockTransferService.hostName),
