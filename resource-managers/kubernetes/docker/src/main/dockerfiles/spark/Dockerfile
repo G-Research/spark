@@ -35,7 +35,7 @@ ARG spark_uid=185
 RUN set -ex && \
     apt-get update && \
     ln -s /lib /lib64 && \
-    apt install -y bash tini libc6 libpam-modules krb5-user libnss3 procps net-tools logrotate socat netcat inetutils-ping && \
+    apt install -y bash tini libc6 libpam-modules krb5-user libnss3 procps net-tools logrotate && \
     mkdir -p /opt/spark && \
     mkdir -p /opt/spark/examples && \
     mkdir -p /opt/spark/work-dir && \
@@ -59,7 +59,6 @@ COPY examples /opt/spark/examples
 RUN ln -s $(basename $(ls /opt/spark/examples/jars/spark-examples_*.jar)) /opt/spark/examples/jars/spark-examples.jar
 COPY kubernetes/tests /opt/spark/tests
 COPY data /opt/spark/data
-COPY conf /opt/spark/conf
 
 ENV SPARK_HOME=/opt/spark
 

@@ -18,7 +18,7 @@ spec:
         #name: spark
         #kubernetes.io/hostname: minikube-m02
       # instead of nodeSelector, use affinity.nodeAffinity
-      
+
       tolerations:
       # these tolerations are to have the daemonset runnable on control plane nodes
       # remove them if your control plane nodes should not run pods

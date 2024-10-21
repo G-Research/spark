@@ -107,7 +107,7 @@ function create_dev_build_context {(
     fi
   done
 
-  for other in bin sbin data conf; do
+  for other in bin sbin data; do
     cp -r "$other" "$BASE_CTX/$other"
   done
 
