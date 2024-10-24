@@ -1565,6 +1565,12 @@ package object config {
       .stringConf
       .createWithDefault("sort")
 
+  private[spark] val SHUFFLE_BLOCK_TRANSFER_SERVICE =
+    ConfigBuilder("spark.shuffle.blockTransferService")
+      .version("4.0.0")
+      .stringConf
+      .createOptional
+
   private[spark] val SHUFFLE_REDUCE_LOCALITY_ENABLE =
     ConfigBuilder("spark.shuffle.reduceLocality.enabled")
       .doc("Whether to compute locality preferences for reduce tasks")
