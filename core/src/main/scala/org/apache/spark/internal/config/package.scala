@@ -521,6 +521,24 @@ package object config {
       .checkValue(_ >= 0, "The number of subdirectories must be 0 or larger.")
       .createWithDefault(Int.MaxValue)
 
+  private[spark] val STORAGE_DECOMMISSION_FALLBACK_STORAGE_REPLICATION_DELAY =
+    ConfigBuilder("spark.storage.decommission.fallbackStorage.replicationDelay")
+      .doc("The maximum expected delay for files written by one executor to become " +
+        "available to other executors.")
+      .version("4.0.0")
+      .timeConf(TimeUnit.SECONDS)
+      .checkValue(_ > 0, "Value must be positive.")
+      .createOptional
+
+  private[spark] val STORAGE_DECOMMISSION_FALLBACK_STORAGE_REPLICATION_WAIT =
+    ConfigBuilder("spark.storage.decommission.fallbackStorage.replicationWait")
+      .doc("When an executor cannot find a file in the fallback storage it waits " +
+        "this amount of time before attempting to open the file again, " +
+        f"while not exceeding ${STORAGE_DECOMMISSION_FALLBACK_STORAGE_REPLICATION_DELAY.key}.")
+      .version("4.0.0")
+      .timeConf(TimeUnit.SECONDS)
+      .checkValue(_ > 0, "Value must be positive.")
+      .createWithDefaultString("1s")
 
   private[spark] val STORAGE_DECOMMISSION_FALLBACK_STORAGE_CLEANUP =
     ConfigBuilder("spark.storage.decommission.fallbackStorage.cleanUp")

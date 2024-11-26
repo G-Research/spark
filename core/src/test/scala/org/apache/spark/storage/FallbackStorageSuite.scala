@@ -16,20 +16,21 @@
  */
 package org.apache.spark.storage
 
-import java.io.{DataOutputStream, File, FileFilter, FileOutputStream, InputStream, IOException}
+import java.io.{DataOutputStream, File, FileFilter, FileNotFoundException, FileOutputStream, InputStream, IOException}
 import java.nio.file.Files
 
 import scala.concurrent.duration._
 import scala.util.Random
 
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.{FSDataInputStream, LocalFileSystem, Path, PositionedReadable, Seekable}
+import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, LocalFileSystem, Path, PositionedReadable, Seekable}
 import org.mockito.{ArgumentMatchers => mc}
 import org.mockito.Mockito.{mock, never, verify, when}
 import org.scalatest.concurrent.Eventually.{eventually, interval, timeout}
 
 import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkFunSuite, TestUtils}
 import org.apache.spark.LocalSparkContext.withSpark
+import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.internal.config._
 import org.apache.spark.launcher.SparkLauncher.{EXECUTOR_MEMORY, SPARK_MASTER}
 import org.apache.spark.network.BlockTransferService
@@ -38,11 +39,12 @@ import org.apache.spark.scheduler.ExecutorDecommissionInfo
 import org.apache.spark.scheduler.cluster.StandaloneSchedulerBackend
 import org.apache.spark.shuffle.{IndexShuffleBlockResolver, ShuffleBlockInfo}
 import org.apache.spark.shuffle.IndexShuffleBlockResolver.NOOP_REDUCE_ID
+import org.apache.spark.util.Clock
 import org.apache.spark.util.Utils.tryWithResource
 
 class FallbackStorageSuite extends SparkFunSuite with LocalSparkContext {
 
-  def getSparkConf(initialExecutor: Int = 1, minExecutor: Int = 1): SparkConf = {
+    def getSparkConf(initialExecutor: Int = 1, minExecutor: Int = 1): SparkConf = {
     new SparkConf(false)
       .setAppName(getClass.getName)
       .set(SPARK_MASTER, s"local-cluster[$initialExecutor,1,1024]")
@@ -395,6 +397,41 @@ class FallbackStorageSuite extends SparkFunSuite with LocalSparkContext {
       }
     }
   }
+
+  Seq(0, 1000, 3000, 6000).foreach { replicationMs =>
+    test(s"Consider replication delay - ${replicationMs}ms") {
+      val delay = 5000  // max allowed replication
+      val wait = 2000   // time between open file attempts
+      val conf = getSparkConf()
+        .set(STORAGE_DECOMMISSION_FALLBACK_STORAGE_REPLICATION_DELAY.key, s"${delay}ms")
+        .set(STORAGE_DECOMMISSION_FALLBACK_STORAGE_REPLICATION_WAIT.key, s"${wait}ms")
+
+      val filesystem = FileSystem.get(SparkHadoopUtil.get.newConfiguration(conf))
+      val path = new Path(conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH).get, "file")
+      val startMs = 123000000L * 1000L  // arbitrary system time
+      val clock = new DelayedActionClock(replicationMs, startMs)(filesystem.create(path).close())
+
+      if (replicationMs <= delay) {
+        // expect open to succeed
+        val in = FallbackStorage.open(conf, filesystem, path, clock)
+        assert(in != null)
+
+        // how many waits are expected to observe replication
+        val expectedWaits = Math.ceil(replicationMs.toFloat / wait).toInt
+        assert(clock.timeMs == startMs + expectedWaits * wait)
+        assert(clock.waited == expectedWaits)
+        in.close()
+      } else {
+        // expect open to fail
+        assertThrows[FileNotFoundException](FallbackStorage.open(conf, filesystem, path, clock))
+
+        // how many waits are expected to observe delay
+        val expectedWaits = delay / wait
+        assert(clock.timeMs == startMs + expectedWaits * wait)
+        assert(clock.waited == expectedWaits)
+      }
+    }
+  }
 }
 
 class ReadPartialInputStream(val in: FSDataInputStream) extends InputStream
@@ -438,5 +475,33 @@ class ReadPartialFileSystem extends LocalFileSystem {
   override def open(f: Path): FSDataInputStream = {
     val stream = super.open(f)
     new FSDataInputStream(new ReadPartialInputStream(stream))
+  }
+}
+
+class DelayedActionClock(delayMs: Long, startTimeMs: Long)(action: => Unit)
+  extends Clock {
+  var timeMs: Long = startTimeMs
+  var waited: Int = 0
+  var triggered: Boolean = false
+
+  if (delayMs == 0) trigger()
+
+  private def trigger(): Unit = {
+    if (!triggered) {
+      triggered = true
+      action
+    }
+  }
+
+  override def getTimeMillis(): Long = timeMs
+  override def nanoTime(): Long = timeMs * 1000000
+  override def waitTillTime(targetTime: Long): Long = {
+    waited += 1
+    if (targetTime >= startTimeMs + delayMs) {
+      timeMs = startTimeMs + delayMs
+      trigger()
+    }
+    timeMs = targetTime
+    targetTime
   }
 }
