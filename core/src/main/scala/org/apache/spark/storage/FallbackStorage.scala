@@ -17,26 +17,27 @@
 
 package org.apache.spark.storage
 
-import java.io.DataInputStream
+import java.io.{DataInputStream, FileNotFoundException}
 import java.nio.ByteBuffer
 
+import scala.annotation.tailrec
 import scala.concurrent.Future
 import scala.reflect.ClassTag
 
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.{FileSystem, Path}
+import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, Path}
 
 import org.apache.spark.{SparkConf, SparkException}
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.internal.{Logging, MDC}
 import org.apache.spark.internal.LogKeys._
-import org.apache.spark.internal.config.{STORAGE_DECOMMISSION_FALLBACK_STORAGE_CLEANUP, STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH}
+import org.apache.spark.internal.config.{STORAGE_DECOMMISSION_FALLBACK_STORAGE_CLEANUP, STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH, STORAGE_DECOMMISSION_FALLBACK_STORAGE_REPLICATION_DELAY, STORAGE_DECOMMISSION_FALLBACK_STORAGE_REPLICATION_WAIT}
 import org.apache.spark.network.buffer.{ManagedBuffer, NioManagedBuffer}
 import org.apache.spark.network.util.JavaUtils
 import org.apache.spark.rpc.{RpcAddress, RpcEndpointRef, RpcTimeout}
 import org.apache.spark.shuffle.{IndexShuffleBlockResolver, ShuffleBlockInfo}
 import org.apache.spark.shuffle.IndexShuffleBlockResolver.NOOP_REDUCE_ID
-import org.apache.spark.util.Utils
+import org.apache.spark.util.{Clock, SystemClock, Utils}
 
 /**
  * A fallback storage used by storage decommissioners.
@@ -138,6 +139,7 @@ private[spark] object FallbackStorage extends Logging {
       val fallbackFileSystem = FileSystem.get(fallbackUri, hadoopConf)
       // The fallback directory for this app may not be created yet.
       if (fallbackFileSystem.exists(fallbackPath)) {
+        logInfo(log"Attempt to clean up: ${MDC(URI, fallbackUri)}")
         if (fallbackFileSystem.delete(fallbackPath, true)) {
           logInfo(log"Succeed to clean up: ${MDC(URI, fallbackUri)}")
         } else {
@@ -153,6 +155,59 @@ private[spark] object FallbackStorage extends Logging {
     assert(blockManager.master != null)
     blockManager.master.updateBlockInfo(
       FALLBACK_BLOCK_MANAGER_ID, blockId, StorageLevel.DISK_ONLY, memSize = 0, dataLength)
+  }
+
+  /**
+   * Open the file, retry a FileNotFoundException for waitMs milliseconds,
+   * unless this would exceed the deadline. In the latter case, rethrow the exception.
+   */
+  @tailrec
+  private def open(filesystem: FileSystem,
+                   path: Path,
+                   deadlineMs: Long,
+                   waitMs: Long,
+                   clock: Clock) : FSDataInputStream = {
+    try {
+      filesystem.open(path)
+    } catch {
+      case fnf: FileNotFoundException =>
+        val waitTillMs = clock.getTimeMillis() + waitMs
+        if (waitTillMs <= deadlineMs) {
+          logInfo(f"File not found, waiting ${waitMs / 1000}s: $path")
+          clock.waitTillTime(waitTillMs)
+          open(filesystem, path, deadlineMs, waitMs, clock)
+        } else {
+          throw fnf
+        }
+    }
+  }
+
+  /**
+   * Open the file and retry FileNotFoundExceptions according to
+   * STORAGE_DECOMMISSION_FALLBACK_STORAGE_REPLICATION_DELAY and
+   * STORAGE_DECOMMISSION_FALLBACK_STORAGE_REPLICATION_WAIT
+   */
+  // Visible for testing
+  private[spark] def open(conf: SparkConf,
+                          filesystem: FileSystem,
+                          path: Path,
+                          clock: Clock = new SystemClock()): FSDataInputStream = {
+    val replicationDelay = conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_REPLICATION_DELAY)
+    if (replicationDelay.isDefined) {
+      val replicationDeadline = clock.getTimeMillis() + replicationDelay.get * 1000
+      val replicationWait = conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_REPLICATION_WAIT)
+      val replicationWaitMs = replicationWait * 1000
+      try {
+        open(filesystem, path, replicationDeadline, replicationWaitMs, clock)
+      } catch {
+        case fnf: FileNotFoundException =>
+          logInfo(f"File not found, exceeded expected replication delay " +
+            f"of ${replicationDelay.get}s: $path")
+          throw fnf
+      }
+    } else {
+      filesystem.open(path)
+    }
   }
 
   /**
@@ -180,7 +235,7 @@ private[spark] object FallbackStorage extends Logging {
     val indexFile = new Path(fallbackPath, s"$appId/$shuffleId/$hash/$name")
     val start = startReduceId * 8L
     val end = endReduceId * 8L
-    Utils.tryWithResource(fallbackFileSystem.open(indexFile)) { inputStream =>
+    Utils.tryWithResource(open(conf, fallbackFileSystem, indexFile)) { inputStream =>
       Utils.tryWithResource(new DataInputStream(inputStream)) { index =>
         index.skip(start)
         val offset = index.readLong()
@@ -193,7 +248,7 @@ private[spark] object FallbackStorage extends Logging {
         logDebug(s"To byte array $size")
         val array = new Array[Byte](size.toInt)
         val startTimeNs = System.nanoTime()
-        Utils.tryWithResource(fallbackFileSystem.open(dataFile)) { f =>
+        Utils.tryWithResource(open(conf, fallbackFileSystem, dataFile)) { f =>
           f.seek(offset)
           f.readFully(array)
           logDebug(s"Took ${(System.nanoTime() - startTimeNs) / (1000 * 1000)}ms")
