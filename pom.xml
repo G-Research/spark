@@ -3410,6 +3410,14 @@
     </profile>
 
     <profile>
+      <id>armada</id>
+      <modules>
+        <module>resource-managers/armada/core</module>
+      </modules>
+    </profile>
+
+
+    <profile>
       <id>hive-thriftserver</id>
       <modules>
         <module>sql/hive-thriftserver</module>

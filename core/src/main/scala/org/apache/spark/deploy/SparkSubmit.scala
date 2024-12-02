@@ -260,9 +260,10 @@ private[spark] class SparkSubmit extends Logging {
           case "yarn" => YARN
           case m if m.startsWith("spark") => STANDALONE
           case m if m.startsWith("k8s") => KUBERNETES
+          case m if m.startsWith("armada") => ARMADA
           case m if m.startsWith("local") => LOCAL
           case _ =>
-            error("Master must either be yarn or start with spark, k8s, or local")
+            error("Master must either be yarn or start with spark, k8s, armada, or local")
             -1
         }
       case None => LOCAL // default master or remote mode.
@@ -293,6 +294,14 @@ private[spark] class SparkSubmit extends Logging {
         error(
           "Could not load KUBERNETES classes. " +
             "This copy of Spark may not have been compiled with KUBERNETES support.")
+      }
+    }
+
+    if (clusterManager == ARMADA) {
+      if (!Utils.classIsLoadable(ARMADA_CLUSTER_SUBMIT_CLASS) && !Utils.isTesting) {
+        error(
+          s"Could not load ARMADA classes. \"${ARMADA_CLUSTER_SUBMIT_CLASS}\"" +
+          "This copy of Spark may not have been compiled with ARMADA support.")
       }
     }
 
@@ -329,6 +338,8 @@ private[spark] class SparkSubmit extends Logging {
     val isKubernetesClient = clusterManager == KUBERNETES && deployMode == CLIENT
     val isKubernetesClusterModeDriver = isKubernetesClient &&
       sparkConf.getBoolean("spark.kubernetes.submitInDriver", false)
+    val isArmadaCluster = clusterManager == ARMADA && deployMode == CLUSTER
+    // TODO: Support armada & client?
     val isCustomClasspathInClusterModeDisallowed =
       !sparkConf.get(ALLOW_CUSTOM_CLASSPATH_BY_PROXY_USER_IN_CLUSTER_MODE) &&
       args.proxyUser != null &&
@@ -416,6 +427,7 @@ private[spark] class SparkSubmit extends Logging {
         downloadFileList(_, targetDir, sparkConf, hadoopConf)
       }.orNull
 
+      // TODO: May have to do the same/similar for Armada
       if (isKubernetesClusterModeDriver) {
         // SPARK-33748: this mimics the behaviour of Yarn cluster mode. If the driver is running
         // in cluster mode, the archives should be available in the driver's current working
@@ -670,6 +682,7 @@ private[spark] class SparkSubmit extends Logging {
         confKey = KEYTAB.key),
       OptionAssigner(args.pyFiles, ALL_CLUSTER_MGRS, CLUSTER, confKey = SUBMIT_PYTHON_FILES.key),
 
+      // TODO: Add Armada where appropriate.
       // Propagate attributes for dependency resolution at the driver side
       OptionAssigner(args.packages, STANDALONE | KUBERNETES,
         CLUSTER, confKey = JAR_PACKAGES.key),
@@ -862,6 +875,11 @@ private[spark] class SparkSubmit extends Logging {
       if (args.proxyUser != null) {
         childArgs += "--proxy-user" += args.proxyUser
       }
+    }
+
+    if (isArmadaCluster) {
+      childMainClass = ARMADA_CLUSTER_SUBMIT_CLASS
+      // TODO: Setup childArgs
     }
 
     // Load any properties specified through --conf and the default properties file
@@ -1071,7 +1089,8 @@ object SparkSubmit extends CommandLineUtils with Logging {
   private val STANDALONE = 2
   private val LOCAL = 8
   private val KUBERNETES = 16
-  private val ALL_CLUSTER_MGRS = YARN | STANDALONE | LOCAL | KUBERNETES
+  private val ARMADA = 32
+  private val ALL_CLUSTER_MGRS = YARN | STANDALONE | LOCAL | KUBERNETES | ARMADA
 
   // Deploy modes
   private val CLIENT = 1
@@ -1095,6 +1114,8 @@ object SparkSubmit extends CommandLineUtils with Logging {
   private[deploy] val STANDALONE_CLUSTER_SUBMIT_CLASS = classOf[ClientApp].getName()
   private[deploy] val KUBERNETES_CLUSTER_SUBMIT_CLASS =
     "org.apache.spark.deploy.k8s.submit.KubernetesClientApplication"
+  private[deploy] val ARMADA_CLUSTER_SUBMIT_CLASS =
+    "org.apache.spark.deploy.armada.submit.ArmadaClientApplication"
 
   override def main(args: Array[String]): Unit = {
     Option(System.getenv("SPARK_PREFER_IPV6"))
