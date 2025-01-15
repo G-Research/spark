@@ -16,24 +16,24 @@
  */
 package org.apache.spark.scheduler.cluster.armada
 
-import java.io.File
+//import java.io.File
 
-import io.fabric8.kubernetes.client.Config
-import io.fabric8.kubernetes.client.KubernetesClient
+//import io.fabric8.kubernetes.client.Config
+//import io.fabric8.kubernetes.client.KubernetesClient
 
-import org.apache.spark.{SparkConf, SparkContext, SparkMasterRegex}
-import org.apache.spark.deploy.k8s.{KubernetesConf, KubernetesUtils, SparkKubernetesClientFactory}
-import org.apache.spark.deploy.k8s.Config._
-import org.apache.spark.deploy.k8s.Constants.DEFAULT_EXECUTOR_CONTAINER_NAME
-import org.apache.spark.internal.{Logging, MDC}
-import org.apache.spark.internal.LogKeys.MASTER_URL
-import org.apache.spark.internal.config.TASK_MAX_FAILURES
+import org.apache.spark.{SparkConf, SparkContext} //, SparkMasterRegex}
+//import org.apache.spark.deploy.k8s.{KubernetesConf, KubernetesUtils, SparkKubernetesClientFactory}
+//import org.apache.spark.deploy.k8s.Config._
+//import org.apache.spark.deploy.k8s.Constants.DEFAULT_EXECUTOR_CONTAINER_NAME
+import org.apache.spark.internal.Logging
+//import org.apache.spark.internal.LogKeys.MASTER_URL
+//import org.apache.spark.internal.config.TASK_MAX_FAILURES
 import org.apache.spark.scheduler.{ExternalClusterManager, SchedulerBackend, TaskScheduler, TaskSchedulerImpl}
-import org.apache.spark.scheduler.local.LocalSchedulerBackend
-import org.apache.spark.util.{Clock, SystemClock, ThreadUtils, Utils}
+//import org.apache.spark.scheduler.local.LocalSchedulerBackend
+import org.apache.spark.util.{ThreadUtils} //{Clock, SystemClock, ThreadUtils, Utils}
 
 private[spark] class ArmadaClusterManager extends ExternalClusterManager with Logging {
-  import SparkMasterRegex._
+  //import SparkMasterRegex._
 
   override def canCreate(masterURL: String): Boolean = masterURL.startsWith("armada")
 
@@ -49,7 +49,7 @@ private[spark] class ArmadaClusterManager extends ExternalClusterManager with Lo
       sc: SparkContext,
       masterURL: String,
       scheduler: TaskScheduler): SchedulerBackend = {
-    val wasSparkSubmittedInClusterMode = sc.conf.get(KUBERNETES_DRIVER_SUBMIT_CHECK)
+    //val wasSparkSubmittedInClusterMode = sc.conf.get(KUBERNETES_DRIVER_SUBMIT_CHECK)
     
     // TODO: Create Armada client here.
     /*
@@ -68,10 +68,12 @@ private[spark] class ArmadaClusterManager extends ExternalClusterManager with Lo
         sc.conf.get(KUBERNETES_EXECUTOR_PODTEMPLATE_CONTAINER_NAME),
         sc.conf)
     }
+    */
 
     val schedulerExecutorService = ThreadUtils.newDaemonSingleThreadScheduledExecutor(
       "kubernetes-executor-maintenance")
 
+    /*
     ExecutorPodsSnapshot.setShouldCheckAllContainers(
       sc.conf.get(KUBERNETES_EXECUTOR_CHECK_ALL_CONTAINERS))
     val sparkContainerName = sc.conf.get(KUBERNETES_EXECUTOR_PODTEMPLATE_CONTAINER_NAME)
@@ -103,16 +105,17 @@ private[spark] class ArmadaClusterManager extends ExternalClusterManager with Lo
     new ArmadaClusterSchedulerBackend(
       scheduler.asInstanceOf[TaskSchedulerImpl],
       sc,
-      armadaClient,
-      schedulerExecutorService,
-      snapshotsStore,
-      executorPodsAllocator,
-      executorPodsLifecycleEventHandler,
-      podsWatchEventSource,
-      podsPollingEventSource)
+      new ArmadaClient, // FIXME 
+      schedulerExecutorService)
+      //snapshotsStore,
+      //executorPodsAllocator,
+      //executorPodsLifecycleEventHandler,
+      //podsWatchEventSource,
+      //podsPollingEventSource)
   }
 
-  private[k8s] def makeExecutorPodsAllocator(sc: SparkContext, kubernetesClient: KubernetesClient,
+  /*
+  private[armada] def makeExecutorPodsAllocator(sc: SparkContext, kubernetesClient: KubernetesClient,
       snapshotsStore: ExecutorPodsSnapshotsStore) = {
     val executorPodsAllocatorName = sc.conf.get(KUBERNETES_ALLOCATION_PODS_ALLOCATOR) match {
       case "statefulset" =>
@@ -135,7 +138,7 @@ private[spark] class ArmadaClusterManager extends ExternalClusterManager with Lo
       kubernetesClient,
       snapshotsStore,
       new SystemClock())
-  }
+  }*/
 
   override def initialize(scheduler: TaskScheduler, backend: SchedulerBackend): Unit = {
     scheduler.asInstanceOf[TaskSchedulerImpl].initialize(backend)
