@@ -279,12 +279,10 @@ abstract class AppStatusListenerSuite extends SparkFunSuite with BeforeAndAfter 
     executorStageSummaryWrappers.foreach { exec =>
       // only the first executor is expected to be excluded
       val expectedExcludedFlag = exec.executorId == execIds.head
-      assert(exec.info.isBlacklistedForStage === expectedExcludedFlag)
       assert(exec.info.isExcludedForStage === expectedExcludedFlag)
     }
 
     check[ExecutorSummaryWrapper](execIds.head) { exec =>
-      assert(exec.info.blacklistedInStages === Set(stages.head.stageId))
       assert(exec.info.excludedInStages === Set(stages.head.stageId))
 
     }
@@ -306,7 +304,6 @@ abstract class AppStatusListenerSuite extends SparkFunSuite with BeforeAndAfter 
     assert(executorStageSummaryWrappersForNode.nonEmpty)
     executorStageSummaryWrappersForNode.foreach { exec =>
       // both executor is expected to be excluded
-      assert(exec.info.isBlacklistedForStage)
       assert(exec.info.isExcludedForStage)
 
     }
@@ -467,7 +464,6 @@ abstract class AppStatusListenerSuite extends SparkFunSuite with BeforeAndAfter 
     }
 
     check[ExecutorSummaryWrapper](execIds.head) { exec =>
-      assert(exec.info.blacklistedInStages === Set())
       assert(exec.info.excludedInStages === Set())
     }
 
@@ -495,7 +491,6 @@ abstract class AppStatusListenerSuite extends SparkFunSuite with BeforeAndAfter 
       stageAttemptId = stages.last.attemptNumber()))
 
     check[ExecutorSummaryWrapper](execIds.head) { exec =>
-      assert(exec.info.blacklistedInStages === Set(stages.last.stageId))
       assert(exec.info.excludedInStages === Set(stages.last.stageId))
     }
 
@@ -652,14 +647,12 @@ abstract class AppStatusListenerSuite extends SparkFunSuite with BeforeAndAfter 
     time += 1
     listener.onExecutorExcluded(SparkListenerExecutorExcluded(time, "1", 42))
     check[ExecutorSummaryWrapper]("1") { exec =>
-      assert(exec.info.isBlacklisted)
       assert(exec.info.isExcluded)
     }
 
     time += 1
     listener.onExecutorUnexcluded(SparkListenerExecutorUnexcluded(time, "1"))
     check[ExecutorSummaryWrapper]("1") { exec =>
-      assert(!exec.info.isBlacklisted)
       assert(!exec.info.isExcluded)
     }
 
@@ -667,14 +660,12 @@ abstract class AppStatusListenerSuite extends SparkFunSuite with BeforeAndAfter 
     time += 1
     listener.onNodeExcluded(SparkListenerNodeExcluded(time, "1.example.com", 2))
     check[ExecutorSummaryWrapper]("1") { exec =>
-      assert(exec.info.isBlacklisted)
       assert(exec.info.isExcluded)
     }
 
     time += 1
     listener.onNodeUnexcluded(SparkListenerNodeUnexcluded(time, "1.example.com"))
     check[ExecutorSummaryWrapper]("1") { exec =>
-      assert(!exec.info.isBlacklisted)
       assert(!exec.info.isExcluded)
     }
 
