@@ -324,7 +324,7 @@ class ColumnNodeToExpressionConverterSuite extends SparkFunSuite {
     a.asInstanceOf[AgnosticEncoder[Any]]
 
   test("udf") {
-    val int2LongSum = new aggregate.TypedSumLong[Int]((i: Int) => i.toLong)
+    val int2LongSum = new TypedSumLong[Int]((i: Int) => i.toLong)
     val bufferEncoder = encoderFor(int2LongSum.bufferEncoder)
     val outputEncoder = encoderFor(int2LongSum.outputEncoder)
     val bufferAttrs = bufferEncoder.namedExpressions.map {
@@ -405,4 +405,5 @@ private[internal] case class Nope(override val origin: Origin = CurrentOrigin.ge
   extends ColumnNode {
   override private[internal] def normalize(): Nope = this
   override def sql: String = "nope"
+  override private[internal] def children: Seq[ColumnNodeLike] = Seq.empty
 }

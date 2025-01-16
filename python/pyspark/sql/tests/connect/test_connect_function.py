@@ -54,7 +54,7 @@ class SparkConnectFunctionTests(ReusedConnectTestCase, PandasOnSparkTestUtils, S
         # Disable the shared namespace so pyspark.sql.functions, etc point the regular
         # PySpark libraries.
         os.environ["PYSPARK_NO_NAMESPACE_SHARE"] = "1"
-        cls.connect = cls.spark  # Switch Spark Connect session and regular PySpark sesion.
+        cls.connect = cls.spark  # Switch Spark Connect session and regular PySpark session.
         cls.spark = PySparkSession._instantiatedSession
         assert cls.spark is not None
 
@@ -590,6 +590,10 @@ class SparkConnectFunctionTests(ReusedConnectTestCase, PandasOnSparkTestUtils, S
             (CF.avg, SF.avg),
             (CF.collect_list, SF.collect_list),
             (CF.collect_set, SF.collect_set),
+            (CF.listagg, SF.listagg),
+            (CF.listagg_distinct, SF.listagg_distinct),
+            (CF.string_agg, SF.string_agg),
+            (CF.string_agg_distinct, SF.string_agg_distinct),
             (CF.count, SF.count),
             (CF.first, SF.first),
             (CF.kurtosis, SF.kurtosis),
@@ -2572,7 +2576,7 @@ class SparkConnectFunctionTests(ReusedConnectTestCase, PandasOnSparkTestUtils, S
 
         cf_fn = {name for (name, value) in getmembers(CF, isfunction) if name[0] != "_"}
 
-        # Functions in vanilla PySpark we do not expect to be available in Spark Connect
+        # Functions in classic PySpark we do not expect to be available in Spark Connect
         sf_excluded_fn = set()
 
         self.assertEqual(
@@ -2581,7 +2585,7 @@ class SparkConnectFunctionTests(ReusedConnectTestCase, PandasOnSparkTestUtils, S
             "Missing functions in Spark Connect not as expected",
         )
 
-        # Functions in Spark Connect we do not expect to be available in vanilla PySpark
+        # Functions in Spark Connect we do not expect to be available in classic PySpark
         cf_excluded_fn = {
             "check_dependencies",  # internal helper function
         }
@@ -2589,7 +2593,7 @@ class SparkConnectFunctionTests(ReusedConnectTestCase, PandasOnSparkTestUtils, S
         self.assertEqual(
             cf_fn - sf_fn,
             cf_excluded_fn,
-            "Missing functions in vanilla PySpark not as expected",
+            "Missing functions in classic PySpark not as expected",
         )
 
     # SPARK-45216: Fix non-deterministic seeded Dataset APIs

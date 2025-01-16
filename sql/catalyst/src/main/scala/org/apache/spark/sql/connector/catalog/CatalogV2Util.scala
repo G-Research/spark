@@ -29,7 +29,7 @@ import org.apache.spark.sql.catalyst.analysis.{AsOfTimestamp, AsOfVersion, Named
 import org.apache.spark.sql.catalyst.catalog.ClusterBySpec
 import org.apache.spark.sql.catalyst.expressions.Literal
 import org.apache.spark.sql.catalyst.plans.logical.{SerdeInfo, TableSpec}
-import org.apache.spark.sql.catalyst.util.GeneratedColumn
+import org.apache.spark.sql.catalyst.util.{GeneratedColumn, IdentityColumn}
 import org.apache.spark.sql.catalyst.util.ResolveDefaultColumns._
 import org.apache.spark.sql.connector.catalog.TableChange._
 import org.apache.spark.sql.connector.catalog.functions.UnboundFunction
@@ -53,6 +53,7 @@ private[sql] object CatalogV2Util {
    */
   val TABLE_RESERVED_PROPERTIES =
     Seq(TableCatalog.PROP_COMMENT,
+      TableCatalog.PROP_COLLATION,
       TableCatalog.PROP_LOCATION,
       TableCatalog.PROP_PROVIDER,
       TableCatalog.PROP_OWNER,
@@ -336,8 +337,11 @@ private[sql] object CatalogV2Util {
         return struct
       } else {
         throw new SparkIllegalArgumentException(
-          errorClass = "_LEGACY_ERROR_TEMP_3227",
-          messageParameters = Map("fieldName" -> fieldNames.head))
+          errorClass = "FIELD_NOT_FOUND",
+          messageParameters = Map(
+            "fieldName" -> toSQLId(fieldNames.head),
+            "fields" -> struct.fields.map(f => toSQLId(f.name)).mkString(", "))
+        )
       }
     }
 
@@ -456,7 +460,7 @@ private[sql] object CatalogV2Util {
   def convertTableProperties(t: TableSpec): Map[String, String] = {
     val props = convertTableProperties(
       t.properties, t.options, t.serde, t.location, t.comment,
-      t.provider, t.external)
+      t.collation, t.provider, t.external)
     withDefaultOwnership(props)
   }
 
@@ -466,6 +470,7 @@ private[sql] object CatalogV2Util {
       serdeInfo: Option[SerdeInfo],
       location: Option[String],
       comment: Option[String],
+      collation: Option[String],
       provider: Option[String],
       external: Boolean = false): Map[String, String] = {
     properties ++
@@ -475,6 +480,7 @@ private[sql] object CatalogV2Util {
       (if (external) Some(TableCatalog.PROP_EXTERNAL -> "true") else None) ++
       provider.map(TableCatalog.PROP_PROVIDER -> _) ++
       comment.map(TableCatalog.PROP_COMMENT -> _) ++
+      collation.map(TableCatalog.PROP_COLLATION -> _) ++
       location.map(TableCatalog.PROP_LOCATION -> _)
   }
 
@@ -579,18 +585,10 @@ private[sql] object CatalogV2Util {
     val isDefaultColumn = f.getCurrentDefaultValue().isDefined &&
       f.getExistenceDefaultValue().isDefined
     val isGeneratedColumn = GeneratedColumn.isGeneratedColumn(f)
-    if (isDefaultColumn && isGeneratedColumn) {
-      throw new AnalysisException(
-        errorClass = "GENERATED_COLUMN_WITH_DEFAULT_VALUE",
-        messageParameters = Map(
-          "colName" -> f.name,
-          "defaultValue" -> f.getCurrentDefaultValue().get,
-          "genExpr" -> GeneratedColumn.getGenerationExpression(f).get
-        )
-      )
-    }
-
+    val isIdentityColumn = IdentityColumn.isIdentityColumn(f)
     if (isDefaultColumn) {
+      checkDefaultColumnConflicts(f)
+
       val e = analyze(
         f,
         statementType = "Column analysis",
@@ -611,10 +609,41 @@ private[sql] object CatalogV2Util {
         Seq("comment", GeneratedColumn.GENERATION_EXPRESSION_METADATA_KEY))
       Column.create(f.name, f.dataType, f.nullable, f.getComment().orNull,
         GeneratedColumn.getGenerationExpression(f).get, metadataAsJson(cleanedMetadata))
+    } else if (isIdentityColumn) {
+      val cleanedMetadata = metadataWithKeysRemoved(
+        Seq("comment",
+          IdentityColumn.IDENTITY_INFO_START,
+          IdentityColumn.IDENTITY_INFO_STEP,
+          IdentityColumn.IDENTITY_INFO_ALLOW_EXPLICIT_INSERT))
+        Column.create(f.name, f.dataType, f.nullable, f.getComment().orNull,
+          IdentityColumn.getIdentityInfo(f).get, metadataAsJson(cleanedMetadata))
     } else {
       val cleanedMetadata = metadataWithKeysRemoved(Seq("comment"))
       Column.create(f.name, f.dataType, f.nullable, f.getComment().orNull,
         metadataAsJson(cleanedMetadata))
+    }
+  }
+
+  private def checkDefaultColumnConflicts(f: StructField): Unit = {
+    if (GeneratedColumn.isGeneratedColumn(f)) {
+      throw new AnalysisException(
+        errorClass = "GENERATED_COLUMN_WITH_DEFAULT_VALUE",
+        messageParameters = Map(
+          "colName" -> f.name,
+          "defaultValue" -> f.getCurrentDefaultValue().get,
+          "genExpr" -> GeneratedColumn.getGenerationExpression(f).get
+        )
+      )
+    }
+    if (IdentityColumn.isIdentityColumn(f)) {
+      throw new AnalysisException(
+        errorClass = "IDENTITY_COLUMN_WITH_DEFAULT_VALUE",
+        messageParameters = Map(
+          "colName" -> f.name,
+          "defaultValue" -> f.getCurrentDefaultValue().get,
+          "identityColumnSpec" -> IdentityColumn.getIdentityInfo(f).get.toString
+        )
+      )
     }
   }
 }

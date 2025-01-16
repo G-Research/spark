@@ -53,7 +53,8 @@ class V2CommandsCaseSensitivitySuite
       withSQLConf(SQLConf.CASE_SENSITIVE.key -> caseSensitive.toString) {
         Seq("ID", "iD").foreach { ref =>
           val tableSpec =
-            UnresolvedTableSpec(Map.empty, None, OptionList(Seq.empty), None, None, None, false)
+            UnresolvedTableSpec(Map.empty, None, OptionList(Seq.empty),
+              None, None, None, None, false)
           val plan = CreateTableAsSelect(
             UnresolvedIdentifier(Array("table_name").toImmutableArraySeq),
             Expressions.identity(ref) :: Nil,
@@ -77,7 +78,8 @@ class V2CommandsCaseSensitivitySuite
       withSQLConf(SQLConf.CASE_SENSITIVE.key -> caseSensitive.toString) {
         Seq("POINT.X", "point.X", "poInt.x", "poInt.X").foreach { ref =>
           val tableSpec =
-            UnresolvedTableSpec(Map.empty, None, OptionList(Seq.empty), None, None, None, false)
+            UnresolvedTableSpec(Map.empty, None, OptionList(Seq.empty),
+              None, None, None, None, false)
           val plan = CreateTableAsSelect(
             UnresolvedIdentifier(Array("table_name").toImmutableArraySeq),
             Expressions.bucket(4, ref) :: Nil,
@@ -102,7 +104,8 @@ class V2CommandsCaseSensitivitySuite
       withSQLConf(SQLConf.CASE_SENSITIVE.key -> caseSensitive.toString) {
         Seq("ID", "iD").foreach { ref =>
           val tableSpec =
-            UnresolvedTableSpec(Map.empty, None, OptionList(Seq.empty), None, None, None, false)
+            UnresolvedTableSpec(Map.empty, None, OptionList(Seq.empty),
+              None, None, None, None, false)
           val plan = ReplaceTableAsSelect(
             UnresolvedIdentifier(Array("table_name").toImmutableArraySeq),
             Expressions.identity(ref) :: Nil,
@@ -126,7 +129,8 @@ class V2CommandsCaseSensitivitySuite
       withSQLConf(SQLConf.CASE_SENSITIVE.key -> caseSensitive.toString) {
         Seq("POINT.X", "point.X", "poInt.x", "poInt.X").foreach { ref =>
           val tableSpec =
-            UnresolvedTableSpec(Map.empty, None, OptionList(Seq.empty), None, None, None, false)
+            UnresolvedTableSpec(Map.empty, None, OptionList(Seq.empty),
+              None, None, None, None, false)
           val plan = ReplaceTableAsSelect(
             UnresolvedIdentifier(Array("table_name").toImmutableArraySeq),
             Expressions.bucket(4, ref) :: Nil,
@@ -155,7 +159,7 @@ class V2CommandsCaseSensitivitySuite
           Seq(QualifiedColType(
             Some(UnresolvedFieldName(field.init.toImmutableArraySeq)),
             field.last, LongType, true, None, None, None))),
-        expectedErrorClass = "UNRESOLVED_COLUMN.WITH_SUGGESTION",
+        expectedErrorCondition = "UNRESOLVED_COLUMN.WITH_SUGGESTION",
         expectedMessageParameters = Map(
           "objectName" -> s"`${field.head}`",
           "proposal" -> "`id`, `data`, `point`")
@@ -177,9 +181,9 @@ class V2CommandsCaseSensitivitySuite
             None)))
       Seq(true, false).foreach { caseSensitive =>
         withSQLConf(SQLConf.CASE_SENSITIVE.key -> caseSensitive.toString) {
-          assertAnalysisErrorClass(
+          assertAnalysisErrorCondition(
             inputPlan = alter,
-            expectedErrorClass = "FIELD_NOT_FOUND",
+            expectedErrorCondition = "FIELD_NOT_FOUND",
             expectedMessageParameters = Map("fieldName" -> "`f`", "fields" -> "id, data, point")
           )
         }
@@ -208,9 +212,9 @@ class V2CommandsCaseSensitivitySuite
           None)))
     Seq(true, false).foreach { caseSensitive =>
       withSQLConf(SQLConf.CASE_SENSITIVE.key -> caseSensitive.toString) {
-        assertAnalysisErrorClass(
+        assertAnalysisErrorCondition(
           inputPlan = alter,
-          expectedErrorClass = "FIELD_NOT_FOUND",
+          expectedErrorCondition = "FIELD_NOT_FOUND",
           expectedMessageParameters = Map("fieldName" -> "`y`", "fields" -> "id, data, point, x")
         )
       }
@@ -231,9 +235,9 @@ class V2CommandsCaseSensitivitySuite
             None)))
       Seq(true, false).foreach { caseSensitive =>
         withSQLConf(SQLConf.CASE_SENSITIVE.key -> caseSensitive.toString) {
-          assertAnalysisErrorClass(
+          assertAnalysisErrorCondition(
             inputPlan = alter,
-            expectedErrorClass = "FIELD_NOT_FOUND",
+            expectedErrorCondition = "FIELD_NOT_FOUND",
             expectedMessageParameters = Map("fieldName" -> "`z`", "fields" -> "x, y")
           )
         }
@@ -262,9 +266,9 @@ class V2CommandsCaseSensitivitySuite
           None)))
     Seq(true, false).foreach { caseSensitive =>
       withSQLConf(SQLConf.CASE_SENSITIVE.key -> caseSensitive.toString) {
-        assertAnalysisErrorClass(
+        assertAnalysisErrorCondition(
           inputPlan = alter,
-          expectedErrorClass = "FIELD_NOT_FOUND",
+          expectedErrorCondition = "FIELD_NOT_FOUND",
           expectedMessageParameters = Map("fieldName" -> "`zz`", "fields" -> "x, y, z")
         )
       }
@@ -272,7 +276,7 @@ class V2CommandsCaseSensitivitySuite
   }
 
   test("SPARK-36372: Adding duplicate columns should not be allowed") {
-    assertAnalysisErrorClass(
+    assertAnalysisErrorCondition(
       AddColumns(
         table,
         Seq(QualifiedColType(
@@ -297,7 +301,7 @@ class V2CommandsCaseSensitivitySuite
   }
 
   test("SPARK-36381: Check column name exist case sensitive and insensitive when add column") {
-    alterTableErrorClass(
+    alterTableErrorCondition(
       AddColumns(
         table,
         Seq(QualifiedColType(
@@ -317,7 +321,7 @@ class V2CommandsCaseSensitivitySuite
   }
 
   test("SPARK-36381: Check column name exist case sensitive and insensitive when rename column") {
-    alterTableErrorClass(
+    alterTableErrorCondition(
       RenameColumn(table, UnresolvedFieldName(Array("id").toImmutableArraySeq), "DATA"),
       "FIELD_ALREADY_EXISTS",
       Map(
@@ -338,7 +342,7 @@ class V2CommandsCaseSensitivitySuite
         } else {
           alterTableTest(
             alter = alter,
-            expectedErrorClass = "UNRESOLVED_COLUMN.WITH_SUGGESTION",
+            expectedErrorCondition = "UNRESOLVED_COLUMN.WITH_SUGGESTION",
             expectedMessageParameters = Map(
               "objectName" -> s"${toSQLId(ref.toImmutableArraySeq)}",
               "proposal" -> "`id`, `data`, `point`"
@@ -353,7 +357,7 @@ class V2CommandsCaseSensitivitySuite
     Seq(Array("ID"), Array("point", "X"), Array("POINT", "X"), Array("POINT", "x")).foreach { ref =>
       alterTableTest(
         alter = RenameColumn(table, UnresolvedFieldName(ref.toImmutableArraySeq), "newName"),
-        expectedErrorClass = "UNRESOLVED_COLUMN.WITH_SUGGESTION",
+        expectedErrorCondition = "UNRESOLVED_COLUMN.WITH_SUGGESTION",
         expectedMessageParameters = Map(
           "objectName" -> s"${toSQLId(ref.toImmutableArraySeq)}",
           "proposal" -> "`id`, `data`, `point`")
@@ -366,7 +370,7 @@ class V2CommandsCaseSensitivitySuite
       alterTableTest(
         AlterColumn(table, UnresolvedFieldName(ref.toImmutableArraySeq),
           None, Some(true), None, None, None),
-        expectedErrorClass = "UNRESOLVED_COLUMN.WITH_SUGGESTION",
+        expectedErrorCondition = "UNRESOLVED_COLUMN.WITH_SUGGESTION",
         expectedMessageParameters = Map(
           "objectName" -> s"${toSQLId(ref.toImmutableArraySeq)}",
           "proposal" -> "`id`, `data`, `point`")
@@ -379,7 +383,7 @@ class V2CommandsCaseSensitivitySuite
       alterTableTest(
         AlterColumn(table, UnresolvedFieldName(ref.toImmutableArraySeq),
           Some(StringType), None, None, None, None),
-        expectedErrorClass = "UNRESOLVED_COLUMN.WITH_SUGGESTION",
+        expectedErrorCondition = "UNRESOLVED_COLUMN.WITH_SUGGESTION",
         expectedMessageParameters = Map(
           "objectName" -> s"${toSQLId(ref.toImmutableArraySeq)}",
           "proposal" -> "`id`, `data`, `point`")
@@ -392,7 +396,7 @@ class V2CommandsCaseSensitivitySuite
       alterTableTest(
         AlterColumn(table, UnresolvedFieldName(ref.toImmutableArraySeq),
           None, None, Some("comment"), None, None),
-        expectedErrorClass = "UNRESOLVED_COLUMN.WITH_SUGGESTION",
+        expectedErrorCondition = "UNRESOLVED_COLUMN.WITH_SUGGESTION",
         expectedMessageParameters = Map(
           "objectName" -> s"${toSQLId(ref.toImmutableArraySeq)}",
           "proposal" -> "`id`, `data`, `point`")
@@ -401,7 +405,7 @@ class V2CommandsCaseSensitivitySuite
   }
 
   test("SPARK-36449: Replacing columns with duplicate name should not be allowed") {
-    assertAnalysisErrorClass(
+    assertAnalysisErrorCondition(
       ReplaceColumns(
         table,
         Seq(QualifiedColType(None, "f", LongType, true, None, None, None),
@@ -413,15 +417,15 @@ class V2CommandsCaseSensitivitySuite
 
   private def alterTableTest(
       alter: => AlterTableCommand,
-      expectedErrorClass: String,
+      expectedErrorCondition: String,
       expectedMessageParameters: Map[String, String],
       expectErrorOnCaseSensitive: Boolean = true): Unit = {
     Seq(true, false).foreach { caseSensitive =>
       withSQLConf(SQLConf.CASE_SENSITIVE.key -> caseSensitive.toString) {
         val expectError = if (expectErrorOnCaseSensitive) caseSensitive else !caseSensitive
         if (expectError) {
-          assertAnalysisErrorClass(
-            alter, expectedErrorClass, expectedMessageParameters, caseSensitive = caseSensitive)
+          assertAnalysisErrorCondition(
+            alter, expectedErrorCondition, expectedMessageParameters, caseSensitive = caseSensitive)
         } else {
           assertAnalysisSuccess(alter, caseSensitive)
         }
@@ -429,17 +433,17 @@ class V2CommandsCaseSensitivitySuite
     }
   }
 
-  private def alterTableErrorClass(
+  private def alterTableErrorCondition(
       alter: => AlterTableCommand,
-      errorClass: String,
+      condition: String,
       messageParameters: Map[String, String],
       expectErrorOnCaseSensitive: Boolean = true): Unit = {
     Seq(true, false).foreach { caseSensitive =>
       withSQLConf(SQLConf.CASE_SENSITIVE.key -> caseSensitive.toString) {
         val expectError = if (expectErrorOnCaseSensitive) caseSensitive else !caseSensitive
         if (expectError) {
-          assertAnalysisErrorClass(
-            alter, errorClass, messageParameters, caseSensitive = caseSensitive)
+          assertAnalysisErrorCondition(
+            alter, condition, messageParameters, caseSensitive = caseSensitive)
         } else {
           assertAnalysisSuccess(alter, caseSensitive)
         }

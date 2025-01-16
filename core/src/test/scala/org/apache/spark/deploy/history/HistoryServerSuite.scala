@@ -283,7 +283,7 @@ abstract class HistoryServerSuite extends SparkFunSuite with BeforeAndAfter with
         val expectedFile = {
           new File(logDir, entry.getName)
         }
-        val expected = Files.toString(expectedFile, StandardCharsets.UTF_8)
+        val expected = Files.asCharSource(expectedFile, StandardCharsets.UTF_8).read()
         val actual = new String(ByteStreams.toByteArray(zipStream), StandardCharsets.UTF_8)
         actual should be (expected)
         filesCompared += 1
@@ -794,11 +794,6 @@ object HistoryServerSuite {
  * A filter used for auth tests; sets the request's user to the value of the "HTTP_USER" header.
  */
 class FakeAuthFilter extends Filter {
-
-  override def destroy(): Unit = { }
-
-  override def init(config: FilterConfig): Unit = { }
-
   override def doFilter(req: ServletRequest, res: ServletResponse, chain: FilterChain): Unit = {
     val hreq = req.asInstanceOf[HttpServletRequest]
     val wrapped = new HttpServletRequestWrapper(hreq) {

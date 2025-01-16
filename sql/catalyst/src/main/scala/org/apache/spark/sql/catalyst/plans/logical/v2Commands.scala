@@ -19,17 +19,22 @@ package org.apache.spark.sql.catalyst.plans.logical
 
 import org.apache.spark.{SparkIllegalArgumentException, SparkUnsupportedOperationException}
 import org.apache.spark.sql.AnalysisException
-import org.apache.spark.sql.catalyst.analysis.{AnalysisContext, AssignmentUtils, EliminateSubqueryAliases, FieldName, NamedRelation, PartitionSpec, ResolvedIdentifier, UnresolvedException, ViewSchemaMode}
+import org.apache.spark.sql.catalyst.analysis.{AnalysisContext, AssignmentUtils, EliminateSubqueryAliases, FieldName, NamedRelation, PartitionSpec, ResolvedIdentifier, ResolvedProcedure, TypeCheckResult, UnresolvedException, UnresolvedProcedure, ViewSchemaMode}
+import org.apache.spark.sql.catalyst.analysis.TypeCheckResult.{DataTypeMismatch, TypeCheckSuccess}
+import org.apache.spark.sql.catalyst.catalog.{FunctionResource, RoutineLanguage}
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
-import org.apache.spark.sql.catalyst.catalog.FunctionResource
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, AttributeSet, Expression, MetadataAttribute, NamedExpression, UnaryExpression, Unevaluable, V2ExpressionUtils}
 import org.apache.spark.sql.catalyst.plans.DescribeCommandSchema
 import org.apache.spark.sql.catalyst.trees.BinaryLike
-import org.apache.spark.sql.catalyst.util.{CharVarcharUtils, RowDeltaUtils, WriteDeltaProjections}
+import org.apache.spark.sql.catalyst.util.{quoteIfNeeded, truncatedString, CharVarcharUtils, RowDeltaUtils, WriteDeltaProjections}
+import org.apache.spark.sql.catalyst.util.TypeUtils.{ordinalNumber, toSQLExpr}
 import org.apache.spark.sql.connector.catalog._
+import org.apache.spark.sql.connector.catalog.CatalogV2Implicits.{IdentifierHelper, MultipartIdentifierHelper}
+import org.apache.spark.sql.connector.catalog.procedures.BoundProcedure
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.connector.expressions.filter.Predicate
 import org.apache.spark.sql.connector.write.{DeltaWrite, RowLevelOperation, RowLevelOperationTable, SupportsDelta, Write}
+import org.apache.spark.sql.errors.DataTypeErrors.toSQLType
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.types.{BooleanType, DataType, IntegerType, MapType, MetadataBuilder, StringType, StructField, StructType}
 import org.apache.spark.util.ArrayImplicits._
@@ -454,6 +459,12 @@ trait V2CreateTableAsSelectPlan
       newQuery: LogicalPlan): V2CreateTableAsSelectPlan
 }
 
+/**
+ * A trait used for logical plan nodes that create V1 table definitions,
+ * and so that rules from the catalyst module can identify them.
+ */
+trait V1CreateTablePlan extends LogicalPlan
+
 /** A trait used for logical plan nodes that create or replace V2 table definitions. */
 trait V2CreateTablePlan extends LogicalPlan {
   def name: LogicalPlan
@@ -796,9 +807,9 @@ case class MergeIntoTable(
 
 object MergeIntoTable {
   def getWritePrivileges(
-      matchedActions: Seq[MergeAction],
-      notMatchedActions: Seq[MergeAction],
-      notMatchedBySourceActions: Seq[MergeAction]): Seq[TableWritePrivilege] = {
+      matchedActions: Iterable[MergeAction],
+      notMatchedActions: Iterable[MergeAction],
+      notMatchedBySourceActions: Iterable[MergeAction]): Seq[TableWritePrivilege] = {
     val privileges = scala.collection.mutable.HashSet.empty[TableWritePrivilege]
     (matchedActions.iterator ++ notMatchedActions ++ notMatchedBySourceActions).foreach {
       case _: DeleteAction => privileges.add(TableWritePrivilege.DELETE)
@@ -1058,6 +1069,26 @@ case class CreateFunction(
     ifExists: Boolean,
     replace: Boolean) extends UnaryCommand {
   override protected def withNewChildInternal(newChild: LogicalPlan): CreateFunction =
+    copy(child = newChild)
+}
+
+/**
+ * The logical plan of the CREATE FUNCTION command for SQL Functions.
+ */
+case class CreateUserDefinedFunction(
+    child: LogicalPlan,
+    inputParamText: Option[String],
+    returnTypeText: String,
+    exprText: Option[String],
+    queryText: Option[String],
+    comment: Option[String],
+    isDeterministic: Option[Boolean],
+    containsSQL: Option[Boolean],
+    language: RoutineLanguage,
+    isTableFunc: Boolean,
+    ignoreIfExists: Boolean,
+    replace: Boolean) extends UnaryCommand {
+  override protected def withNewChildInternal(newChild: LogicalPlan): CreateUserDefinedFunction =
     copy(child = newChild)
 }
 
@@ -1327,6 +1358,7 @@ case class CreateView(
     child: LogicalPlan,
     userSpecifiedColumns: Seq[(String, Option[String])],
     comment: Option[String],
+    collation: Option[String],
     properties: Map[String, String],
     originalText: Option[String],
     query: LogicalPlan,
@@ -1475,6 +1507,7 @@ trait TableSpecBase {
   def provider: Option[String]
   def location: Option[String]
   def comment: Option[String]
+  def collation: Option[String]
   def serde: Option[SerdeInfo]
   def external: Boolean
 }
@@ -1485,6 +1518,7 @@ case class UnresolvedTableSpec(
     optionExpression: OptionList,
     location: Option[String],
     comment: Option[String],
+    collation: Option[String],
     serde: Option[SerdeInfo],
     external: Boolean) extends UnaryExpression with Unevaluable with TableSpecBase {
 
@@ -1530,10 +1564,11 @@ case class TableSpec(
     options: Map[String, String],
     location: Option[String],
     comment: Option[String],
+    collation: Option[String],
     serde: Option[SerdeInfo],
     external: Boolean) extends TableSpecBase {
   def withNewLocation(newLocation: Option[String]): TableSpec = {
-    TableSpec(properties, provider, options, newLocation, comment, serde, external)
+    TableSpec(properties, provider, options, newLocation, comment, collation, serde, external)
   }
 }
 
@@ -1570,4 +1605,62 @@ case class SetVariable(
   override def child: LogicalPlan = sourceQuery
   override protected def withNewChildInternal(newChild: LogicalPlan): SetVariable =
     copy(sourceQuery = newChild)
+}
+
+/**
+ * The logical plan of the CALL statement.
+ */
+case class Call(
+    procedure: LogicalPlan,
+    args: Seq[Expression],
+    execute: Boolean = true)
+  extends UnaryNode with ExecutableDuringAnalysis {
+
+  override def output: Seq[Attribute] = Nil
+
+  override def child: LogicalPlan = procedure
+
+  def bound: Boolean = procedure match {
+    case ResolvedProcedure(_, _, _: BoundProcedure) => true
+    case _ => false
+  }
+
+  def checkArgTypes(): TypeCheckResult = {
+    require(resolved && bound, "can check arg types only after resolution and binding")
+
+    val params = procedure match {
+      case ResolvedProcedure(_, _, bound: BoundProcedure) => bound.parameters
+    }
+    require(args.length == params.length, "number of args and params must match after binding")
+
+    args.zip(params).zipWithIndex.collectFirst {
+      case ((arg, param), idx)
+          if !DataType.equalsIgnoreCompatibleNullability(arg.dataType, param.dataType) =>
+        DataTypeMismatch(
+          errorSubClass = "UNEXPECTED_INPUT_TYPE",
+          messageParameters = Map(
+            "paramIndex" -> ordinalNumber(idx),
+            "requiredType" -> toSQLType(param.dataType),
+            "inputSql" -> toSQLExpr(arg),
+            "inputType" -> toSQLType(arg.dataType)))
+    }.getOrElse(TypeCheckSuccess)
+  }
+
+  override def simpleString(maxFields: Int): String = {
+    val name = procedure match {
+      case ResolvedProcedure(catalog, ident, _) =>
+        s"${quoteIfNeeded(catalog.name)}.${ident.quoted}"
+      case UnresolvedProcedure(nameParts) =>
+        nameParts.quoted
+    }
+    val argsString = truncatedString(args, ", ", maxFields)
+    s"Call $name($argsString)"
+  }
+
+  override def stageForExplain(): Call = {
+    copy(execute = false)
+  }
+
+  override protected def withNewChildInternal(newChild: LogicalPlan): Call =
+    copy(procedure = newChild)
 }

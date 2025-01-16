@@ -32,7 +32,7 @@ import org.apache.spark.sql.catalyst.expressions.{AttributeReference, GenericInt
 import org.apache.spark.sql.catalyst.plans.{FullOuter, Inner, LeftAnti, LeftOuter, LeftSemi, PlanTest, RightOuter}
 import org.apache.spark.sql.catalyst.plans.logical.{CollectMetrics, Distinct, LocalRelation, LogicalPlan}
 import org.apache.spark.sql.catalyst.types.DataTypeUtils
-import org.apache.spark.sql.connect.common.InvalidPlanInput
+import org.apache.spark.sql.connect.common.{InvalidCommandInput, InvalidPlanInput}
 import org.apache.spark.sql.connect.common.LiteralValueProtoConverter.toLiteralProto
 import org.apache.spark.sql.connect.dsl.MockRemoteSession
 import org.apache.spark.sql.connect.dsl.commands._
@@ -1042,7 +1042,7 @@ class SparkConnectProtoSuite extends PlanTest with SparkConnectPlanTest {
         analyzePlan(
           transform(connectTestRelation.observe("my_metric", "id".protoAttr.cast("string"))))
       },
-      errorClass = "INVALID_OBSERVED_METRICS.NON_AGGREGATE_FUNC_ARG_IS_ATTRIBUTE",
+      condition = "INVALID_OBSERVED_METRICS.NON_AGGREGATE_FUNC_ARG_IS_ATTRIBUTE",
       parameters = Map("expr" -> "\"CAST(id AS STRING) AS id\""))
 
     val connectPlan2 =
@@ -1073,7 +1073,7 @@ class SparkConnectProtoSuite extends PlanTest with SparkConnectPlanTest {
           transform(
             connectTestRelation.observe(Observation("my_metric"), "id".protoAttr.cast("string"))))
       },
-      errorClass = "INVALID_OBSERVED_METRICS.NON_AGGREGATE_FUNC_ARG_IS_ATTRIBUTE",
+      condition = "INVALID_OBSERVED_METRICS.NON_AGGREGATE_FUNC_ARG_IS_ATTRIBUTE",
       parameters = Map("expr" -> "\"CAST(id AS STRING) AS id\""))
   }
 

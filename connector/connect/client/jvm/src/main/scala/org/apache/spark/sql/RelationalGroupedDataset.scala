@@ -20,6 +20,8 @@ package org.apache.spark.sql
 import scala.jdk.CollectionConverters._
 
 import org.apache.spark.connect.proto
+import org.apache.spark.sql.catalyst.encoders.AgnosticEncoders.agnosticEncoderFor
+import org.apache.spark.sql.connect.ConnectConversions._
 
 /**
  * A set of methods for aggregations on a `DataFrame`, created by [[Dataset#groupBy groupBy]],
@@ -39,12 +41,11 @@ class RelationalGroupedDataset private[sql] (
     groupType: proto.Aggregate.GroupType,
     pivot: Option[proto.Aggregate.Pivot] = None,
     groupingSets: Option[Seq[proto.Aggregate.GroupingSets]] = None)
-    extends api.RelationalGroupedDataset[Dataset] {
-  type RGD = RelationalGroupedDataset
+    extends api.RelationalGroupedDataset {
   import df.sparkSession.RichColumn
 
   protected def toDF(aggExprs: Seq[Column]): DataFrame = {
-    df.sparkSession.newDataFrame { builder =>
+    df.sparkSession.newDataFrame(groupingExprs ++ aggExprs) { builder =>
       val aggBuilder = builder.getAggregateBuilder
         .setInput(df.plan.getRoot)
       groupingExprs.foreach(c => aggBuilder.addGroupingExpressions(c.expr))
@@ -82,7 +83,11 @@ class RelationalGroupedDataset private[sql] (
 
   /** @inheritdoc */
   def as[K: Encoder, T: Encoder]: KeyValueGroupedDataset[K, T] = {
-    KeyValueGroupedDatasetImpl[K, T](df, encoderFor[K], encoderFor[T], groupingExprs)
+    KeyValueGroupedDatasetImpl[K, T](
+      df,
+      agnosticEncoderFor[K],
+      agnosticEncoderFor[T],
+      groupingExprs)
   }
 
   /** @inheritdoc */

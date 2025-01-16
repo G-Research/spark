@@ -19,6 +19,7 @@ package org.apache.spark.sql.catalyst.expressions
 
 import scala.collection.mutable.ArrayBuffer
 
+import org.apache.spark.sql.catalyst.analysis.UnresolvedPlanId
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.plans._
 import org.apache.spark.sql.catalyst.plans.logical._
@@ -358,6 +359,20 @@ object SubExprUtils extends PredicateHelper {
       case _ => ExpressionSet().empty
     }
   }
+
+  // Returns grouping expressions of 'aggNode' of a scalar subquery that do not have equivalent
+  // columns in the outer query (bound by equality predicates like 'col = outer(c)').
+  // We use it to analyze whether a scalar subquery is guaranteed to return at most 1 row.
+  def nonEquivalentGroupbyCols(query: LogicalPlan, aggNode: Aggregate): ExpressionSet = {
+    val correlatedEquivalentExprs = getCorrelatedEquivalentInnerExpressions(query)
+    // Grouping expressions, except outer refs and constant expressions - grouping by an
+    // outer ref or a constant is always ok
+    val groupByExprs =
+    ExpressionSet(aggNode.groupingExpressions.filter(x => !x.isInstanceOf[OuterReference] &&
+      x.references.nonEmpty))
+    val nonEquivalentGroupByExprs = groupByExprs -- correlatedEquivalentExprs
+    nonEquivalentGroupByExprs
+  }
 }
 
 /**
@@ -371,6 +386,11 @@ object SubExprUtils extends PredicateHelper {
  * case the subquery yields no row at all on empty input to the GROUP BY, which evaluates to NULL.
  * It is set in PullupCorrelatedPredicates to true/false, before it is set its value is None.
  * See constructLeftJoins in RewriteCorrelatedScalarSubquery for more details.
+ *
+ * 'needSingleJoin' is set to true if we can't guarantee that the correlated scalar subquery
+ * returns at most 1 row. For such subqueries we use a modification of an outer join called
+ * LeftSingle join. This value is set in PullupCorrelatedPredicates and used in
+ * RewriteCorrelatedScalarSubquery.
  */
 case class ScalarSubquery(
     plan: LogicalPlan,
@@ -378,7 +398,8 @@ case class ScalarSubquery(
     exprId: ExprId = NamedExpression.newExprId,
     joinCond: Seq[Expression] = Seq.empty,
     hint: Option[HintInfo] = None,
-    mayHaveCountBug: Option[Boolean] = None)
+    mayHaveCountBug: Option[Boolean] = None,
+    needSingleJoin: Option[Boolean] = None)
   extends SubqueryExpression(plan, outerAttrs, exprId, joinCond, hint) with Unevaluable {
   override def dataType: DataType = {
     if (!plan.schema.fields.nonEmpty) {
@@ -416,6 +437,14 @@ object ScalarSubquery {
       case s: ScalarSubquery => s.isCorrelated
       case _ => false
     }
+  }
+}
+
+case class UnresolvedScalarSubqueryPlanId(planId: Long)
+  extends UnresolvedPlanId {
+
+  override def withPlan(plan: LogicalPlan): Expression = {
+    ScalarSubquery(plan)
   }
 }
 
@@ -571,4 +600,12 @@ case class Exists(
       joinCond = newChildren.drop(outerAttrs.size))
 
   final override def nodePatternsInternal(): Seq[TreePattern] = Seq(EXISTS_SUBQUERY)
+}
+
+case class UnresolvedExistsPlanId(planId: Long)
+  extends UnresolvedPlanId {
+
+  override def withPlan(plan: LogicalPlan): Expression = {
+    Exists(plan)
+  }
 }

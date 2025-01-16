@@ -21,7 +21,7 @@ import sys
 import random
 import warnings
 from collections.abc import Iterable
-from functools import reduce
+from functools import reduce, cached_property
 from typing import (
     Any,
     Callable,
@@ -42,6 +42,7 @@ from pyspark import _NoValue
 from pyspark.resource import ResourceProfile
 from pyspark._globals import _NoValueType
 from pyspark.errors import (
+    AnalysisException,
     PySparkTypeError,
     PySparkValueError,
     PySparkIndexError,
@@ -55,6 +56,7 @@ from pyspark.serializers import BatchedSerializer, CPickleSerializer, UTF8Deseri
 from pyspark.storagelevel import StorageLevel
 from pyspark.traceback_utils import SCCallSiteSync
 from pyspark.sql.column import Column
+from pyspark.sql.functions import builtin as F
 from pyspark.sql.classic.column import _to_seq, _to_list, _to_java_column
 from pyspark.sql.readwriter import DataFrameWriter, DataFrameWriterV2
 from pyspark.sql.merge import MergeIntoWriter
@@ -72,6 +74,8 @@ from pyspark.sql.dataframe import (
 from pyspark.sql.utils import get_active_spark_context, to_java_array, to_scala_map
 from pyspark.sql.pandas.conversion import PandasConversionMixin
 from pyspark.sql.pandas.map_ops import PandasMapOpsMixin
+from pyspark.sql.table_arg import TableArg
+
 
 if TYPE_CHECKING:
     from py4j.java_gateway import JavaObject
@@ -115,8 +119,6 @@ class DataFrame(ParentDataFrame, PandasMapOpsMixin, PandasConversionMixin):
     ):
         from pyspark.sql.context import SQLContext
 
-        self._sql_ctx: Optional["SQLContext"] = None
-
         if isinstance(sql_ctx, SQLContext):
             assert not os.environ.get("SPARK_TESTING")  # Sanity check for our internal usage.
             assert isinstance(sql_ctx, SQLContext)
@@ -133,14 +135,11 @@ class DataFrame(ParentDataFrame, PandasMapOpsMixin, PandasConversionMixin):
         self._sc: "SparkContext" = sql_ctx._sc
         self._jdf: "JavaObject" = jdf
         self.is_cached = False
-        # initialized lazily
-        self._schema: Optional[StructType] = None
-        self._lazy_rdd: Optional["RDD[Row]"] = None
         # Check whether _repr_html is supported or not, we use it to avoid calling _jdf twice
         # by __repr__ and _repr_html_ while eager evaluation opens.
         self._support_repr_html = False
 
-    @property
+    @cached_property
     def sql_ctx(self) -> "SQLContext":
         from pyspark.sql.context import SQLContext
 
@@ -148,24 +147,18 @@ class DataFrame(ParentDataFrame, PandasMapOpsMixin, PandasConversionMixin):
             "DataFrame.sql_ctx is an internal property, and will be removed "
             "in future releases. Use DataFrame.sparkSession instead."
         )
-        if self._sql_ctx is None:
-            self._sql_ctx = SQLContext._get_or_create(self._sc)
-        return self._sql_ctx
+        return SQLContext._get_or_create(self._sc)
 
     @property
     def sparkSession(self) -> "SparkSession":
         return self._session
 
-    @property
+    @cached_property
     def rdd(self) -> "RDD[Row]":
         from pyspark.core.rdd import RDD
 
-        if self._lazy_rdd is None:
-            jrdd = self._jdf.javaToPython()
-            self._lazy_rdd = RDD(
-                jrdd, self.sparkSession._sc, BatchedSerializer(CPickleSerializer())
-            )
-        return self._lazy_rdd
+        jrdd = self._jdf.javaToPython()
+        return RDD(jrdd, self.sparkSession._sc, BatchedSerializer(CPickleSerializer()))
 
     @property
     def na(self) -> ParentDataFrameNaFunctions:
@@ -205,19 +198,17 @@ class DataFrame(ParentDataFrame, PandasMapOpsMixin, PandasConversionMixin):
     def writeStream(self) -> DataStreamWriter:
         return DataStreamWriter(self)
 
-    @property
+    @cached_property
     def schema(self) -> StructType:
-        if self._schema is None:
-            try:
-                self._schema = cast(
-                    StructType, _parse_datatype_json_string(self._jdf.schema().json())
-                )
-            except Exception as e:
-                raise PySparkValueError(
-                    errorClass="CANNOT_PARSE_DATATYPE",
-                    messageParameters={"error": str(e)},
-                )
-        return self._schema
+        try:
+            return cast(StructType, _parse_datatype_json_string(self._jdf.schema().json()))
+        except AnalysisException as e:
+            raise e
+        except Exception as e:
+            raise PySparkValueError(
+                errorClass="CANNOT_PARSE_DATATYPE",
+                messageParameters={"error": str(e)},
+            )
 
     def printSchema(self, level: Optional[int] = None) -> None:
         if level:
@@ -354,8 +345,13 @@ class DataFrame(ParentDataFrame, PandasMapOpsMixin, PandasConversionMixin):
         jdf = self._jdf.checkpoint(eager)
         return DataFrame(jdf, self.sparkSession)
 
-    def localCheckpoint(self, eager: bool = True) -> ParentDataFrame:
-        jdf = self._jdf.localCheckpoint(eager)
+    def localCheckpoint(
+        self, eager: bool = True, storageLevel: Optional[StorageLevel] = None
+    ) -> ParentDataFrame:
+        if storageLevel is None:
+            jdf = self._jdf.localCheckpoint(eager)
+        else:
+            jdf = self._jdf.localCheckpoint(eager, self._sc._getJavaStorageLevel(storageLevel))
         return DataFrame(jdf, self.sparkSession)
 
     def withWatermark(self, eventTime: str, delayThreshold: str) -> ParentDataFrame:
@@ -595,44 +591,8 @@ class DataFrame(ParentDataFrame, PandasMapOpsMixin, PandasConversionMixin):
         fraction: Optional[Union[int, float]] = None,
         seed: Optional[int] = None,
     ) -> ParentDataFrame:
-        # For the cases below:
-        #   sample(True, 0.5 [, seed])
-        #   sample(True, fraction=0.5 [, seed])
-        #   sample(withReplacement=False, fraction=0.5 [, seed])
-        is_withReplacement_set = type(withReplacement) == bool and isinstance(fraction, float)
-
-        # For the case below:
-        #   sample(faction=0.5 [, seed])
-        is_withReplacement_omitted_kwargs = withReplacement is None and isinstance(fraction, float)
-
-        # For the case below:
-        #   sample(0.5 [, seed])
-        is_withReplacement_omitted_args = isinstance(withReplacement, float)
-
-        if not (
-            is_withReplacement_set
-            or is_withReplacement_omitted_kwargs
-            or is_withReplacement_omitted_args
-        ):
-            argtypes = [type(arg).__name__ for arg in [withReplacement, fraction, seed]]
-            raise PySparkTypeError(
-                errorClass="NOT_BOOL_OR_FLOAT_OR_INT",
-                messageParameters={
-                    "arg_name": "withReplacement (optional), "
-                    + "fraction (required) and seed (optional)",
-                    "arg_type": ", ".join(argtypes),
-                },
-            )
-
-        if is_withReplacement_omitted_args:
-            if fraction is not None:
-                seed = cast(int, fraction)
-            fraction = withReplacement
-            withReplacement = None
-
-        seed = int(seed) if seed is not None else None
-        args = [arg for arg in [withReplacement, fraction, seed] if arg is not None]
-        jdf = self._jdf.sample(*args)
+        _w, _f, _s = self._preapare_args_for_sample(withReplacement, fraction, seed)
+        jdf = self._jdf.sample(*[_w, _f, _s])
         return DataFrame(jdf, self.sparkSession)
 
     def sampleBy(
@@ -691,6 +651,15 @@ class DataFrame(ParentDataFrame, PandasMapOpsMixin, PandasConversionMixin):
     def columns(self) -> List[str]:
         return [f.name for f in self.schema.fields]
 
+    def metadataColumn(self, colName: str) -> Column:
+        if not isinstance(colName, str):
+            raise PySparkTypeError(
+                errorClass="NOT_STR",
+                messageParameters={"arg_name": "colName", "arg_type": type(colName).__name__},
+            )
+        jc = self._jdf.metadataColumn(colName)
+        return Column(jc)
+
     def colRegex(self, colName: str) -> Column:
         if not isinstance(colName, str):
             raise PySparkTypeError(
@@ -739,6 +708,22 @@ class DataFrame(ParentDataFrame, PandasMapOpsMixin, PandasConversionMixin):
                 on = self._jseq([])
             assert isinstance(how, str), "how should be a string"
             jdf = self._jdf.join(other._jdf, on, how)
+        return DataFrame(jdf, self.sparkSession)
+
+    def lateralJoin(
+        self,
+        other: ParentDataFrame,
+        on: Optional[Column] = None,
+        how: Optional[str] = None,
+    ) -> ParentDataFrame:
+        if on is None and how is None:
+            jdf = self._jdf.lateralJoin(other._jdf)
+        elif on is None:
+            jdf = self._jdf.lateralJoin(other._jdf, how)
+        elif how is None:
+            jdf = self._jdf.lateralJoin(other._jdf, on._jc)
+        else:
+            jdf = self._jdf.lateralJoin(other._jdf, on._jc, how)
         return DataFrame(jdf, self.sparkSession)
 
     # TODO(SPARK-22947): Fix the DataFrame API.
@@ -868,7 +853,8 @@ class DataFrame(ParentDataFrame, PandasMapOpsMixin, PandasConversionMixin):
         *cols: Union[int, str, Column, List[Union[int, str, Column]]],
         **kwargs: Any,
     ) -> ParentDataFrame:
-        jdf = self._jdf.sortWithinPartitions(self._sort_cols(cols, kwargs))
+        _cols = self._preapare_cols_for_sort(F.col, cols, kwargs)
+        jdf = self._jdf.sortWithinPartitions(self._jseq(_cols, _to_java_column))
         return DataFrame(jdf, self.sparkSession)
 
     def sort(
@@ -876,7 +862,8 @@ class DataFrame(ParentDataFrame, PandasMapOpsMixin, PandasConversionMixin):
         *cols: Union[int, str, Column, List[Union[int, str, Column]]],
         **kwargs: Any,
     ) -> ParentDataFrame:
-        jdf = self._jdf.sort(self._sort_cols(cols, kwargs))
+        _cols = self._preapare_cols_for_sort(F.col, cols, kwargs)
+        jdf = self._jdf.sort(self._jseq(_cols, _to_java_column))
         return DataFrame(jdf, self.sparkSession)
 
     orderBy = sort
@@ -922,51 +909,6 @@ class DataFrame(ParentDataFrame, PandasMapOpsMixin, PandasConversionMixin):
             else:
                 _cols.append(c)  # type: ignore[arg-type]
         return self._jseq(_cols, _to_java_column)
-
-    def _sort_cols(
-        self,
-        cols: Sequence[Union[int, str, Column, List[Union[int, str, Column]]]],
-        kwargs: Dict[str, Any],
-    ) -> "JavaObject":
-        """Return a JVM Seq of Columns that describes the sort order"""
-        if not cols:
-            raise PySparkValueError(
-                errorClass="CANNOT_BE_EMPTY",
-                messageParameters={"item": "column"},
-            )
-        if len(cols) == 1 and isinstance(cols[0], list):
-            cols = cols[0]
-
-        jcols = []
-        for c in cols:
-            if isinstance(c, int) and not isinstance(c, bool):
-                # ordinal is 1-based
-                if c > 0:
-                    _c = self[c - 1]
-                # negative ordinal means sort by desc
-                elif c < 0:
-                    _c = self[-c - 1].desc()
-                else:
-                    raise PySparkIndexError(
-                        errorClass="ZERO_INDEX",
-                        messageParameters={},
-                    )
-            else:
-                _c = c  # type: ignore[assignment]
-            jcols.append(_to_java_column(cast("ColumnOrName", _c)))
-
-        ascending = kwargs.get("ascending", True)
-        if isinstance(ascending, (bool, int)):
-            if not ascending:
-                jcols = [jc.desc() for jc in jcols]
-        elif isinstance(ascending, list):
-            jcols = [jc if asc else jc.desc() for asc, jc in zip(ascending, jcols)]
-        else:
-            raise PySparkTypeError(
-                errorClass="NOT_BOOL_OR_LIST",
-                messageParameters={"arg_name": "ascending", "arg_type": type(ascending).__name__},
-            )
-        return self._jseq(jcols)
 
     def describe(self, *cols: Union[str, List[str]]) -> ParentDataFrame:
         if len(cols) == 1 and isinstance(cols[0], list):
@@ -1063,7 +1005,7 @@ class DataFrame(ParentDataFrame, PandasMapOpsMixin, PandasConversionMixin):
         jdf = self._jdf.selectExpr(self._jseq(expr))
         return DataFrame(jdf, self.sparkSession)
 
-    def filter(self, condition: "ColumnOrName") -> ParentDataFrame:
+    def filter(self, condition: Union[Column, str]) -> ParentDataFrame:
         if isinstance(condition, str):
             jdf = self._jdf.filter(condition)
         elif isinstance(condition, Column):
@@ -1782,7 +1724,7 @@ class DataFrame(ParentDataFrame, PandasMapOpsMixin, PandasConversionMixin):
     def inputFiles(self) -> List[str]:
         return list(self._jdf.inputFiles())
 
-    def where(self, condition: "ColumnOrName") -> ParentDataFrame:
+    def where(self, condition: Union[Column, str]) -> ParentDataFrame:
         return self.filter(condition)
 
     # Two aliases below were added for pandas compatibility many years ago.
@@ -1804,10 +1746,10 @@ class DataFrame(ParentDataFrame, PandasMapOpsMixin, PandasConversionMixin):
     def drop_duplicates(self, subset: Optional[List[str]] = None) -> ParentDataFrame:
         return self.dropDuplicates(subset)
 
-    def writeTo(self, table: str) -> DataFrameWriterV2:
+    def writeTo(self, table: str) -> "DataFrameWriterV2":
         return DataFrameWriterV2(self, table)
 
-    def mergeInto(self, table: str, condition: Column) -> MergeIntoWriter:
+    def mergeInto(self, table: str, condition: Column) -> "MergeIntoWriter":
         return MergeIntoWriter(self, table, condition)
 
     def pandas_api(
@@ -1849,12 +1791,33 @@ class DataFrame(ParentDataFrame, PandasMapOpsMixin, PandasConversionMixin):
     def toPandas(self) -> "PandasDataFrameLike":
         return PandasConversionMixin.toPandas(self)
 
+    def transpose(self, indexColumn: Optional["ColumnOrName"] = None) -> ParentDataFrame:
+        if indexColumn is not None:
+            return DataFrame(self._jdf.transpose(_to_java_column(indexColumn)), self.sparkSession)
+        else:
+            return DataFrame(self._jdf.transpose(), self.sparkSession)
+
+    def asTable(self) -> TableArg:
+        return TableArg(self._jdf.asTable())
+
+    def scalar(self) -> Column:
+        return Column(self._jdf.scalar())
+
+    def exists(self) -> Column:
+        return Column(self._jdf.exists())
+
     @property
     def executionInfo(self) -> Optional["ExecutionInfo"]:
         raise PySparkValueError(
             errorClass="CLASSIC_OPERATION_NOT_SUPPORTED_ON_DF",
             messageParameters={"member": "queryExecution"},
         )
+
+    @property
+    def plot(self) -> "PySparkPlotAccessor":  # type: ignore[name-defined] # noqa: F821
+        from pyspark.sql.plot import PySparkPlotAccessor
+
+        return PySparkPlotAccessor(self)
 
 
 class DataFrameNaFunctions(ParentDataFrameNaFunctions):

@@ -23,8 +23,8 @@ from pyspark.sql.types import StructType
 from pyspark.errors import PySparkNotImplementedError
 
 if TYPE_CHECKING:
+    from pyarrow import RecordBatch
     from pyspark.sql.session import SparkSession
-
 
 __all__ = [
     "DataSource",
@@ -32,6 +32,7 @@ __all__ = [
     "DataSourceStreamReader",
     "SimpleDataSourceStreamReader",
     "DataSourceWriter",
+    "DataSourceArrowWriter",
     "DataSourceStreamWriter",
     "DataSourceRegistration",
     "InputPartition",
@@ -333,7 +334,7 @@ class DataSourceReader(ABC):
         )
 
     @abstractmethod
-    def read(self, partition: InputPartition) -> Iterator[Tuple]:
+    def read(self, partition: InputPartition) -> Union[Iterator[Tuple], Iterator["RecordBatch"]]:
         """
         Generates data for a given partition and returns an iterator of tuples or rows.
 
@@ -350,9 +351,11 @@ class DataSourceReader(ABC):
 
         Returns
         -------
-        iterator of tuples or :class:`Row`\\s
+        iterator of tuples or PyArrow's `RecordBatch`
             An iterator of tuples or rows. Each tuple or row will be converted to a row
             in the final DataFrame.
+            It can also return an iterator of PyArrow's `RecordBatch` if the data source
+            supports it.
 
         Examples
         --------
@@ -448,7 +451,7 @@ class DataSourceStreamReader(ABC):
         )
 
     @abstractmethod
-    def read(self, partition: InputPartition) -> Iterator[Tuple]:
+    def read(self, partition: InputPartition) -> Union[Iterator[Tuple], Iterator["RecordBatch"]]:
         """
         Generates data for a given partition and returns an iterator of tuples or rows.
 
@@ -470,9 +473,11 @@ class DataSourceStreamReader(ABC):
 
         Returns
         -------
-        iterator of tuples or :class:`Row`\\s
+        iterator of tuples or PyArrow's `RecordBatch`
             An iterator of tuples or rows. Each tuple or row will be converted to a row
             in the final DataFrame.
+            It can also return an iterator of PyArrow's `RecordBatch` if the data source
+            supports it.
         """
         raise PySparkNotImplementedError(
             errorClass="NOT_IMPLEMENTED",
@@ -662,6 +667,44 @@ class DataSourceWriter(ABC):
         ...
 
 
+class DataSourceArrowWriter(DataSourceWriter):
+    """
+    A base class for data source writers that process data using PyArrow’s `RecordBatch`.
+
+    Unlike :class:`DataSourceWriter`, which works with an iterator of Spark Rows, this class
+    is optimized for using the Arrow format when writing data. It can offer better performance
+    when interfacing with systems or libraries that natively support Arrow.
+
+    .. versionadded: 4.0.0
+    """
+
+    @abstractmethod
+    def write(self, iterator: Iterator["RecordBatch"]) -> "WriterCommitMessage":
+        """
+        Writes an iterator of PyArrow `RecordBatch` objects to the sink.
+
+        This method is called once on each executor to write data to the data source.
+        It accepts an iterator of PyArrow `RecordBatch`\\s and returns a single row
+        representing a commit message, or None if there is no commit message.
+
+        The driver collects commit messages, if any, from all executors and passes them
+        to the :class:`DataSourceWriter.commit` method if all tasks run successfully. If any
+        task fails, the :class:`DataSourceWriter.abort` method will be called with the
+        collected commit messages.
+
+        Parameters
+        ----------
+        iterator : iterator of :class:`RecordBatch`\\s
+            An iterator of PyArrow `RecordBatch` objects representing the input data.
+
+        Returns
+        -------
+        :class:`WriterCommitMessage`
+            a serializable commit message
+        """
+        ...
+
+
 class DataSourceStreamWriter(ABC):
     """
     A base class for data stream writers. Data stream writers are responsible for writing
@@ -779,9 +822,9 @@ class DataSourceRegistration:
         wrapped = _wrap_function(sc, dataSource)
         assert sc._jvm is not None
         jvm = sc._jvm
-        ds = jvm.org.apache.spark.sql.execution.datasources.v2.python.UserDefinedPythonDataSource(
-            wrapped
-        )
+        ds = getattr(
+            jvm, "org.apache.spark.sql.execution.datasources.v2.python.UserDefinedPythonDataSource"
+        )(wrapped)
         self.sparkSession._jsparkSession.dataSource().registerPython(name, ds)
 
 

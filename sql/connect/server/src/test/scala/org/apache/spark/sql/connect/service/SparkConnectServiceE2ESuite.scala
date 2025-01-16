@@ -109,7 +109,7 @@ class SparkConnectServiceE2ESuite extends SparkConnectServerTest {
       }
       // Check the async execute cleanup get called
       Eventually.eventually(timeout(eventuallyTimeout)) {
-        assert(executeHolder1.completionCallbackCalled)
+        assert(executeHolder1.completionCallbackCalled.get())
       }
     }
   }
@@ -243,6 +243,28 @@ class SparkConnectServiceE2ESuite extends SparkConnectServerTest {
         newest_query.hasNext
       }
       assert(queryError.getMessage.contains("INVALID_HANDLE.SESSION_CHANGED"))
+    }
+  }
+
+  test("Client is allowed to reconnect to released session if allow_reconnect is set") {
+    withRawBlockingStub { stub =>
+      val sessionId = UUID.randomUUID.toString()
+      val iter =
+        stub.executePlan(
+          buildExecutePlanRequest(
+            buildPlan("select * from range(1000000)"),
+            sessionId = sessionId))
+      iter.hasNext // guarantees the request was received by server.
+
+      stub.releaseSession(buildReleaseSessionRequest(sessionId, allowReconnect = true))
+
+      val iter2 =
+        stub.executePlan(
+          buildExecutePlanRequest(
+            buildPlan("select * from range(1000000)"),
+            sessionId = sessionId))
+      // guarantees the request was received by server. No exception should be thrown on reuse
+      iter2.hasNext
     }
   }
 }
