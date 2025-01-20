@@ -22,7 +22,9 @@ import org.apache.spark.sql.catalyst.analysis.UnresolvedDeserializer
 import org.apache.spark.sql.catalyst.encoders.AgnosticEncoders.agnosticEncoderFor
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.catalyst.expressions._
+import org.apache.spark.sql.catalyst.util.ALIAS_HIDDEN_FROM_RESOLVER
 import org.apache.spark.sql.execution.aggregate.TypedAggregateExpression
+import org.apache.spark.sql.types.MetadataBuilder
 
 private[sql] object TypedAggUtils {
 
@@ -30,14 +32,17 @@ private[sql] object TypedAggUtils {
       encoder: Encoder[A],
       groupingAttributes: Seq[Attribute]): NamedExpression = {
     val agnosticEncoder = agnosticEncoderFor(encoder)
+    val metadata = new MetadataBuilder()
+      .putBoolean(ALIAS_HIDDEN_FROM_RESOLVER, value = true)
+      .build()
     if (!agnosticEncoder.isStruct) {
       if (SQLConf.get.nameNonStructGroupingKeyAsValue) {
-        groupingAttributes.head
+        groupingAttributes.head.withMetadata(metadata)
       } else {
-        Alias(groupingAttributes.head, "key")()
+        Alias(groupingAttributes.head, "key")(explicitMetadata = Some(metadata))
       }
     } else {
-      Alias(CreateStruct(groupingAttributes), "key")()
+      Alias(CreateStruct(groupingAttributes), "key")(explicitMetadata = Some(metadata))
     }
   }
 
