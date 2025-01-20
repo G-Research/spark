@@ -373,7 +373,9 @@ package object expressions  {
         candidates
       }
 
-      (prunedCandidates, nestedFields)
+      val resolvableCandidates = prunedCandidates.filter(c => !c.isHiddenFromResolver)
+
+      (resolvableCandidates, nestedFields)
     }
 
     def resolveCandidates(
