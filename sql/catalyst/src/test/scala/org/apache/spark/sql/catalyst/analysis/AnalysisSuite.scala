@@ -1572,6 +1572,99 @@ class AnalysisSuite extends AnalysisTest with Matchers {
       queryContext = Array(ExpectedContext("SELECT *\nFROM t1\nWHERE 'true'", 31, 59)))
   }
 
+  test("SPARK-42199: resolve expression against scoped attributes") {
+    val plan = testRelation.select($"a".as("value")).analyze
+    implicit val intEncoder = ExpressionEncoder[Int]()
+    val appendCols = AppendColumns[Int, Int]((x: Int) => x, plan)
+
+    // AppendColumns adds a duplicate 'value' column, which makes $"value" ambiguous
+    assertAnalysisErrorCondition(
+      Project(
+        Seq($"value"),
+        appendCols
+      ),
+      "AMBIGUOUS_REFERENCE",
+      Map(
+        "name" -> "`value`",
+        "referenceNames" -> "[`value`, `value`]"))
+  }
+
+  test("SPARK-42199: MapGroups scopes sort order expressions") {
+    def func(k: Int, it: Iterator[Int]): Iterator[Int] = {
+      Iterator.empty
+    }
+
+    implicit val intEncoder = ExpressionEncoder[Int]()
+
+    val rel = testRelation2.analyze
+    val group = MapGroups(
+      func,
+      rel.output.head :: Nil,
+      rel.output,
+      SortOrder($"b", Ascending, $"b".as("b2") :: Nil) :: Nil,
+      rel
+    )
+
+    val mg = group.collectFirst {
+      case mg: MapGroups => mg
+    }
+
+    // grouping attributes should be hidden from resolution
+    assert(mg.isDefined)
+    mg.foreach { mg =>
+      assert(mg.groupingAttributes.size == 1)
+      assert(mg.groupingAttributes.forall(_.isHiddenFromResolver))
+      assert(mg.dataAttributes.size == rel.output.size)
+      assert(mg.dataAttributes.forall(!_.isHiddenFromResolver))
+    }
+  }
+
+  test("SPARK-42199: CoGroup scopes sort order expressions") {
+    def func(k: Int, left: Iterator[Int], right: Iterator[Int]): Iterator[Int] = {
+      Iterator.empty
+    }
+
+    implicit val intEncoder = ExpressionEncoder[Int]()
+
+    val left = testRelation2.select($"e").analyze
+    val right = testRelation3.select($"e", $"f").analyze
+    val leftWithKey = AppendColumns[Int, Int]((x: Int) => x, left)
+    val rightWithKey = AppendColumns[Int, Int]((x: Int) => x, right)
+    val leftOrder = SortOrder($"e", Ascending) :: Nil
+    val rightOrder =
+      SortOrder($"e", Ascending, $"e".as("e2") :: Nil) ::
+        SortOrder($"f", Descending, $"f".as("f2") :: Nil) ::
+        Nil
+
+    val cogroup = leftWithKey.cogroup[Int, Int, Int, Int](
+      rightWithKey,
+      func,
+      leftWithKey.newColumns,
+      rightWithKey.newColumns,
+      left.output,
+      right.output,
+      leftOrder,
+      rightOrder
+    )
+
+    val cg = cogroup.collectFirst {
+      case cg: CoGroup => cg
+    }
+
+    // left and right grouping attributes should be hidden from resolution
+    assert(cg.isDefined)
+    cg.foreach { cg =>
+      assert(cg.leftGroup.size == 1)
+      assert(cg.leftGroup.forall(_.isHiddenFromResolver))
+      assert(cg.rightGroup.size == 1)
+      assert(cg.rightGroup.forall(_.isHiddenFromResolver))
+      assert(cg.leftAttr.size == 1)
+      assert(cg.leftAttr.forall(!_.isHiddenFromResolver))
+      assert(cg.rightAttr.size == 1)
+      assert(cg.rightAttr.forall(!_.isHiddenFromResolver))
+    }
+  }
+
   test("SPARK-38591: resolve left and right CoGroup sort order on respective side only") {
     def func(k: Int, left: Iterator[Int], right: Iterator[Int]): Iterator[Int] = {
       Iterator.empty
