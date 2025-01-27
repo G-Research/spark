@@ -10,27 +10,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: armada
+          path: spark-armada
       - uses: actions/checkout@v4
         with:
           repository: armadaproject/armada-operator
           path: armada-operator
       - run: |
-          cd armada
+          cd spark-armada
           ./build/sbt package -Pkubernetes -Parmada
           cp resource-managers/armada/core/target/scala-2.13/spark-armada_2.13-4.0.0-SNAPSHOT.jar assembly/target/scala-2.13/jars/
           ./bin/docker-image-tool.sh -t testing build
-          docker image save -o ../armada-operator/spark_testing.tar spark:testing
+          docker image save -o ../spark_testing.tar spark:testing
           cd ..
 
           cd armada-operator
           make kind-all
-          ./bin/tooling/kind load image-archive spark_testing.tar --name armada
+          ./bin/tooling/kind load image-archive ../spark_testing.tar --name armada
+
+          # sleep a bit, or we see "create queue request failed: rpc error: code = DeadlineExceeded"
+          sleep 60
+
           ./bin/app/armadactl create queue test
           ./bin/app/armadactl submit spark-driver-job.yaml
           ./bin/app/armadactl submit spark-executor-job.yaml
 
+          # wait for the jobs to start
           sleep 60
+
+          # inspect jobs
           kubectl get pods
           for pod in $(kubectl get pods | grep armada | cut -d " " -f 1)
           do
