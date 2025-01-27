@@ -1,0 +1,41 @@
+name: Aramda
+
+on:
+  pull_request:
+
+jobs:
+  armada:
+    name: Armada integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: armada
+      - uses: actions/checkout@v4
+        with:
+          repository: armadaproject/armada-operator
+          path: armada-operator
+      - run: |
+          cd armada
+          ./build/sbt package -Pkubernetes -Parmada
+          cp resource-managers/armada/core/target/scala-2.13/spark-armada_2.13-4.0.0-SNAPSHOT.jar assembly/target/scala-2.13/jars/
+          ./bin/docker-image-tool.sh -t testing build
+          docker image save -o ../armada-operator/spark_testing.tar spark:testing
+          cd ..
+
+          cd armada-operator
+          make kind-all
+          ./bin/tooling/kind load image-archive spark_testing.tar --name armada
+          ./bin/app/armadactl create queue test
+          ./bin/app/armadactl submit spark-driver-job.yaml
+          ./bin/app/armadactl submit spark-executor-job.yaml
+
+          sleep 60
+          kubectl get pods
+          for pod in $(kubectl get pods | grep armada | cut -d " " -f 1)
+          do
+            echo "$pod"
+            kubectl logs pod/$pod
+            echo
+          done
+
