@@ -27,10 +27,14 @@ jobs:
           make kind-all
           ./bin/tooling/kind load image-archive ../spark_testing.tar --name armada
 
-          # sleep a bit, or we see "create queue request failed: rpc error: code = DeadlineExceeded"
+          # sleep a bit, or we see: create queue request failed: rpc error: code = DeadlineExceeded
           sleep 60
 
           ./bin/app/armadactl create queue test
+
+          # sleep a bit, or we see: rpc error: code = PermissionDenied desc = could not find queue "test"
+          sleep 60
+
           ./bin/app/armadactl submit ../spark-armada/examples/spark-driver-job.yaml
           ./bin/app/armadactl submit ../spark-armada/examples/spark-executor-job.yaml
 
