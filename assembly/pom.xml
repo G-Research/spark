@@ -241,7 +241,7 @@
       <id>armada</id>
       <dependencies>
         <dependency>
-          <groupId>io.armadaproject.spark</groupId>
+          <groupId>org.apache.spark</groupId>
           <artifactId>spark-armada_${scala.binary.version}</artifactId>
           <version>${project.version}</version>
         </dependency>
