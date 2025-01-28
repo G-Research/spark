@@ -10,18 +10,6 @@ From the spark repository root:
 You may have to adjust `JAVA_HOME` to suit your environment. Spark requires Java 17 and above. `-Parmada` tells
 sbt to enable the armada project.
 
-Once at the sbt console:
-```
-sbt:spark-parent> project armada
-```
-Switches to the aramda project.
-
-Now with feeling:
-```
-sbt:spark-armada> package
-```
-Should build what's available underneath `spark/resource-managers/armada`.
-
 Test
 ---
 ```
