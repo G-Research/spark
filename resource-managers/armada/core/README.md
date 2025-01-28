@@ -5,7 +5,7 @@ Build
 ---
 From the spark repository root: 
 ```bash
-$ JAVA_HOME=/usr/lib/jvm/java/ ./build/sbt -Parmada
+./build/sbt package -Pkubernetes -Parmada
 ```
 You may have to adjust `JAVA_HOME` to suit your environment. `-Parmada` tells
 sbt to enable the armada project.
