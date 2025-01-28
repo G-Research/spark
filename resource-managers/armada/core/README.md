@@ -7,7 +7,7 @@ From the spark repository root:
 ```bash
 ./build/sbt package -Pkubernetes -Parmada
 ```
-You may have to adjust `JAVA_HOME` to suit your environment. `-Parmada` tells
+You may have to adjust `JAVA_HOME` to suit your environment. Spark requires Java 17 and above. `-Parmada` tells
 sbt to enable the armada project.
 
 Once at the sbt console:
