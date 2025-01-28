@@ -13,6 +13,6 @@ sbt to enable the armada project.
 Test
 ---
 ```
-sbt:spark-armada> test
+./build/sbt armada/testOnly -Parmada
 ```
 Runs all tests!
