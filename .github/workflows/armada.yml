@@ -31,8 +31,8 @@ jobs:
           sleep 60
 
           ./bin/app/armadactl create queue test
-          ./bin/app/armadactl submit spark-driver-job.yaml
-          ./bin/app/armadactl submit spark-executor-job.yaml
+          ./bin/app/armadactl submit ../spark-armada/examples/spark-driver-job.yaml
+          ./bin/app/armadactl submit ../spark-armada/examples/spark-executor-job.yaml
 
           # wait for the jobs to start
           sleep 60
