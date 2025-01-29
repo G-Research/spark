@@ -17,7 +17,7 @@ jobs:
           path: armada-operator
       - run: |
           cd spark-armada
-          ./build/mvn package -Parmada -Pkubernetes -DskipTests
+          ./build/sbt package -Parmada -Pkubernetes
           ./bin/docker-image-tool.sh -t testing build
           docker image save -o ../spark_testing.tar spark:testing
           cd ..
