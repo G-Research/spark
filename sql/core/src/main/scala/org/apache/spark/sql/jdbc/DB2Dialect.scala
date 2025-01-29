@@ -82,6 +82,12 @@ private case class DB2Dialect() extends JdbcDialect with SQLConfHelper with NoLe
     }
   }
 
+  override def compileValue(value: Any): Any = value match {
+    case binaryValue: Array[Byte] =>
+      binaryValue.map("%02X".format(_)).mkString("BLOB(X'", "", "')")
+    case other => super.compileValue(other)
+  }
+
   override def getCatalystType(
       sqlType: Int,
       typeName: String,
@@ -101,7 +107,7 @@ private case class DB2Dialect() extends JdbcDialect with SQLConfHelper with NoLe
   }
 
   override def getJDBCType(dt: DataType): Option[JdbcType] = dt match {
-    case _: StringType => Option(JdbcType("CLOB", java.sql.Types.CLOB))
+    case StringType => Option(JdbcType("CLOB", java.sql.Types.CLOB))
     case BooleanType if conf.legacyDB2BooleanMappingEnabled =>
       Option(JdbcType("CHAR(1)", java.sql.Types.CHAR))
     case BooleanType => Option(JdbcType("BOOLEAN", java.sql.Types.BOOLEAN))
@@ -201,7 +207,7 @@ private case class DB2Dialect() extends JdbcDialect with SQLConfHelper with NoLe
       val offsetClause = dialect.getOffsetClause(offset)
 
       options.prepareQuery +
-        s"SELECT $columnList FROM ${options.tableOrQuery} $tableSampleClause" +
+        s"SELECT $columnList FROM ${options.tableOrQuery}" +
         s" $whereClause $groupByClause $orderByClause $offsetClause $limitClause"
     }
   }

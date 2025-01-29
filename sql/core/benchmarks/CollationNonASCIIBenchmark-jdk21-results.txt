@@ -1,54 +1,88 @@
-OpenJDK 64-Bit Server VM 21.0.5+11-LTS on Linux 6.5.0-1025-azure
+OpenJDK 64-Bit Server VM 21.0.5+11-LTS on Linux 6.8.0-1017-azure
 AMD EPYC 7763 64-Core Processor
 collation unit benchmarks - equalsFunction:  Best Time(ms)   Avg Time(ms)   Stdev(ms)    Rate(M/s)   Per Row(ns) Relative time
 --------------------------------------------------------------------------------------------------------------------------
-UTF8_BINARY                                           171            171           0          0.2        4273.2       1.0X
-UTF8_LCASE                                           7382           7393          16          0.0      184558.6      43.2X
-UNICODE                                              5337           5342           7          0.0      133424.6      31.2X
-UNICODE_CI                                           5090           5093           4          0.0      127259.3      29.8X
+UTF8_BINARY                                           171            172           1          0.2        4282.8       1.0X
+UTF8_LCASE                                           7012           7018           9          0.0      175288.2      40.9X
+UNICODE                                              5206           5207           0          0.0      130157.7      30.4X
+UNICODE_CI                                           5220           5220           0          0.0      130499.0      30.5X
 
-OpenJDK 64-Bit Server VM 21.0.5+11-LTS on Linux 6.5.0-1025-azure
+OpenJDK 64-Bit Server VM 21.0.5+11-LTS on Linux 6.8.0-1017-azure
 AMD EPYC 7763 64-Core Processor
 collation unit benchmarks - compareFunction:  Best Time(ms)   Avg Time(ms)   Stdev(ms)    Rate(M/s)   Per Row(ns) Relative time
 ---------------------------------------------------------------------------------------------------------------------------
-UTF8_BINARY                                            318            319           1          0.1        7952.7       1.0X
-UTF8_LCASE                                            7065           7072          10          0.0      176621.0      22.2X
-UNICODE                                               5294           5297           4          0.0      132357.7      16.6X
-UNICODE_CI                                            5246           5248           2          0.0      131156.9      16.5X
+UTF8_BINARY                                            315            316           1          0.1        7871.4       1.0X
+UTF8_LCASE                                            7036           7038           4          0.0      175888.2      22.3X
+UNICODE                                               5343           5344           1          0.0      133571.1      17.0X
+UNICODE_CI                                            5284           5284           0          0.0      132104.2      16.8X
 
-OpenJDK 64-Bit Server VM 21.0.5+11-LTS on Linux 6.5.0-1025-azure
+OpenJDK 64-Bit Server VM 21.0.5+11-LTS on Linux 6.8.0-1017-azure
 AMD EPYC 7763 64-Core Processor
 collation unit benchmarks - hashFunction:  Best Time(ms)   Avg Time(ms)   Stdev(ms)    Rate(M/s)   Per Row(ns) Relative time
 ------------------------------------------------------------------------------------------------------------------------
-UTF8_BINARY                                         385            387           2          0.1        9635.7       1.0X
-UTF8_LCASE                                         3559           3560           1          0.0       88974.0       9.2X
-UNICODE                                           15525          15542          25          0.0      388119.0      40.3X
-UNICODE_CI                                        12479          12482           5          0.0      311967.1      32.4X
+UTF8_BINARY                                         382            383           1          0.1        9557.2       1.0X
+UTF8_LCASE                                         3587           3592           6          0.0       89683.4       9.4X
+UNICODE                                           15310          15322          16          0.0      382753.7      40.0X
+UNICODE_CI                                        12531          12543          17          0.0      313269.1      32.8X
 
-OpenJDK 64-Bit Server VM 21.0.5+11-LTS on Linux 6.5.0-1025-azure
+OpenJDK 64-Bit Server VM 21.0.5+11-LTS on Linux 6.8.0-1017-azure
 AMD EPYC 7763 64-Core Processor
 collation unit benchmarks - contains:     Best Time(ms)   Avg Time(ms)   Stdev(ms)    Rate(M/s)   Per Row(ns) Relative time
 ------------------------------------------------------------------------------------------------------------------------
-UTF8_BINARY                                        1669           1671           2          0.0       41724.7       1.0X
-UTF8_LCASE                                        10199          10202           4          0.0      254974.8       6.1X
-UNICODE                                           68754          68758           6          0.0     1718852.9      41.2X
-UNICODE_CI                                        76056          76086          42          0.0     1901404.1      45.6X
+UTF8_BINARY                                         350            350           0          0.1        8742.0       1.0X
+UTF8_LCASE                                         9013           9020          11          0.0      225317.3      25.8X
+UNICODE                                           58338          58368          43          0.0     1458444.2     166.8X
+UNICODE_CI                                        58821          58928         152          0.0     1470530.7     168.2X
 
-OpenJDK 64-Bit Server VM 21.0.5+11-LTS on Linux 6.5.0-1025-azure
+OpenJDK 64-Bit Server VM 21.0.5+11-LTS on Linux 6.8.0-1017-azure
 AMD EPYC 7763 64-Core Processor
 collation unit benchmarks - startsWith:   Best Time(ms)   Avg Time(ms)   Stdev(ms)    Rate(M/s)   Per Row(ns) Relative time
 ------------------------------------------------------------------------------------------------------------------------
-UTF8_BINARY                                        1785           1787           3          0.0       44623.9       1.0X
-UTF8_LCASE                                         6859           6861           3          0.0      171482.2       3.8X
-UNICODE                                           68545          68553          12          0.0     1713617.2      38.4X
-UNICODE_CI                                        76486          76520          48          0.0     1912155.4      42.9X
+UTF8_BINARY                                         290            291           1          0.1        7250.9       1.0X
+UTF8_LCASE                                         5323           5325           3          0.0      133079.8      18.4X
+UNICODE                                           57879          57976         138          0.0     1446968.2     199.6X
+UNICODE_CI                                        59098          59188         127          0.0     1477459.9     203.8X
 
-OpenJDK 64-Bit Server VM 21.0.5+11-LTS on Linux 6.5.0-1025-azure
+OpenJDK 64-Bit Server VM 21.0.5+11-LTS on Linux 6.8.0-1017-azure
 AMD EPYC 7763 64-Core Processor
 collation unit benchmarks - endsWith:     Best Time(ms)   Avg Time(ms)   Stdev(ms)    Rate(M/s)   Per Row(ns) Relative time
 ------------------------------------------------------------------------------------------------------------------------
-UTF8_BINARY                                        1760           1761           1          0.0       44004.8       1.0X
-UTF8_LCASE                                         6680           6681           1          0.0      166995.3       3.8X
-UNICODE                                           74294          74346          74          0.0     1857344.0      42.2X
-UNICODE_CI                                        81377          81447          98          0.0     2034434.9      46.2X
+UTF8_BINARY                                         300            302           1          0.1        7507.7       1.0X
+UTF8_LCASE                                         5310           5318          11          0.0      132754.5      17.7X
+UNICODE                                           64787          64833          65          0.0     1619680.3     215.7X
+UNICODE_CI                                        64384          64419          50          0.0     1609603.5     214.4X
+
+OpenJDK 64-Bit Server VM 21.0.5+11-LTS on Linux 6.8.0-1017-azure
+AMD EPYC 7763 64-Core Processor
+collation unit benchmarks - initCap using impl execICU:  Best Time(ms)   Avg Time(ms)   Stdev(ms)    Rate(M/s)   Per Row(ns) Relative time
+--------------------------------------------------------------------------------------------------------------------------------------
+UNICODE                                                           214            215           1          0.2        5339.5       1.0X
+UNICODE_CI                                                        214            215           0          0.2        5355.7       1.0X
+
+OpenJDK 64-Bit Server VM 21.0.5+11-LTS on Linux 6.8.0-1017-azure
+AMD EPYC 7763 64-Core Processor
+collation unit benchmarks - initCap using impl execBinaryICU:  Best Time(ms)   Avg Time(ms)   Stdev(ms)    Rate(M/s)   Per Row(ns) Relative time
+--------------------------------------------------------------------------------------------------------------------------------------------
+UTF8_BINARY                                                             318            318           1          0.1        7946.2       1.0X
+UTF8_LCASE                                                              318            319           1          0.1        7945.3       1.0X
+UNICODE                                                                 318            319           1          0.1        7950.9       1.0X
+UNICODE_CI                                                              317            318           1          0.1        7931.1       1.0X
+
+OpenJDK 64-Bit Server VM 21.0.5+11-LTS on Linux 6.8.0-1017-azure
+AMD EPYC 7763 64-Core Processor
+collation unit benchmarks - initCap using impl execBinary:  Best Time(ms)   Avg Time(ms)   Stdev(ms)    Rate(M/s)   Per Row(ns) Relative time
+-----------------------------------------------------------------------------------------------------------------------------------------
+UTF8_BINARY                                                           84             85           0          0.5        2101.1       1.0X
+UTF8_LCASE                                                            84             85           1          0.5        2097.7       1.0X
+UNICODE                                                               84             85           1          0.5        2106.4       1.0X
+UNICODE_CI                                                            84             85           1          0.5        2111.5       1.0X
+
+OpenJDK 64-Bit Server VM 21.0.5+11-LTS on Linux 6.8.0-1017-azure
+AMD EPYC 7763 64-Core Processor
+collation unit benchmarks - initCap using impl execLowercase:  Best Time(ms)   Avg Time(ms)   Stdev(ms)    Rate(M/s)   Per Row(ns) Relative time
+--------------------------------------------------------------------------------------------------------------------------------------------
+UTF8_BINARY                                                             214            215           2          0.2        5342.3       1.0X
+UTF8_LCASE                                                              214            215           1          0.2        5348.9       1.0X
+UNICODE                                                                 214            215           1          0.2        5349.8       1.0X
+UNICODE_CI                                                              214            215           0          0.2        5354.4       1.0X
 
