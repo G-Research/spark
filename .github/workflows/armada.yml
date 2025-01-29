@@ -17,8 +17,7 @@ jobs:
           path: armada-operator
       - run: |
           cd spark-armada
-          ./build/sbt package -Pkubernetes -Parmada
-          cp resource-managers/armada/core/target/scala-2.13/spark-armada_2.13-4.0.0-SNAPSHOT.jar assembly/target/scala-2.13/jars/
+          ./build/mvn package -Parmada -Pkubernetes -DskipTests
           ./bin/docker-image-tool.sh -t testing build
           docker image save -o ../spark_testing.tar spark:testing
           cd ..
