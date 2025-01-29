@@ -1519,6 +1519,14 @@ yarn = Module(
 )
 
 kubernetes = Module(
+    name="armada",
+    dependencies=[],
+    source_file_regexes=["resource-managers/armada"],
+    build_profile_flags=[],
+    sbt_test_goals=["armada/test"],
+)
+
+kubernetes = Module(
     name="kubernetes",
     dependencies=[],
     source_file_regexes=["resource-managers/kubernetes"],
