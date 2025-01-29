@@ -17,10 +17,10 @@
 
 package org.apache.spark.scheduler.cluster.armada
 
+import org.jmock.lib.concurrent.DeterministicScheduler
 import org.scalatest.BeforeAndAfter
 
-import org.jmock.lib.concurrent.DeterministicScheduler
-import org.apache.spark.{/*SparkConf, SparkContext, SparkEnv,*/ SparkFunSuite}
+import org.apache.spark.SparkFunSuite
 
 class ArmadaClusterManagerBackendSuite extends SparkFunSuite with BeforeAndAfter {
   private val schedulerExecutorService = new DeterministicScheduler()

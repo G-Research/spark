@@ -16,15 +16,14 @@
  */
 package org.apache.spark.scheduler.cluster.armada
 
+import java.util.concurrent.{ScheduledExecutorService}
+
 import scala.collection.mutable.HashMap
 
-import java.util.concurrent.{ScheduledExecutorService} //, TimeUnit}
-import org.apache.spark.scheduler.{ExecutorDecommission, TaskSchedulerImpl} //, ExecutorDecommissionInfo, ExecutorKilled, ExecutorLossReason,
-  //TaskSchedulerImpl}
-import org.apache.spark.rpc.{RpcAddress, RpcCallContext}
 import org.apache.spark.SparkContext
+import org.apache.spark.rpc.{RpcAddress, RpcCallContext}
+import org.apache.spark.scheduler.{ExecutorDecommission, TaskSchedulerImpl}
 import org.apache.spark.scheduler.cluster.{CoarseGrainedSchedulerBackend, SchedulerBackendUtils}
-//import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.RegisterExecutor
 
 // FIXME: Actually import ArmadaClient
 class ArmadaClient {}
@@ -54,7 +53,8 @@ private[spark] class ArmadaClusterSchedulerBackend(
       resourceProfileToTotalExecs: Map[ResourceProfile, Int]): Future[Boolean] = {
         //podAllocator.setTotalExpectedExecutors(resourceProfileToTotalExecs)
         //Future.successful(true)
-    }*/
+    }
+    */
 
     override def sufficientResourcesRegistered(): Boolean = {
       totalRegisteredExecutors.get() >= initialExecutors * minRegisteredRatio
@@ -63,7 +63,7 @@ private[spark] class ArmadaClusterSchedulerBackend(
     override def getExecutorIds(): Seq[String] = synchronized {
       super.getExecutorIds()
     }
-    
+
     override def createDriverEndpoint(): DriverEndpoint = {
       new ArmadaDriverEndpoint()
     }
@@ -73,9 +73,9 @@ private[spark] class ArmadaClusterSchedulerBackend(
 
       override def receiveAndReply(context: RpcCallContext): PartialFunction[Any, Unit] =
             super.receiveAndReply(context)
-        /*generateExecID(context).orElse(
+        /* generateExecID(context).orElse(
           ignoreRegisterExecutorAtStoppedContext.orElse(
-            super.receiveAndReply(context)))*/
+            super.receiveAndReply(context))) */
 
       override def onDisconnected(rpcAddress: RpcAddress): Unit = {
         val execId = addressToExecutorId.get(rpcAddress)

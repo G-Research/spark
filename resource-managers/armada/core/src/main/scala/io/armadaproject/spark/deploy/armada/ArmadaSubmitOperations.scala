@@ -16,7 +16,7 @@
  */
 package org.apache.spark.deploy.armada.submit
 
-//import scala.jdk.CollectionConverters._
+// import scala.jdk.CollectionConverters._
 
 /*
 import K8SSparkSubmitOperation.getGracePeriod
@@ -27,10 +27,10 @@ import io.fabric8.kubernetes.client.dsl.PodResource
 
 import org.apache.spark.SparkConf
 import org.apache.spark.deploy.SparkSubmitOperation
-//import io.armadaproject.spark.deploy.armada.Config.{ARMADA_SUBMIT_GRACE_PERIOD}
-//import org.apache.spark.deploy.k8s.Constants.{SPARK_POD_DRIVER_ROLE, SPARK_ROLE_LABEL}
-//import org.apache.spark.deploy.k8s.KubernetesUtils.formatPodState
-import org.apache.spark.util.{CommandLineLoggingUtils/*, Utils*/}
+// import io.armadaproject.spark.deploy.armada.Config.{ARMADA_SUBMIT_GRACE_PERIOD}
+// import org.apache.spark.deploy.k8s.Constants.{SPARK_POD_DRIVER_ROLE, SPARK_ROLE_LABEL}
+// import org.apache.spark.deploy.k8s.KubernetesUtils.formatPodState
+import org.apache.spark.util.CommandLineLoggingUtils  /* , Utils */
 
 private sealed trait ArmadaSubmitOperation extends CommandLineLoggingUtils {
   // TODO: Tear this out
@@ -95,7 +95,7 @@ private[spark] class ArmadaSparkSubmitOperation extends SparkSubmitOperation
     }
     */
     printMessage("TODO!! ArmadaSparkSubmitOperation:execute!")
-    () 
+    ()
   }
 
   override def kill(submissionId: String, conf: SparkConf): Unit = {
