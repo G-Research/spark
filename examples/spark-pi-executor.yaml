@@ -1,37 +1,34 @@
-  queue: test                                                        
-  jobSetId: job-set-1                                                
-  jobs:                                                              
-    - namespace: default                                             
-      podSpec:                                                       
-        terminationGracePeriodSeconds: 0                             
-        restartPolicy: Never                                         
-        containers:                                                  
-          - args:
-            - executor
-            env:
-            - name: SPARK_USER
-              value: gbj
+  queue: test                                                            
+  jobSetId: job-set-1                                                    
+  jobs:                                                                  
+    - namespace: default                                                 
+      priority: 0                                                        
+      podSpec:                                                           
+        terminationGracePeriodSeconds: 0                                 
+        restartPolicy: Never                                             
+        containers:                                                      
+          - name: spark-executor                                         
+            image: spark:testing                                         
+            env:                                                         
+            - name: SPARK_EXECUTOR_MEMORY                                
+              value: "512m"                                              
             - name: SPARK_DRIVER_URL
               value: "spark://CoarseGrainedScheduler@${IP_ADDR}:7078"
+            - name: SPARK_EXECUTOR_ID                                    
+              value: "1"                                                 
+            - name: SPARK_EXECUTOR_CORES                                 
+              value: "1"                                                 
+            - name: SPARK_APPLICATION_ID                                 
+              value: "test_spark_app_id"                                 
             - name: SPARK_EXECUTOR_POD_IP
               valueFrom:
                 fieldRef:
                   apiVersion: v1
                   fieldPath: status.podIP
-            - name: SPARK_EXECUTOR_POD_NAME
-              value: "executor_pod"
-            - name: SPARK_EXECUTOR_CORES
-              value: "1"
-            - name: SPARK_EXECUTOR_MEMORY
-              value: 1024m
-            - name: SPARK_APPLICATION_ID
-              value: spark-0b0907d65ec240618163930cc6671aaa
-            - name: SPARK_CONF_DIR
-              value: /opt/spark/conf
-            - name: SPARK_EXECUTOR_ID
-              value: "1"
-            - name: SPARK_RESOURCE_PROFILE_ID
-              value: "0"
+            - name: SPARK_RESOURCE_PROFILE_ID                            
+              value: "0"                                                 
+            - name: SPARK_EXECUTOR_POD_NAME                              
+              value: "test-pod-name"                                     
             - name: SPARK_JAVA_OPT_0
               value: -Djava.net.preferIPv6Addresses=false
             - name: SPARK_JAVA_OPT_20
@@ -78,19 +75,18 @@
               value: --add-opens=java.base/sun.nio.cs=ALL-UNNAMED
             - name: SPARK_JAVA_OPT_5
               value: --add-opens=java.base/java.lang.reflect=ALL-UNNAMED
-            image: spark:testing10
-            imagePullPolicy: IfNotPresent
-            name: spark-kubernetes-executor
+            command:                                                     
+              - /opt/entrypoint.sh                                       
+            args:                                                        
+              - executor                                                 
+            resources:                                                   
+              limits:                                                    
+                memory: 1Gi                                              
+                cpu: 1                                                   
+              requests:                                                  
+                memory: 1Gi                                              
+                cpu: 1                                                              
             ports:
             - containerPort: 7079
               name: blockmanager
               protocol: TCP
-            resources:
-              limits:
-                cpu: "1"
-                memory: 1408Mi
-              requests:
-                cpu: "1"
-                memory: 1408Mi
-            terminationMessagePath: /dev/termination-log
-            terminationMessagePolicy: File
