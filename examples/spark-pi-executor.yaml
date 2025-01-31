@@ -30,12 +30,6 @@
             - name: SPARK_EXECUTOR_POD_NAME                              
               value: "test-pod-name"                                     
             - name: SPARK_JAVA_OPT_0
-              value: -Dspark.driver.port=7078
-            - name: SPARK_JAVA_OPT_1
-              value: -Dspark.driver.blockManager.port=7079
-            - name: SPARK_JAVA_OPT_2
-              value: -Dio.netty.tryReflectionSetAccessible=true
-            - name: SPARK_JAVA_OPT_3
               value: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005
             command:                                                     
               - /opt/entrypoint.sh                                       
