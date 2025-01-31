@@ -30,51 +30,13 @@
             - name: SPARK_EXECUTOR_POD_NAME                              
               value: "test-pod-name"                                     
             - name: SPARK_JAVA_OPT_0
-              value: -Djava.net.preferIPv6Addresses=false
-            - name: SPARK_JAVA_OPT_20
-              value: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005
-            - name: SPARK_JAVA_OPT_6
-              value: --add-opens=java.base/java.io=ALL-UNNAMED
-            - name: SPARK_JAVA_OPT_1
-              value: -XX:+IgnoreUnrecognizedVMOptions
-            - name: SPARK_JAVA_OPT_21
               value: -Dspark.driver.port=7078
-            - name: SPARK_JAVA_OPT_10
-              value: --add-opens=java.base/java.util.concurrent=ALL-UNNAMED
-            - name: SPARK_JAVA_OPT_9
-              value: --add-opens=java.base/java.util=ALL-UNNAMED
-            - name: SPARK_JAVA_OPT_8
-              value: --add-opens=java.base/java.nio=ALL-UNNAMED
-            - name: SPARK_JAVA_OPT_12
-              value: --add-opens=java.base/jdk.internal.ref=ALL-UNNAMED
-            - name: SPARK_JAVA_OPT_15
-              value: --add-opens=java.base/sun.security.action=ALL-UNNAMED
-            - name: SPARK_JAVA_OPT_3
-              value: --add-opens=java.base/java.lang=ALL-UNNAMED
-            - name: SPARK_JAVA_OPT_19
-              value: -Dio.netty.tryReflectionSetAccessible=true
-            - name: SPARK_JAVA_OPT_13
-              value: --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
-            - name: SPARK_JAVA_OPT_4
-              value: --add-opens=java.base/java.lang.invoke=ALL-UNNAMED
-            - name: SPARK_JAVA_OPT_18
-              value: -Djdk.reflect.useDirectMethodHandle=false
-            - name: SPARK_JAVA_OPT_7
-              value: --add-opens=java.base/java.net=ALL-UNNAMED
-            - name: SPARK_JAVA_OPT_17
-              value: --add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED
-            - name: SPARK_JAVA_OPT_22
+            - name: SPARK_JAVA_OPT_1
               value: -Dspark.driver.blockManager.port=7079
-            - name: SPARK_JAVA_OPT_11
-              value: --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED
             - name: SPARK_JAVA_OPT_2
-              value: --add-modules=jdk.incubator.vector
-            - name: SPARK_JAVA_OPT_16
-              value: --add-opens=java.base/sun.util.calendar=ALL-UNNAMED
-            - name: SPARK_JAVA_OPT_14
-              value: --add-opens=java.base/sun.nio.cs=ALL-UNNAMED
-            - name: SPARK_JAVA_OPT_5
-              value: --add-opens=java.base/java.lang.reflect=ALL-UNNAMED
+              value: -Dio.netty.tryReflectionSetAccessible=true
+            - name: SPARK_JAVA_OPT_3
+              value: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005
             command:                                                     
               - /opt/entrypoint.sh                                       
             args:                                                        
@@ -86,7 +48,3 @@
               requests:                                                  
                 memory: 1Gi                                              
                 cpu: 1                                                              
-            ports:
-            - containerPort: 7079
-              name: blockmanager
-              protocol: TCP
