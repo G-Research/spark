@@ -22,14 +22,21 @@
               - --verbose                                       
               - --class
               - org.apache.spark.examples.SparkPi
+              - --master                                        
+              - armada://192.168.1.167:50051                    
               - --conf
               - "spark.driver.port=7078"
-              - --conf
-              - spark.master=armada://service-0:38819"
               - --conf
               - "spark.driver.extraJavaOptions=-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=0.0.0.0:5005"
               - local:///opt/spark/examples/jars/spark-examples.jar
               - "100"
+            resources:                                          
+              limits:                                           
+                memory: 1Gi                                     
+                cpu: 1                                          
+              requests:                                         
+                memory: 1Gi                                     
+                cpu: 1  
             ports:
             - containerPort: 7078
               name: driver-rpc-port
@@ -40,10 +47,3 @@
             - containerPort: 4040
               name: spark-ui
               protocol: TCP
-            resources:
-              limits:
-                cpu: "1"
-                memory: 1408Mi
-              requests:
-                cpu: "1"
-                memory: 1408Mi
