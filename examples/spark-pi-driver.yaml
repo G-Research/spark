@@ -1,12 +1,12 @@
-  queue: test                                                        
-  jobSetId: job-set-1                                                
-  jobs:                                                              
-    - namespace: default
+  queue: test                                                   
+  jobSetId: job-set-1                                           
+  jobs:                                                         
+    - namespace: default                                        
       priority: 0                                               
-      podSpec:                                                       
-        terminationGracePeriodSeconds: 0                             
-        restartPolicy: Never                                         
-        containers:                                                  
+      podSpec:                                                  
+        terminationGracePeriodSeconds: 0                        
+        restartPolicy: Never                                    
+        containers:                                             
           - name: spark-driver                                  
             image: spark:testing                                
             env:                                                
