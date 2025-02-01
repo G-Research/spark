@@ -3,11 +3,10 @@
 # Start up the driver, get it's ip address, then start the executor with it
 set -e
 
-
 echo
 echo starting SparkPi driver
 armadactl submit examples/spark-pi-driver.yaml >& /tmp/jobid.txt
-export JOB_ID=`cat /tmp/jobid.txt | awk  '{print $5}'`
+JOB_ID=`cat /tmp/jobid.txt | awk  '{print $5}'`
 cat /tmp/jobid.txt
 echo
 
@@ -17,12 +16,12 @@ sleep 20
 
 echo
 echo SparkPi driver ip addr:
-export IP_ADDR=`kubectl get pod "armada-$JOB_ID-0" -o jsonpath='{.status.podIP}'`
+IP_ADDR=`kubectl get pod "armada-$JOB_ID-0" -o jsonpath='{.status.podIP}'`
 echo     $IP_ADDR
 echo
 
 echo passing drivers ip addr to executor and starting it
-envsubst < examples/spark-pi-executor.yaml > /tmp/ex.yaml
+IP_ADDR=$IP_ADDR envsubst < examples/spark-pi-executor.yaml > /tmp/ex.yaml
 armadactl submit /tmp/ex.yaml
 echo
 
