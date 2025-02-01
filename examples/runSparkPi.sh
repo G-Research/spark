@@ -5,7 +5,7 @@ set -e
 
 echo
 echo starting SparkPi driver
-armadactl submit examples/spark-pi-driver.yaml >& /tmp/jobid.txt
+armadactl submit examples/spark-pi-driver.yaml > /tmp/jobid.txt
 JOB_ID=`cat /tmp/jobid.txt | awk  '{print $5}'`
 cat /tmp/jobid.txt
 echo
