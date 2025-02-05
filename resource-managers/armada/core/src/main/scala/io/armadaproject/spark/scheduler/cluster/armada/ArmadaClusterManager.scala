@@ -43,6 +43,7 @@ private[spark] class ArmadaClusterManager extends ExternalClusterManager with Lo
 
   override def createTaskScheduler(sc: SparkContext, masterURL: String): TaskScheduler = {
     val maxTaskFailures = 1
+    logInfo("gbj20 cluster manager")
     new TaskSchedulerImpl(sc, maxTaskFailures, isLocal(sc.conf))
   }
 
@@ -106,8 +107,8 @@ private[spark] class ArmadaClusterManager extends ExternalClusterManager with Lo
     new ArmadaClusterSchedulerBackend(
       scheduler.asInstanceOf[TaskSchedulerImpl],
       sc,
-      new ArmadaClient, // FIXME
-      schedulerExecutorService)
+      schedulerExecutorService,
+      masterURL)
       // snapshotsStore,
       // executorPodsAllocator,
       // executorPodsLifecycleEventHandler,

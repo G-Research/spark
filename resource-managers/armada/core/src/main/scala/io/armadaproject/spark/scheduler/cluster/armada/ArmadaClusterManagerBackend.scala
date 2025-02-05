@@ -20,20 +20,24 @@ import java.util.concurrent.{ScheduledExecutorService}
 
 import scala.collection.mutable.HashMap
 
+import io.armadaproject.armada.ArmadaClient
+import io.grpc.ManagedChannelBuilder
+import k8s.io.api.core.v1.generated.{Container, PodSpec, ResourceRequirements}
+import k8s.io.api.core.v1.generated.{EnvVar, EnvVarSource, ObjectFieldSelector}
+import k8s.io.apimachinery.pkg.api.resource.generated.Quantity
+
 import org.apache.spark.SparkContext
 import org.apache.spark.rpc.{RpcAddress, RpcCallContext}
 import org.apache.spark.scheduler.{ExecutorDecommission, TaskSchedulerImpl}
 import org.apache.spark.scheduler.cluster.{CoarseGrainedSchedulerBackend, SchedulerBackendUtils}
 
-// FIXME: Actually import ArmadaClient
-class ArmadaClient {}
 
 // TODO: Implement for Armada
 private[spark] class ArmadaClusterSchedulerBackend(
     scheduler: TaskSchedulerImpl,
     sc: SparkContext,
-    armadaClient: ArmadaClient,
-    executorService: ScheduledExecutorService)
+    executorService: ScheduledExecutorService,
+    masterURL: String)
     extends CoarseGrainedSchedulerBackend(scheduler, sc.env.rpcEnv) {
 
     // FIXME
@@ -45,7 +49,80 @@ private[spark] class ArmadaClusterSchedulerBackend(
         conf.getOption("spark.app.id").getOrElse(appId)
     }
 
-    override def start(): Unit = {}
+
+  def submitJob(): Unit = {
+
+    var urlArray = masterURL.split(":")
+    // Remove leading "/"'s
+    val host = if (urlArray(1).startsWith("/")) urlArray(1).substring(2) else urlArray(1)
+    val port = urlArray(2).toInt
+
+    val driverAddr = sys.env("SPARK_DRIVER_BIND_ADDRESS")
+
+
+    val driverURL = s"spark://CoarseGrainedScheduler@${driverAddr}:7078"
+    val source = EnvVarSource().withFieldRef(ObjectFieldSelector()
+      .withApiVersion("v1").withFieldPath("status.podIP"))
+    val envVars = Seq(
+      new EnvVar().withName("SPARK_EXECUTOR_ID").withValue("1"),
+      new EnvVar().withName("SPARK_RESOURCE_PROFILE_ID").withValue("0"),
+      new EnvVar().withName("SPARK_EXECUTOR_POD_NAME").withValue("test-pod-name"),
+      new EnvVar().withName("SPARK_APPLICATION_ID").withValue("test_spark_app_id"),
+      new EnvVar().withName("SPARK_EXECUTOR_CORES").withValue("1"),
+      new EnvVar().withName("SPARK_EXECUTOR_MEMORY").withValue("512m"),
+      new EnvVar().withName("SPARK_DRIVER_URL").withValue(driverURL),
+      new EnvVar().withName("SPARK_EXECUTOR_POD_IP").withValueFrom(source)
+    )
+    val executorContainer = Container()
+      .withName("spark-executor")
+      .withImagePullPolicy("IfNotPresent")
+      .withImage("spark:testing")
+      .withEnv(envVars)
+      .withCommand(Seq("/opt/entrypoint.sh"))
+      .withArgs(
+        Seq(
+          "executor"
+        )
+      )
+      .withResources(
+        ResourceRequirements(
+          limits = Map(
+            "memory" -> Quantity(Option("1000Mi")),
+            "cpu" -> Quantity(Option("100m"))
+          ),
+          requests = Map(
+            "memory" -> Quantity(Option("1000Mi")),
+            "cpu" -> Quantity(Option("100m"))
+          )
+        )
+      )
+
+    val podSpec = PodSpec()
+      .withTerminationGracePeriodSeconds(0)
+      .withRestartPolicy("Never")
+      .withContainers(Seq(executorContainer))
+
+    val testJob = api.submit
+      .JobSubmitRequestItem()
+      .withPriority(0)
+      .withNamespace("default")
+      .withPodSpec(podSpec)
+
+    val channel =
+      ManagedChannelBuilder.forAddress(host, port).usePlaintext().build()
+
+    val jobSubmitResponse = new ArmadaClient(channel).SubmitJobs("test", "executor", Seq(testJob))
+
+    logInfo(s"Job Submit Response")
+    for (respItem <- jobSubmitResponse.jobResponseItems) {
+      logInfo(s"JobID: ${respItem.jobId}  Error: ${respItem.error} ")
+
+    }
+  }
+    override def start(): Unit = {
+      submitJob()
+    }
+
     override def stop(): Unit = {}
 
     /*
@@ -65,6 +142,7 @@ private[spark] class ArmadaClusterSchedulerBackend(
     }
 
     override def createDriverEndpoint(): DriverEndpoint = {
+      logInfo("gbj20 driver endpoint")
       new ArmadaDriverEndpoint()
     }
 
@@ -84,7 +162,7 @@ private[spark] class ArmadaClusterSchedulerBackend(
             executorsPendingDecommission.get(id) match {
               case Some(host) =>
                 // We don't pass through the host because by convention the
-                // host is only populated if the entire host is going away
+              // host is only populated if the entire host is going away
                 // and we don't know if that's the case or just one container.
                 removeExecutor(id, ExecutorDecommission(None))
               case _ =>
