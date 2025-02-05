@@ -139,7 +139,6 @@ private[spark] class ArmadaClusterSchedulerBackend(
     }
 
     override def createDriverEndpoint(): DriverEndpoint = {
-      logInfo("gbj20 driver endpoint")
       new ArmadaDriverEndpoint()
     }
 
