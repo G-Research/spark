@@ -21,7 +21,6 @@ import java.util.concurrent.{ScheduledExecutorService}
 import scala.collection.mutable.HashMap
 
 import io.armadaproject.armada.ArmadaClient
-import io.grpc.ManagedChannelBuilder
 import k8s.io.api.core.v1.generated.{Container, PodSpec, ResourceRequirements}
 import k8s.io.api.core.v1.generated.{EnvVar, EnvVarSource, ObjectFieldSelector}
 import k8s.io.apimachinery.pkg.api.resource.generated.Quantity
@@ -108,10 +107,8 @@ private[spark] class ArmadaClusterSchedulerBackend(
       .withNamespace("default")
       .withPodSpec(podSpec)
 
-    val channel =
-      ManagedChannelBuilder.forAddress(host, port).usePlaintext().build()
-
-    val jobSubmitResponse = new ArmadaClient(channel).SubmitJobs("test", "executor", Seq(testJob))
+    val jobSubmitResponse = ArmadaClient(host, port)
+      .SubmitJobs("test", "executor", Seq(testJob))
 
     logInfo(s"Job Submit Response")
     for (respItem <- jobSubmitResponse.jobResponseItems) {
@@ -162,7 +159,7 @@ private[spark] class ArmadaClusterSchedulerBackend(
             executorsPendingDecommission.get(id) match {
               case Some(host) =>
                 // We don't pass through the host because by convention the
-              // host is only populated if the entire host is going away
+                // host is only populated if the entire host is going away
                 // and we don't know if that's the case or just one container.
                 removeExecutor(id, ExecutorDecommission(None))
               case _ =>
