@@ -63,14 +63,14 @@ private[spark] class ArmadaClusterSchedulerBackend(
     val source = EnvVarSource().withFieldRef(ObjectFieldSelector()
       .withApiVersion("v1").withFieldPath("status.podIP"))
     val envVars = Seq(
-      new EnvVar().withName("SPARK_EXECUTOR_ID").withValue("1"),
-      new EnvVar().withName("SPARK_RESOURCE_PROFILE_ID").withValue("0"),
-      new EnvVar().withName("SPARK_EXECUTOR_POD_NAME").withValue("test-pod-name"),
-      new EnvVar().withName("SPARK_APPLICATION_ID").withValue("test_spark_app_id"),
-      new EnvVar().withName("SPARK_EXECUTOR_CORES").withValue("1"),
-      new EnvVar().withName("SPARK_EXECUTOR_MEMORY").withValue("512m"),
-      new EnvVar().withName("SPARK_DRIVER_URL").withValue(driverURL),
-      new EnvVar().withName("SPARK_EXECUTOR_POD_IP").withValueFrom(source)
+      EnvVar().withName("SPARK_EXECUTOR_ID").withValue("1"),
+      EnvVar().withName("SPARK_RESOURCE_PROFILE_ID").withValue("0"),
+      EnvVar().withName("SPARK_EXECUTOR_POD_NAME").withValue("test-pod-name"),
+      EnvVar().withName("SPARK_APPLICATION_ID").withValue("test_spark_app_id"),
+      EnvVar().withName("SPARK_EXECUTOR_CORES").withValue("1"),
+      EnvVar().withName("SPARK_EXECUTOR_MEMORY").withValue("512m"),
+      EnvVar().withName("SPARK_DRIVER_URL").withValue(driverURL),
+      EnvVar().withName("SPARK_EXECUTOR_POD_IP").withValueFrom(source)
     )
     val executorContainer = Container()
       .withName("spark-executor")
