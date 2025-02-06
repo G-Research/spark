@@ -16,7 +16,7 @@
  */
 package org.apache.spark.scheduler.cluster.armada
 
-import java.util.concurrent.{ScheduledExecutorService}
+import java.util.concurrent.ScheduledExecutorService
 
 import scala.collection.mutable.HashMap
 
@@ -49,9 +49,9 @@ private[spark] class ArmadaClusterSchedulerBackend(
     }
 
 
-  def submitJob(): Unit = {
+  private def submitJob(): Unit = {
 
-    var urlArray = masterURL.split(":")
+    val urlArray = masterURL.split(":")
     // Remove leading "/"'s
     val host = if (urlArray(1).startsWith("/")) urlArray(1).substring(2) else urlArray(1)
     val port = urlArray(2).toInt
@@ -59,7 +59,7 @@ private[spark] class ArmadaClusterSchedulerBackend(
     val driverAddr = sys.env("SPARK_DRIVER_BIND_ADDRESS")
 
 
-    val driverURL = s"spark://CoarseGrainedScheduler@${driverAddr}:7078"
+    val driverURL = s"spark://CoarseGrainedScheduler@$driverAddr:7078"
     val source = EnvVarSource().withFieldRef(ObjectFieldSelector()
       .withApiVersion("v1").withFieldPath("status.podIP"))
     val envVars = Seq(
@@ -110,7 +110,7 @@ private[spark] class ArmadaClusterSchedulerBackend(
     val jobSubmitResponse = ArmadaClient(host, port)
       .SubmitJobs("test", "executor", Seq(testJob))
 
-    logInfo(s"Job Submit Response")
+    logInfo(s"Driver Job Submit Response")
     for (respItem <- jobSubmitResponse.jobResponseItems) {
       logInfo(s"JobID: ${respItem.jobId}  Error: ${respItem.error} ")
 
@@ -174,7 +174,7 @@ private[spark] class ArmadaClusterSchedulerBackend(
                 execIDRequester -= rpcAddress
                 // Expected, executors re-establish a connection with an ID
               case _ =>
-                logDebug(s"No executor found for ${rpcAddress}")
+                logDebug(s"No executor found for $rpcAddress")
             }
         }
     }
