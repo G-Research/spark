@@ -28,11 +28,15 @@ import io.fabric8.kubernetes.api.model._
 import io.fabric8.kubernetes.client.{KubernetesClient, Watch}
 import io.fabric8.kubernetes.client.Watcher.Action
 */
+import _root_.io.armadaproject.armada.ArmadaClient
+import k8s.io.api.core.v1.generated.{Container, EnvVar, PodSpec, ResourceRequirements}
+import k8s.io.apimachinery.pkg.api.resource.generated.Quantity
 
 import org.apache.spark.SparkConf
 import org.apache.spark.deploy.SparkApplication
-/*
-import org.apache.spark.deploy.k8s._
+
+
+/* import org.apache.spark.deploy.k8s._
 import org.apache.spark.deploy.k8s.Config._
 import org.apache.spark.deploy.k8s.Constants._
 import org.apache.spark.deploy.k8s.KubernetesUtils.addOwnerReference
@@ -229,12 +233,33 @@ private[spark] object Client {
  * Main class and entry point of application submission in KUBERNETES mode.
  */
 private[spark] class ArmadaClientApplication extends SparkApplication {
+  // FIXME: Find the real way to log properly.
+  def log(msg: String): Unit = {
+    // scalastyle:off println
+    System.err.println(msg)
+    // scalastyle:on println
+  }
 
   override def start(args: Array[String], conf: SparkConf): Unit = {
+    log("ArmadaClientApplication.start() called!")
     run(conf)
   }
 
   private def run(sparkConf: SparkConf): Unit = {
+    val (host, port) = ArmadaUtils.parseMasterUrl(sparkConf.get("spark.master"))
+    log(s"host is $host, port is $port")
+    var armadaClient = new ArmadaClient(ArmadaClient.GetChannel(host, port))
+    if (armadaClient.SubmitHealth().isServing) {
+      log("Submit health good!")
+    } else {
+      log("Could not contact Armada!")
+    }
+
+
+    // # FIXME: Need to check how this is launched whether to submit a job or
+    // to turn into driver / cluster manager mode.
+    val jobId = submitDriverJob(armadaClient, sparkConf)
+    log(s"Got job ID: $jobId")
     // For constructing the app ID, we can't use the Spark application name, as the app ID is going
     // to be added as a label to group resources belonging to the same application. Label values are
     // considerably restrictive, e.g. must be no longer than 63 characters in length. So we generate
@@ -269,5 +294,61 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
     }
     */
     ()
+  }
+
+  private def submitDriverJob(armadaClient: ArmadaClient, conf: SparkConf): String = {
+    val envVars = Seq(
+      EnvVar().withName("SPARK_DRIVER_BIND_ADDRESS").withValue("0.0.0.0:1234")
+    )
+    val driverContainer = Container()
+      .withName("spark-driver")
+      .withImagePullPolicy("IfNotPresent")
+      .withImage("spark:testing")
+      .withEnv(envVars)
+      .withCommand(Seq("/opt/entrypoint.sh"))
+      .withArgs(
+        Seq(
+          "driver",
+          "--verbose",
+          "--class",
+          "org.apache.spark.examples.LocalPi", // FIXME: Plumb config
+          // org/apache/spark/examples/SparkPi.class
+          "--master",
+          "armada://armada-server.armada.svc.cluster.local:50051",
+          "submit"
+        )
+      )
+      .withResources( // FIXME: What are reasonable requests/limits for spark drivers?
+        ResourceRequirements(
+          limits = Map(
+            "memory" -> Quantity(Option("1Gi")),
+            "cpu" -> Quantity(Option("1"))
+          ),
+          requests = Map(
+            "memory" -> Quantity(Option("1Gi")),
+            "cpu" -> Quantity(Option("1"))
+          )
+        )
+      )
+
+    val podSpec = PodSpec()
+      .withTerminationGracePeriodSeconds(0)
+      .withRestartPolicy("Never")
+      .withContainers(Seq(driverContainer))
+
+    val driverJob = api.submit
+      .JobSubmitRequestItem()
+      .withPriority(0)
+      .withNamespace("personal-anonymous")
+      .withPodSpec(podSpec)
+
+    // FIXME: Plumb config for queue, job-set-it
+    val jobSubmitResponse = armadaClient.SubmitJobs("test", "spark-test-1", Seq(driverJob))
+
+    log(s"Job Submit Response $jobSubmitResponse")
+    for (respItem <- jobSubmitResponse.jobResponseItems) {
+      log(s"JobID: ${respItem.jobId}  Error: ${respItem.error} ")
+    }
+    jobSubmitResponse.jobResponseItems(0).jobId
   }
 }

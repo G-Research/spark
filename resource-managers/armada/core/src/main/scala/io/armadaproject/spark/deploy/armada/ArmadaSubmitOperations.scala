@@ -27,10 +27,10 @@ import io.fabric8.kubernetes.client.dsl.PodResource
 
 import org.apache.spark.SparkConf
 import org.apache.spark.deploy.SparkSubmitOperation
-// import io.armadaproject.spark.deploy.armada.Config.{ARMADA_SUBMIT_GRACE_PERIOD}
+// import org.apache.spark.deploy.armada.Config.{ARMADA_SUBMIT_GRACE_PERIOD}
 // import org.apache.spark.deploy.k8s.Constants.{SPARK_POD_DRIVER_ROLE, SPARK_ROLE_LABEL}
 // import org.apache.spark.deploy.k8s.KubernetesUtils.formatPodState
-import org.apache.spark.util.CommandLineLoggingUtils  /* , Utils */
+import org.apache.spark.util.{CommandLineLoggingUtils/* , Utils */}
 
 private sealed trait ArmadaSubmitOperation extends CommandLineLoggingUtils {
   // TODO: Tear this out

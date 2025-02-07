@@ -107,8 +107,8 @@ private[spark] class ArmadaClusterSchedulerBackend(
       .withNamespace("default")
       .withPodSpec(podSpec)
 
-    val jobSubmitResponse = ArmadaClient(host, port)
-      .SubmitJobs("test", "executor", Seq(testJob))
+    val client = new ArmadaClient(ArmadaClient.GetChannel(host, port))
+    val jobSubmitResponse = client.SubmitJobs("test", "executor", Seq(testJob))
 
     logInfo(s"Driver Job Submit Response")
     for (respItem <- jobSubmitResponse.jobResponseItems) {
