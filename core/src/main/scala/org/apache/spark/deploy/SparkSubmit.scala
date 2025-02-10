@@ -339,8 +339,8 @@ private[spark] class SparkSubmit extends Logging {
     val isKubernetesClient = clusterManager == KUBERNETES && deployMode == CLIENT
     val isKubernetesClusterModeDriver = isKubernetesClient &&
       sparkConf.getBoolean("spark.kubernetes.submitInDriver", false)
-    val isArmadaCluster = clusterManager == ARMADA && deployMode == CLUSTER
-    // TODO: Support armada & client?
+    // TODO: does client/cluster mode matter here?
+    val isArmada = clusterManager == ARMADA
     val isCustomClasspathInClusterModeDisallowed =
       !sparkConf.get(ALLOW_CUSTOM_CLASSPATH_BY_PROXY_USER_IN_CLUSTER_MODE) &&
       args.proxyUser != null &&
@@ -878,9 +878,10 @@ private[spark] class SparkSubmit extends Logging {
       }
     }
 
-    if (isArmadaCluster) {
+    if (isArmada) {
+      // FIXME: Make sure we populate what we need here!
       childMainClass = ARMADA_CLUSTER_SUBMIT_CLASS
-      // TODO: Setup childArgs
+      childArgs ++= Array("--class", args.mainClass)
     }
 
     // Load any properties specified through --conf and the default properties file

@@ -311,8 +311,7 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
           "driver",
           "--verbose",
           "--class",
-          "org.apache.spark.examples.LocalPi", // FIXME: Plumb config
-          // org/apache/spark/examples/SparkPi.class
+          conf.get("spark.app.name"),
           "--master",
           "armada://armada-server.armada.svc.cluster.local:50051",
           "submit"
@@ -342,7 +341,7 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
       .withNamespace("personal-anonymous")
       .withPodSpec(podSpec)
 
-    // FIXME: Plumb config for queue, job-set-it
+    // FIXME: Plumb config for queue, job-set-id
     val jobSubmitResponse = armadaClient.SubmitJobs("test", "spark-test-1", Seq(driverJob))
 
     log(s"Job Submit Response $jobSubmitResponse")
