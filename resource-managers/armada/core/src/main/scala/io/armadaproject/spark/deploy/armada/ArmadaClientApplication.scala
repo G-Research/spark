@@ -30,6 +30,7 @@ import io.fabric8.kubernetes.client.Watcher.Action
 */
 import _root_.io.armadaproject.armada.ArmadaClient
 import k8s.io.api.core.v1.generated.{Container, EnvVar, PodSpec, ResourceRequirements}
+import k8s.io.api.core.v1.generated.{EnvVarSource, ObjectFieldSelector}
 import k8s.io.apimachinery.pkg.api.resource.generated.Quantity
 
 import org.apache.spark.SparkConf
@@ -241,14 +242,14 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
   }
 
   override def start(args: Array[String], conf: SparkConf): Unit = {
-    log("ArmadaClientApplication.start() called!")
+    log("ArmadaClientApplication.start() called! arm4")
     run(conf)
   }
 
   private def run(sparkConf: SparkConf): Unit = {
     val (host, port) = ArmadaUtils.parseMasterUrl(sparkConf.get("spark.master"))
     log(s"host is $host, port is $port")
-    var armadaClient = new ArmadaClient(ArmadaClient.GetChannel(host, port))
+    var armadaClient = ArmadaClient(host, port)
     if (armadaClient.SubmitHealth().isServing) {
       log("Submit health good!")
     } else {
@@ -297,9 +298,12 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
   }
 
   private def submitDriverJob(armadaClient: ArmadaClient, conf: SparkConf): String = {
+    val source = EnvVarSource().withFieldRef(ObjectFieldSelector()
+      .withApiVersion("v1").withFieldPath("status.podIP"))
     val envVars = Seq(
-      EnvVar().withName("SPARK_DRIVER_BIND_ADDRESS").withValue("0.0.0.0:1234")
+      new EnvVar().withName("SPARK_DRIVER_BIND_ADDRESS").withValueFrom(source)
     )
+    val javaOptions = "-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=0.0.0.0:5005"
     val driverContainer = Container()
       .withName("spark-driver")
       .withImagePullPolicy("IfNotPresent")
@@ -311,10 +315,15 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
           "driver",
           "--verbose",
           "--class",
-          conf.get("spark.app.name"),
+          "org.apache.spark.examples.SparkPi",
           "--master",
           "armada://armada-server.armada.svc.cluster.local:50051",
-          "submit"
+          "--conf",
+          "spark.driver.port=7078",
+          "--conf",
+          s"spark.driver.extraJavaOptions=$javaOptions",
+          "local:///opt/spark/examples/jars/spark-examples.jar",
+          "100"
         )
       )
       .withResources( // FIXME: What are reasonable requests/limits for spark drivers?
@@ -338,7 +347,7 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
     val driverJob = api.submit
       .JobSubmitRequestItem()
       .withPriority(0)
-      .withNamespace("personal-anonymous")
+      .withNamespace("default")
       .withPodSpec(podSpec)
 
     // FIXME: Plumb config for queue, job-set-id
