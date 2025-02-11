@@ -91,7 +91,7 @@ private[spark] object ClientArguments {
     ClientArguments(
       mainAppResource,
       mainClass.get,
-      driverArgs.toArray[String],
+      driverArgs.toArray,
       proxyUser)
   }
 }
@@ -241,7 +241,7 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
   }
 
   override def start(args: Array[String], conf: SparkConf): Unit = {
-    log("ArmadaClientApplication.start() called! arm8")
+    log("ArmadaClientApplication.start() called! arm11")
     val parsedArguments = ClientArguments.fromCommandLineArgs(args)
     run(parsedArguments, conf)
   }
@@ -304,11 +304,15 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
     val envVars = Seq(
       new EnvVar().withName("SPARK_DRIVER_BIND_ADDRESS").withValueFrom(source)
     )
+
     val primaryResource = clientArguments.mainAppResource match {
       case JavaMainAppResource(Some(resource)) => Seq(resource)
+      case PythonMainAppResource(resource) => Seq(resource)
+      case RMainAppResource(resource) => Seq(resource)
       case _ => Seq()
     }
-    val javaOptions = "-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=0.0.0.0:5005"
+
+    val javaOptions = "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=0.0.0.0:5005"
     val driverContainer = Container()
       .withName("spark-driver")
       .withImagePullPolicy("IfNotPresent")
@@ -328,7 +332,7 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
           "--conf",
           s"spark.driver.extraJavaOptions=$javaOptions",
 
-        ) ++ primaryResource ++ Seq("100")
+        ) ++ primaryResource ++ clientArguments.driverArgs
       )
       .withResources( // FIXME: What are reasonable requests/limits for spark drivers?
         ResourceRequirements(
