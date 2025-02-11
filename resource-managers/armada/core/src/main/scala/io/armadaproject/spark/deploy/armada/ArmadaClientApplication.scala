@@ -361,9 +361,9 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
     // FIXME: Plumb config for queue, job-set-id
     val jobSubmitResponse = armadaClient.SubmitJobs("test", "driver", Seq(driverJob))
 
-    log(s"Job Submit Response $jobSubmitResponse")
     for (respItem <- jobSubmitResponse.jobResponseItems) {
-      log(s"JobID: ${respItem.jobId}  Error: ${respItem.error} ")
+      val error = if (respItem.error == "") "None" else respItem.error
+      log(s"JobID: ${respItem.jobId}  Error: ${error}")
     }
     jobSubmitResponse.jobResponseItems.head.jobId
   }
