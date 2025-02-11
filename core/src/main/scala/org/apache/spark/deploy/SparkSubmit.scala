@@ -301,7 +301,7 @@ private[spark] class SparkSubmit extends Logging {
       printMessage(s"Armada selected as cluster manager.")
       if (!Utils.classIsLoadable(ARMADA_CLUSTER_SUBMIT_CLASS) && !Utils.isTesting) {
         error(
-          s"Could not load ARMADA class \"${ARMADA_CLUSTER_SUBMIT_CLASS}\". " +
+          s"Could not load ARMADA class \"$ARMADA_CLUSTER_SUBMIT_CLASS\". " +
           "This copy of Spark may not have been compiled with ARMADA support.")
       }
     }
@@ -706,7 +706,7 @@ private[spark] class SparkSubmit extends Logging {
         mergeFn = Some(mergeFileLists(_, _))),
 
       // Other options
-      OptionAssigner(args.numExecutors, YARN | KUBERNETES, ALL_DEPLOY_MODES,
+      OptionAssigner(args.numExecutors, YARN | KUBERNETES | ARMADA, ALL_DEPLOY_MODES,
         confKey = EXECUTOR_INSTANCES.key),
       OptionAssigner(args.executorCores, STANDALONE | YARN | KUBERNETES, ALL_DEPLOY_MODES,
         confKey = EXECUTOR_CORES.key),
