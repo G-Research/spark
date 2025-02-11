@@ -880,7 +880,26 @@ private[spark] class SparkSubmit extends Logging {
 
     if (isArmadaCluster) {
       childMainClass = ARMADA_CLUSTER_SUBMIT_CLASS
-      childArgs ++= Array("--main-class", args.mainClass)
+      if (args.primaryResource != SparkLauncher.NO_RESOURCE) {
+        if (args.isPython) {
+          childArgs ++= Array("--primary-py-file", args.primaryResource)
+          childArgs ++= Array("--main-class", "org.apache.spark.deploy.PythonRunner")
+        } else if (args.isR) {
+          childArgs ++= Array("--primary-r-file", args.primaryResource)
+          childArgs ++= Array("--main-class", "org.apache.spark.deploy.RRunner")
+        }
+        else {
+          childArgs ++= Array("--primary-java-resource", args.primaryResource)
+          childArgs ++= Array("--main-class", args.mainClass)
+        }
+      } else {
+        childArgs ++= Array("--main-class", args.mainClass)
+      }
+      if (args.childArgs != null) {
+        args.childArgs.foreach { arg =>
+          childArgs += "--arg" += arg
+        }
+      }
     }
 
     // Load any properties specified through --conf and the default properties file
