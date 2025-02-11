@@ -16,8 +16,9 @@
  */
 package org.apache.spark.deploy.armada.submit
 
-/*
 import scala.collection.mutable
+
+/*
 import scala.jdk.CollectionConverters._
 import scala.util.control.Breaks._
 import scala.util.control.NonFatal
@@ -53,7 +54,6 @@ import org.apache.spark.util.Utils
  * @param mainClass the main class of the application to run
  * @param driverArgs arguments to the driver
  */
-/*
 private[spark] case class ClientArguments(
     mainAppResource: MainAppResource,
     mainClass: String,
@@ -95,7 +95,6 @@ private[spark] object ClientArguments {
       proxyUser)
   }
 }
-*/
 
 /**
  * Submits a Spark application to run on Kubernetes by creating the driver pod and starting a
@@ -242,11 +241,12 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
   }
 
   override def start(args: Array[String], conf: SparkConf): Unit = {
-    log("ArmadaClientApplication.start() called! arm4")
-    run(conf)
+    log("ArmadaClientApplication.start() called! arm5")
+    val parsedArguments = ClientArguments.fromCommandLineArgs(args)
+    run(parsedArguments, conf)
   }
 
-  private def run(sparkConf: SparkConf): Unit = {
+  private def run(clientArguments: ClientArguments, sparkConf: SparkConf): Unit = {
     val (host, port) = ArmadaUtils.parseMasterUrl(sparkConf.get("spark.master"))
     log(s"host is $host, port is $port")
     var armadaClient = ArmadaClient(host, port)
@@ -259,7 +259,7 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
 
     // # FIXME: Need to check how this is launched whether to submit a job or
     // to turn into driver / cluster manager mode.
-    val jobId = submitDriverJob(armadaClient, sparkConf)
+    val jobId = submitDriverJob(armadaClient, clientArguments, sparkConf)
     log(s"Got job ID: $jobId")
     // For constructing the app ID, we can't use the Spark application name, as the app ID is going
     // to be added as a label to group resources belonging to the same application. Label values are
@@ -297,7 +297,8 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
     ()
   }
 
-  private def submitDriverJob(armadaClient: ArmadaClient, conf: SparkConf): String = {
+  private def submitDriverJob(armadaClient: ArmadaClient, clientArguments: ClientArguments,
+    conf: SparkConf): String = {
     val source = EnvVarSource().withFieldRef(ObjectFieldSelector()
       .withApiVersion("v1").withFieldPath("status.podIP"))
     val envVars = Seq(
@@ -315,15 +316,14 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
           "driver",
           "--verbose",
           "--class",
-          "org.apache.spark.examples.SparkPi",
+          clientArguments.mainClass,
           "--master",
           "armada://armada-server.armada.svc.cluster.local:50051",
           "--conf",
           "spark.driver.port=7078",
           "--conf",
           s"spark.driver.extraJavaOptions=$javaOptions",
-          "local:///opt/spark/examples/jars/spark-examples.jar",
-          "100"
+          "local:///opt/spark/examples/jars/spark-examples.jar"
         )
       )
       .withResources( // FIXME: What are reasonable requests/limits for spark drivers?

@@ -880,7 +880,7 @@ private[spark] class SparkSubmit extends Logging {
 
     if (isArmadaCluster) {
       childMainClass = ARMADA_CLUSTER_SUBMIT_CLASS
-      // TODO: Setup childArgs
+      childArgs ++= Array("--main-class", args.mainClass)
     }
 
     // Load any properties specified through --conf and the default properties file
