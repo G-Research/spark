@@ -301,7 +301,7 @@ private[spark] class SparkSubmit extends Logging {
       printMessage(s"Armada selected as cluster manager.")
       if (!Utils.classIsLoadable(ARMADA_CLUSTER_SUBMIT_CLASS) && !Utils.isTesting) {
         error(
-          s"Could not load ARMADA class \"$ARMADA_CLUSTER_SUBMIT_CLASS\". " +
+          s"Could not load ARMADA class \"${ARMADA_CLUSTER_SUBMIT_CLASS}\". " +
           "This copy of Spark may not have been compiled with ARMADA support.")
       }
     }

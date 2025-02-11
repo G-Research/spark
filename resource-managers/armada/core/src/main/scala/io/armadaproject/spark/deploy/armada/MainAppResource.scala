@@ -16,7 +16,6 @@
  */
 package org.apache.spark.deploy.armada.submit
 
-
 import org.apache.spark.annotation.{DeveloperApi, Since, Stable}
 
 /**

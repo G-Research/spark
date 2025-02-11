@@ -330,7 +330,7 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
           "--conf",
           "spark.driver.port=7078",
           "--conf",
-          s"spark.driver.extraJavaOptions=$javaOptions",
+          s"spark.driver.extraJavaOptions=$javaOptions"
 
         ) ++ primaryResource ++ clientArguments.driverArgs
       )
