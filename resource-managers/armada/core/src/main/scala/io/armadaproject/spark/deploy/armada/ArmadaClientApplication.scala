@@ -328,6 +328,8 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
           "--master",
           "armada://armada-server.armada.svc.cluster.local:50051",
           "--conf",
+          s"spark.executor.instances=${conf.get("spark.executor.instances")}",
+          "--conf",
           "spark.driver.port=7078",
           "--conf",
           s"spark.driver.extraJavaOptions=$javaOptions"
