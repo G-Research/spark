@@ -339,8 +339,8 @@ private[spark] class SparkSubmit extends Logging {
     val isKubernetesClient = clusterManager == KUBERNETES && deployMode == CLIENT
     val isKubernetesClusterModeDriver = isKubernetesClient &&
       sparkConf.getBoolean("spark.kubernetes.submitInDriver", false)
-    // TODO: does client/cluster mode matter here?
-    val isArmada = clusterManager == ARMADA
+    val isArmadaCluster = clusterManager == ARMADA && deployMode == CLUSTER
+    // TODO: Support armada & client?
     val isCustomClasspathInClusterModeDisallowed =
       !sparkConf.get(ALLOW_CUSTOM_CLASSPATH_BY_PROXY_USER_IN_CLUSTER_MODE) &&
       args.proxyUser != null &&
@@ -706,7 +706,7 @@ private[spark] class SparkSubmit extends Logging {
         mergeFn = Some(mergeFileLists(_, _))),
 
       // Other options
-      OptionAssigner(args.numExecutors, YARN | KUBERNETES, ALL_DEPLOY_MODES,
+      OptionAssigner(args.numExecutors, YARN | KUBERNETES | ARMADA, ALL_DEPLOY_MODES,
         confKey = EXECUTOR_INSTANCES.key),
       OptionAssigner(args.executorCores, STANDALONE | YARN | KUBERNETES, ALL_DEPLOY_MODES,
         confKey = EXECUTOR_CORES.key),
@@ -878,10 +878,28 @@ private[spark] class SparkSubmit extends Logging {
       }
     }
 
-    if (isArmada) {
-      // FIXME: Make sure we populate what we need here!
+    if (isArmadaCluster) {
       childMainClass = ARMADA_CLUSTER_SUBMIT_CLASS
-      childArgs ++= Array("--class", args.mainClass)
+      if (args.primaryResource != SparkLauncher.NO_RESOURCE) {
+        if (args.isPython) {
+          childArgs ++= Array("--primary-py-file", args.primaryResource)
+          childArgs ++= Array("--main-class", "org.apache.spark.deploy.PythonRunner")
+        } else if (args.isR) {
+          childArgs ++= Array("--primary-r-file", args.primaryResource)
+          childArgs ++= Array("--main-class", "org.apache.spark.deploy.RRunner")
+        }
+        else {
+          childArgs ++= Array("--primary-java-resource", args.primaryResource)
+          childArgs ++= Array("--main-class", args.mainClass)
+        }
+      } else {
+        childArgs ++= Array("--main-class", args.mainClass)
+      }
+      if (args.childArgs != null) {
+        args.childArgs.foreach { arg =>
+          childArgs += "--arg" += arg
+        }
+      }
     }
 
     // Load any properties specified through --conf and the default properties file
