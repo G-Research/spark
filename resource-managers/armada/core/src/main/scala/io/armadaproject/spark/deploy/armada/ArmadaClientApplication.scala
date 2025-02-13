@@ -316,7 +316,7 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
     val driverContainer = Container()
       .withName("spark-driver")
       .withImagePullPolicy("IfNotPresent")
-      .withImage("spark:testing")
+      .withImage(conf.get("spark.kubernetes.container.image"))
       .withEnv(envVars)
       .withCommand(Seq("/opt/entrypoint.sh"))
       .withArgs(
@@ -329,6 +329,8 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
           "armada://armada-server.armada.svc.cluster.local:50051",
           "--conf",
           s"spark.executor.instances=${conf.get("spark.executor.instances")}",
+          "--conf",
+          s"spark.kubernetes.container.image=${conf.get("spark.kubernetes.container.image")}",
           "--conf",
           "spark.driver.port=7078",
           "--conf",
