@@ -16,8 +16,9 @@
  */
 package org.apache.spark.deploy.armada.submit
 
-/*
 import scala.collection.mutable
+
+/*
 import scala.jdk.CollectionConverters._
 import scala.util.control.Breaks._
 import scala.util.control.NonFatal
@@ -30,6 +31,7 @@ import io.fabric8.kubernetes.client.Watcher.Action
 */
 import _root_.io.armadaproject.armada.ArmadaClient
 import k8s.io.api.core.v1.generated.{Container, EnvVar, PodSpec, ResourceRequirements}
+import k8s.io.api.core.v1.generated.{EnvVarSource, ObjectFieldSelector}
 import k8s.io.apimachinery.pkg.api.resource.generated.Quantity
 
 import org.apache.spark.SparkConf
@@ -52,7 +54,6 @@ import org.apache.spark.util.Utils
  * @param mainClass the main class of the application to run
  * @param driverArgs arguments to the driver
  */
-/*
 private[spark] case class ClientArguments(
     mainAppResource: MainAppResource,
     mainClass: String,
@@ -94,7 +95,6 @@ private[spark] object ClientArguments {
       proxyUser)
   }
 }
-*/
 
 /**
  * Submits a Spark application to run on Kubernetes by creating the driver pod and starting a
@@ -242,14 +242,15 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
 
   override def start(args: Array[String], conf: SparkConf): Unit = {
     log("ArmadaClientApplication.start() called!")
-    run(conf)
+    val parsedArguments = ClientArguments.fromCommandLineArgs(args)
+    run(parsedArguments, conf)
   }
 
-  private def run(sparkConf: SparkConf): Unit = {
+  private def run(clientArguments: ClientArguments, sparkConf: SparkConf): Unit = {
     val (host, port) = ArmadaUtils.parseMasterUrl(sparkConf.get("spark.master"))
     log(s"host is $host, port is $port")
-    var armadaClient = new ArmadaClient(ArmadaClient.GetChannel(host, port))
-    if (armadaClient.SubmitHealth().isServing) {
+    val armadaClient = ArmadaClient(host, port)
+    if (armadaClient.submitHealth().isServing) {
       log("Submit health good!")
     } else {
       log("Could not contact Armada!")
@@ -258,7 +259,7 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
 
     // # FIXME: Need to check how this is launched whether to submit a job or
     // to turn into driver / cluster manager mode.
-    val jobId = submitDriverJob(armadaClient, sparkConf)
+    val jobId = submitDriverJob(armadaClient, clientArguments, sparkConf)
     log(s"Got job ID: $jobId")
     // For constructing the app ID, we can't use the Spark application name, as the app ID is going
     // to be added as a label to group resources belonging to the same application. Label values are
@@ -296,14 +297,26 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
     ()
   }
 
-  private def submitDriverJob(armadaClient: ArmadaClient, conf: SparkConf): String = {
+  private def submitDriverJob(armadaClient: ArmadaClient, clientArguments: ClientArguments,
+    conf: SparkConf): String = {
+    val source = EnvVarSource().withFieldRef(ObjectFieldSelector()
+      .withApiVersion("v1").withFieldPath("status.podIP"))
     val envVars = Seq(
-      EnvVar().withName("SPARK_DRIVER_BIND_ADDRESS").withValue("0.0.0.0:1234")
+      new EnvVar().withName("SPARK_DRIVER_BIND_ADDRESS").withValueFrom(source)
     )
+
+    val primaryResource = clientArguments.mainAppResource match {
+      case JavaMainAppResource(Some(resource)) => Seq(resource)
+      case PythonMainAppResource(resource) => Seq(resource)
+      case RMainAppResource(resource) => Seq(resource)
+      case _ => Seq()
+    }
+
+    val javaOptions = "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=0.0.0.0:5005"
     val driverContainer = Container()
       .withName("spark-driver")
       .withImagePullPolicy("IfNotPresent")
-      .withImage("spark:testing")
+      .withImage(conf.get("spark.kubernetes.container.image"))
       .withEnv(envVars)
       .withCommand(Seq("/opt/entrypoint.sh"))
       .withArgs(
@@ -311,11 +324,19 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
           "driver",
           "--verbose",
           "--class",
-          conf.get("spark.app.name"),
+          clientArguments.mainClass,
           "--master",
           "armada://armada-server.armada.svc.cluster.local:50051",
-          "submit"
-        )
+          "--conf",
+          s"spark.executor.instances=${conf.get("spark.executor.instances")}",
+          "--conf",
+          s"spark.kubernetes.container.image=${conf.get("spark.kubernetes.container.image")}",
+          "--conf",
+          "spark.driver.port=7078",
+          "--conf",
+          s"spark.driver.extraJavaOptions=$javaOptions"
+
+        ) ++ primaryResource ++ clientArguments.driverArgs
       )
       .withResources( // FIXME: What are reasonable requests/limits for spark drivers?
         ResourceRequirements(
@@ -338,16 +359,16 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
     val driverJob = api.submit
       .JobSubmitRequestItem()
       .withPriority(0)
-      .withNamespace("personal-anonymous")
+      .withNamespace("default")
       .withPodSpec(podSpec)
 
     // FIXME: Plumb config for queue, job-set-id
-    val jobSubmitResponse = armadaClient.SubmitJobs("test", "spark-test-1", Seq(driverJob))
+    val jobSubmitResponse = armadaClient.submitJobs("test", "driver", Seq(driverJob))
 
-    log(s"Job Submit Response $jobSubmitResponse")
     for (respItem <- jobSubmitResponse.jobResponseItems) {
-      log(s"JobID: ${respItem.jobId}  Error: ${respItem.error} ")
+      val error = if (respItem.error == "") "None" else respItem.error
+      log(s"JobID: ${respItem.jobId}  Error: ${error}")
     }
-    jobSubmitResponse.jobResponseItems(0).jobId
+    jobSubmitResponse.jobResponseItems.head.jobId
   }
 }

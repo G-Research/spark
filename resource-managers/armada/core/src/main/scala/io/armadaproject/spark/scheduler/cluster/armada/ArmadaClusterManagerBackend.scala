@@ -29,6 +29,7 @@ import org.apache.spark.SparkContext
 import org.apache.spark.rpc.{RpcAddress, RpcCallContext}
 import org.apache.spark.scheduler.{ExecutorDecommission, TaskSchedulerImpl}
 import org.apache.spark.scheduler.cluster.{CoarseGrainedSchedulerBackend, SchedulerBackendUtils}
+import org.apache.spark.scheduler.cluster.SchedulerBackendUtils.getInitialTargetExecutorNumber
 
 
 // TODO: Implement for Armada
@@ -49,7 +50,7 @@ private[spark] class ArmadaClusterSchedulerBackend(
     }
 
 
-  private def submitJob(): Unit = {
+  private def submitJob(executorId: Int): Unit = {
 
     val urlArray = masterURL.split(":")
     // Remove leading "/"'s
@@ -63,7 +64,7 @@ private[spark] class ArmadaClusterSchedulerBackend(
     val source = EnvVarSource().withFieldRef(ObjectFieldSelector()
       .withApiVersion("v1").withFieldPath("status.podIP"))
     val envVars = Seq(
-      EnvVar().withName("SPARK_EXECUTOR_ID").withValue("1"),
+      EnvVar().withName("SPARK_EXECUTOR_ID").withValue(executorId.toString),
       EnvVar().withName("SPARK_RESOURCE_PROFILE_ID").withValue("0"),
       EnvVar().withName("SPARK_EXECUTOR_POD_NAME").withValue("test-pod-name"),
       EnvVar().withName("SPARK_APPLICATION_ID").withValue("test_spark_app_id"),
@@ -75,7 +76,7 @@ private[spark] class ArmadaClusterSchedulerBackend(
     val executorContainer = Container()
       .withName("spark-executor")
       .withImagePullPolicy("IfNotPresent")
-      .withImage("spark:testing")
+      .withImage(conf.get("spark.kubernetes.container.image"))
       .withEnv(envVars)
       .withCommand(Seq("/opt/entrypoint.sh"))
       .withArgs(
@@ -107,8 +108,8 @@ private[spark] class ArmadaClusterSchedulerBackend(
       .withNamespace("default")
       .withPodSpec(podSpec)
 
-    val client = new ArmadaClient(ArmadaClient.GetChannel(host, port))
-    val jobSubmitResponse = client.SubmitJobs("test", "executor", Seq(testJob))
+    val client = ArmadaClient(host, port)
+    val jobSubmitResponse = client.submitJobs("test", "executor", Seq(testJob))
 
     logInfo(s"Driver Job Submit Response")
     for (respItem <- jobSubmitResponse.jobResponseItems) {
@@ -117,7 +118,8 @@ private[spark] class ArmadaClusterSchedulerBackend(
     }
   }
     override def start(): Unit = {
-      submitJob()
+      val numberOfExecutors = getInitialTargetExecutorNumber(conf)
+      1 to numberOfExecutors foreach {j: Int => submitJob(j)}
     }
 
     override def stop(): Unit = {}
@@ -143,7 +145,7 @@ private[spark] class ArmadaClusterSchedulerBackend(
     }
 
     private class ArmadaDriverEndpoint extends DriverEndpoint {
-      protected val execIDRequester = new HashMap[RpcAddress, String]
+      private val execIDRequester = new HashMap[RpcAddress, String]
 
       override def receiveAndReply(context: RpcCallContext): PartialFunction[Any, Unit] =
             super.receiveAndReply(context)
