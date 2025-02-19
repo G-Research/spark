@@ -250,7 +250,7 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
     val (host, port) = ArmadaUtils.parseMasterUrl(sparkConf.get("spark.master"))
     log(s"host is $host, port is $port")
     val armadaClient = ArmadaClient(host, port)
-    if (armadaClient.SubmitHealth().isServing) {
+    if (armadaClient.submitHealth().isServing) {
       log("Submit health good!")
     } else {
       log("Could not contact Armada!")
@@ -363,7 +363,7 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
       .withPodSpec(podSpec)
 
     // FIXME: Plumb config for queue, job-set-id
-    val jobSubmitResponse = armadaClient.SubmitJobs("test", "driver", Seq(driverJob))
+    val jobSubmitResponse = armadaClient.submitJobs("test", "driver", Seq(driverJob))
 
     for (respItem <- jobSubmitResponse.jobResponseItems) {
       val error = if (respItem.error == "") "None" else respItem.error
