@@ -454,6 +454,7 @@ final class ShuffleBlockFetcherIterator(
       s"(${Utils.bytesToString(pushMergedLocalBlockBytes)}) " +
       s"push-merged-local and $numRemoteBlocks (${Utils.bytesToString(remoteBlockBytes)}) " +
       s"remote blocks")
+    logInfo(s"Blocks to fetch: ${numBlocksToFetch}, blocks fetched: $numBlocksProcessed")
     this.hostLocalBlocks ++= hostLocalBlocksByExecutor.values
       .flatMap { infos => infos.map(info => (info._1, info._3)) }
     collectedRemoteRequests
@@ -794,6 +795,8 @@ final class ShuffleBlockFetcherIterator(
     }
 
     numBlocksProcessed += 1
+    logInfo(s"Increment Blocks fetched: $numBlocksProcessed, " +
+      s"blocks to fetch: ${numBlocksToFetch}")
 
     var result: FetchResult = null
     var input: InputStream = null
