@@ -1,0 +1,51 @@
+name: Aramda
+
+on:
+  pull_request:
+
+jobs:
+  armada:
+    name: Armada integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: spark-armada
+      - uses: actions/checkout@v4
+        with:
+          repository: armadaproject/armada-operator
+          path: armada-operator
+      - run: |
+          cd spark-armada
+          ./build/sbt package -Parmada -Pkubernetes
+          ./bin/docker-image-tool.sh -t testing build
+          docker image save -o ../spark_testing.tar spark:testing
+          cd ..
+
+          cd armada-operator
+          make kind-all
+          ./bin/tooling/kind load image-archive ../spark_testing.tar --name armada
+
+          # sleep a bit, or we see: create queue request failed: rpc error: code = DeadlineExceeded
+          sleep 60
+
+          ./bin/app/armadactl create queue test
+
+          # sleep a bit, or we see: rpc error: code = PermissionDenied desc = could not find queue "test"
+          sleep 60
+
+          ./bin/app/armadactl submit ../spark-armada/examples/spark-driver-job.yaml
+          ./bin/app/armadactl submit ../spark-armada/examples/spark-executor-job.yaml
+
+          # wait for the jobs to start
+          sleep 60
+
+          # inspect jobs
+          kubectl get pods
+          for pod in $(kubectl get pods | grep armada | cut -d " " -f 1)
+          do
+            echo "$pod"
+            kubectl logs pod/$pod
+            echo
+          done
+

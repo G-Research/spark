@@ -248,6 +248,16 @@
       </dependencies>
     </profile>
     <profile>
+      <id>armada</id>
+      <dependencies>
+        <dependency>
+          <groupId>org.apache.spark</groupId>
+          <artifactId>spark-armada_${scala.binary.version}</artifactId>
+          <version>${project.version}</version>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
       <id>hive</id>
       <dependencies>
         <dependency>
