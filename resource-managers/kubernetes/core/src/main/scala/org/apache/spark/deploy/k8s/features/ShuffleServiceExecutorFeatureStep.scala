@@ -18,10 +18,11 @@ package org.apache.spark.deploy.k8s.features
 
 import scala.jdk.CollectionConverters._
 
-import io.fabric8.kubernetes.api.model.{ContainerBuilder, HasMetadata, ServiceBuilder}
+import io.fabric8.kubernetes.api.model.{ContainerBuilder, HasMetadata, PodBuilder, ServiceBuilder}
 
 import org.apache.spark.SparkException
 import org.apache.spark.deploy.k8s.{KubernetesConf, KubernetesExecutorConf, SparkPod}
+import org.apache.spark.deploy.k8s.Constants.{ENV_SPARK_CONF_DIR, SPARK_CONF_VOLUME_EXEC}
 import org.apache.spark.internal.config.SHUFFLE_SERVICE_PORT
 
 class ShuffleServiceExecutorFeatureStep extends KubernetesExecutorCustomFeatureConfigStep {
@@ -36,6 +37,8 @@ class ShuffleServiceExecutorFeatureStep extends KubernetesExecutorCustomFeatureC
   // name length is 8 + 38 + 6 + 10 = 62
   // which fits in KUBERNETES_DNS_LABEL_NAME_MAX_LENGTH = 63
   private lazy val serviceName = s"shuffle-$sparkAppSelector-exec-$sparkExecId"
+  private val portName = "shuffle-service"
+  private lazy val port = kubernetesConf.sparkConf.get(SHUFFLE_SERVICE_PORT)
 
   override def init(conf: KubernetesExecutorConf): Unit = {
     kubernetesConf = conf
@@ -50,7 +53,35 @@ class ShuffleServiceExecutorFeatureStep extends KubernetesExecutorCustomFeatureC
 
   override def configurePod(pod: SparkPod): SparkPod = {
     SparkPod(
-      pod.pod,
+      new PodBuilder(pod.pod)
+        .editSpec()
+        .addToInitContainers(
+          new ContainerBuilder()
+            .withName("shuffle-service")
+            .withImage(pod.container.getImage)
+            .withAdditionalProperties(Map[String, Object]("restartPolicy" -> "Always").asJava)
+            .withArgs(
+              "/opt/spark/bin/spark-class",
+              "org.apache.spark.deploy.ExternalShuffleService")
+            .withEnv(
+              pod.container.getEnv.asScala
+                .filter(_.getName == ENV_SPARK_CONF_DIR).asJava)
+            .addNewPort()
+            .withName(portName)
+            .withContainerPort(port)
+            .withProtocol("TCP")
+            .endPort()
+            .addAllToVolumeMounts(
+              pod.container.getVolumeMounts.asScala
+                .filter(mount =>
+                  mount.getName.startsWith("spark-local-dir-") ||
+                    mount.getName == SPARK_CONF_VOLUME_EXEC)
+                .asJavaCollection
+            )
+            .build()
+        )
+        .endSpec()
+        .build(),
       new ContainerBuilder(pod.container)
         .addNewEnv()
         .withName("EXECUTOR_SERVICE_NAME")
@@ -62,8 +93,6 @@ class ShuffleServiceExecutorFeatureStep extends KubernetesExecutorCustomFeatureC
   override def getAdditionalKubernetesResources(): Seq[HasMetadata] = {
     val selector = kubernetesConf.labels
       .filter { case (key, _) => service_selector_labels.contains(key) }
-    val portName = "spark-shuffle-service"
-    val port = kubernetesConf.sparkConf.get(SHUFFLE_SERVICE_PORT)
 
     val service = new ServiceBuilder()
       .withNewMetadata()
