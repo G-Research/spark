@@ -44,7 +44,7 @@ import org.apache.spark.sql.catalyst.analysis._
 import org.apache.spark.sql.catalyst.catalog.HiveTableRelation
 import org.apache.spark.sql.catalyst.encoders._
 import org.apache.spark.sql.catalyst.encoders.AgnosticEncoders.{agnosticEncoderFor, ProductEncoder, StructEncoder}
-import org.apache.spark.sql.catalyst.expressions.{ScalarSubquery => ScalarSubqueryExpr, _}
+import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.json.{JacksonGenerator, JSONOptions}
 import org.apache.spark.sql.catalyst.parser.{ParseException, ParserUtils}
 import org.apache.spark.sql.catalyst.plans._
@@ -69,8 +69,8 @@ import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.SchemaUtils
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.unsafe.array.ByteArrayMethods
+import org.apache.spark.util.{NextIterator, Utils}
 import org.apache.spark.util.ArrayImplicits._
-import org.apache.spark.util.Utils
 
 private[sql] object Dataset {
   val curId = new java.util.concurrent.atomic.AtomicLong()
@@ -929,7 +929,18 @@ class Dataset[T] private[sql](
   /** @inheritdoc */
   @scala.annotation.varargs
   def groupBy(cols: Column*): RelationalGroupedDataset = {
-    RelationalGroupedDataset(toDF(), cols.map(_.expr), RelationalGroupedDataset.GroupByType)
+    // Replace top-level integer literals in grouping expressions with ordinals, if
+    // `groupByOrdinal` is enabled.
+    val groupingExpressionsWithOrdinals = cols.map { col => col.expr match {
+      case Literal(value: Int, IntegerType) if sparkSession.sessionState.conf.groupByOrdinal =>
+        UnresolvedOrdinal(value)
+      case other => other
+    }}
+    RelationalGroupedDataset(
+      df = toDF(),
+      groupingExprs = groupingExpressionsWithOrdinals,
+      groupType = RelationalGroupedDataset.GroupByType
+    )
   }
 
   /** @inheritdoc */
@@ -1060,16 +1071,6 @@ class Dataset[T] private[sql](
       FunctionTableSubqueryArgumentExpression(plan = logicalPlan),
       sparkSession
     )
-  }
-
-  /** @inheritdoc */
-  def scalar(): Column = {
-    Column(ExpressionColumnNode(ScalarSubqueryExpr(logicalPlan)))
-  }
-
-  /** @inheritdoc */
-  def exists(): Column = {
-    Column(ExpressionColumnNode(Exists(logicalPlan)))
   }
 
   /** @inheritdoc */
@@ -1573,7 +1574,7 @@ class Dataset[T] private[sql](
     sparkSession.sessionState.executePlan(deserialized)
   }
 
-  private lazy val materializedRdd: RDD[T] = {
+  private[sql] lazy val materializedRdd: RDD[T] = {
     val objectType = exprEnc.deserializer.dataType
     rddQueryExecution.toRdd.mapPartitions { rows =>
       rows.map(_.get(0, objectType).asInstanceOf[T])
@@ -1677,21 +1678,19 @@ class Dataset[T] private[sql](
       val gen = new JacksonGenerator(rowSchema, writer,
         new JSONOptions(Map.empty[String, String], sessionLocalTimeZone))
 
-      new Iterator[String] {
+      new NextIterator[String] {
         private val toRow = exprEnc.createSerializer()
-        override def hasNext: Boolean = iter.hasNext
-        override def next(): String = {
+        override def close(): Unit = { gen.close() }
+        override def getNext(): String = {
+          if (!iter.hasNext) {
+            finished = true
+            return ""
+          }
+          writer.reset()
           gen.write(toRow(iter.next()))
           gen.flush()
 
-          val json = writer.toString
-          if (hasNext) {
-            writer.reset()
-          } else {
-            gen.close()
-          }
-
-          json
+          writer.toString
         }
       }
     } (Encoders.STRING)
