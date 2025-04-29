@@ -18,11 +18,10 @@ package org.apache.spark.deploy.k8s.features
 
 import scala.jdk.CollectionConverters._
 
-import io.fabric8.kubernetes.api.model.{ContainerBuilder, HasMetadata, PodBuilder, ServiceBuilder}
+import io.fabric8.kubernetes.api.model.{ContainerBuilder, HasMetadata, ServiceBuilder}
 
 import org.apache.spark.SparkException
 import org.apache.spark.deploy.k8s.{KubernetesConf, KubernetesExecutorConf, SparkPod}
-import org.apache.spark.deploy.k8s.Constants.{ENV_SPARK_CONF_DIR, SPARK_CONF_VOLUME_EXEC}
 import org.apache.spark.internal.config.SHUFFLE_SERVICE_PORT
 
 class ShuffleServiceExecutorFeatureStep extends KubernetesExecutorCustomFeatureConfigStep {
@@ -38,8 +37,8 @@ class ShuffleServiceExecutorFeatureStep extends KubernetesExecutorCustomFeatureC
   // name length is 8 + 38 + 6 + 10 = 62
   // which fits in KUBERNETES_DNS_LABEL_NAME_MAX_LENGTH = 63
   private lazy val serviceName = s"shuffle-$sparkAppSelector-exec-$sparkExecId"
-  private val portName = "shuffle-service"
   private lazy val port = kubernetesConf.sparkConf.get(SHUFFLE_SERVICE_PORT)
+  private val portName = "shuffle-service"
 
   override def init(conf: KubernetesExecutorConf): Unit = {
     kubernetesConf = conf
@@ -53,68 +52,20 @@ class ShuffleServiceExecutorFeatureStep extends KubernetesExecutorCustomFeatureC
   }
 
   override def configurePod(pod: SparkPod): SparkPod = {
-    val logfile = s"/opt/spark/logs/spark--$service_class_name--$$HOSTNAME.out"
     SparkPod(
-      new PodBuilder(pod.pod)
-        .editSpec()
-        .addToContainers(
-          new ContainerBuilder()
-            .withName("shuffle-service")
-            .withImage(pod.container.getImage)
-            .withNewLifecycle()
-            .withNewPostStart()
-            .withNewExec()
-            .withCommand("/opt/spark/sbin/spark-daemon.sh", "start", service_class_name)
-            .endExec()
-            .endPostStart()
-            .endLifecycle()
-            .withArgs(
-              "/bin/bash", "-c",
-                s"bash -c 'tail -F $logfile &'; " +
-                "nc -l -p 8177"
-            )
-            .withEnv(
-              pod.container.getEnv.asScala
-                .filter(_.getName == ENV_SPARK_CONF_DIR).asJava
-            )
-            .addNewPort()
-            .withName(portName)
-            .withContainerPort(port)
-            .withProtocol("TCP")
-            .endPort()
-            .addNewPort()
-            .withName("kill")
-            .withContainerPort(8177)
-            .withProtocol("TCP")
-            .endPort()
-            .addAllToVolumeMounts(
-              pod.container.getVolumeMounts.asScala
-                .filter(mount =>
-                  mount.getName.startsWith("spark-local-dir-") ||
-                    mount.getName == SPARK_CONF_VOLUME_EXEC)
-                .asJavaCollection
-            )
-            .build()
-        )
-        .addToContainers(
-          new ContainerBuilder()
-            .withName("sleep")
-            .withImage(pod.container.getImage)
-            .withArgs("nc", "-l", "-p", "9177")
-            .addNewPort()
-            .withName("kill2")
-            .withContainerPort(9177)
-            .withProtocol("TCP")
-            .endPort()
-            .build()
-        )
-        .endSpec()
-        .build(),
+      pod.pod,
       new ContainerBuilder(pod.container)
         .addNewEnv()
         .withName("EXECUTOR_SERVICE_NAME")
         .withValue(serviceName)
         .endEnv()
+        .editLifecycle()
+        .withNewPostStart()
+        .withNewExec()
+        .withCommand("/opt/spark/sbin/spark-daemon.sh", "start", service_class_name)
+        .endExec()
+        .endPostStart()
+        .endLifecycle()
         .build())
   }
 
