@@ -29,6 +29,7 @@ class ShuffleServiceExecutorFeatureStep extends KubernetesExecutorCustomFeatureC
   private val spark_app_selector_label = "spark-app-selector"
   private val spark_exec_id_label = "spark-exec-id"
   private val service_selector_labels = Set(spark_app_selector_label, spark_exec_id_label)
+  private val service_class_name = "org.apache.spark.deploy.ExternalShuffleService"
 
   private var kubernetesConf: KubernetesConf = _
 
@@ -52,23 +53,38 @@ class ShuffleServiceExecutorFeatureStep extends KubernetesExecutorCustomFeatureC
   }
 
   override def configurePod(pod: SparkPod): SparkPod = {
+    val logfile = s"/opt/spark/logs/spark--$service_class_name--$$HOSTNAME.out"
     SparkPod(
       new PodBuilder(pod.pod)
         .editSpec()
-        .addToInitContainers(
+        .addToContainers(
           new ContainerBuilder()
             .withName("shuffle-service")
             .withImage(pod.container.getImage)
-            .withAdditionalProperties(Map[String, Object]("restartPolicy" -> "Always").asJava)
+            .withNewLifecycle()
+            .withNewPostStart()
+            .withNewExec()
+            .withCommand("/opt/spark/sbin/spark-daemon.sh", "start", service_class_name)
+            .endExec()
+            .endPostStart()
+            .endLifecycle()
             .withArgs(
-              "/opt/spark/bin/spark-class",
-              "org.apache.spark.deploy.ExternalShuffleService")
+              "/bin/bash", "-c",
+                s"bash -c 'tail -F $logfile &'; " +
+                "nc -l -p 8177"
+            )
             .withEnv(
               pod.container.getEnv.asScala
-                .filter(_.getName == ENV_SPARK_CONF_DIR).asJava)
+                .filter(_.getName == ENV_SPARK_CONF_DIR).asJava
+            )
             .addNewPort()
             .withName(portName)
             .withContainerPort(port)
+            .withProtocol("TCP")
+            .endPort()
+            .addNewPort()
+            .withName("kill")
+            .withContainerPort(8177)
             .withProtocol("TCP")
             .endPort()
             .addAllToVolumeMounts(
@@ -78,6 +94,18 @@ class ShuffleServiceExecutorFeatureStep extends KubernetesExecutorCustomFeatureC
                     mount.getName == SPARK_CONF_VOLUME_EXEC)
                 .asJavaCollection
             )
+            .build()
+        )
+        .addToContainers(
+          new ContainerBuilder()
+            .withName("sleep")
+            .withImage(pod.container.getImage)
+            .withArgs("nc", "-l", "-p", "9177")
+            .addNewPort()
+            .withName("kill2")
+            .withContainerPort(9177)
+            .withProtocol("TCP")
+            .endPort()
             .build()
         )
         .endSpec()
