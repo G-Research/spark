@@ -62,7 +62,9 @@ class ShuffleServiceExecutorFeatureStep extends KubernetesExecutorCustomFeatureC
         .editLifecycle()
         .withNewPostStart()
         .withNewExec()
-        .withCommand("/opt/spark/sbin/spark-daemon.sh", "start", service_class_name)
+        .withCommand(
+          "env", "SPARK_LOG_DIR=/tmp/log",
+          "/opt/spark/sbin/spark-daemon.sh", "start", service_class_name)
         .endExec()
         .endPostStart()
         .endLifecycle()
