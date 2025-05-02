@@ -28,6 +28,7 @@ import org.apache.spark._
 import org.apache.spark.errors.SparkCoreErrors
 import org.apache.spark.internal.Logging
 import org.apache.spark.internal.config
+import org.apache.spark.internal.config.STORAGE_DECOMMISSION_SHUFFLE_MAX_DISK_SIZE
 import org.apache.spark.shuffle.ShuffleBlockInfo
 import org.apache.spark.storage.BlockManagerMessages.ReplicateBlock
 import org.apache.spark.util.{ThreadUtils, Utils}
@@ -288,7 +289,9 @@ private[storage] class BlockManagerDecommissioner(
       s"are added. In total, $remainedShuffles shuffles are remained.")
 
     // Update the threads doing migrations
-    val livePeerSet = bm.getPeers(false).toSet
+    val peersEnabled = conf.get(STORAGE_DECOMMISSION_SHUFFLE_MAX_DISK_SIZE).exists(_ > 0)
+    val livePeerSet = if (peersEnabled) bm.getPeers(false).toSet
+      else Set(FallbackStorage.FALLBACK_BLOCK_MANAGER_ID)
     val currentPeerSet = migrationPeers.keys.toSet
     val deadPeers = currentPeerSet.diff(livePeerSet)
     // Randomize the orders of the peers to avoid hotspot nodes.
