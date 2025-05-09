@@ -976,18 +976,20 @@ final class ShuffleBlockFetcherIterator(
 
           val newBlocksByAddr = blockId match {
             case ShuffleBlockId(shuffleId, _, reduceId) =>
+              mapOutputTracker.unregisterShuffle(shuffleId)
               mapOutputTracker.getMapSizesByExecutorId(
                 shuffleId,
                 mapIndex,
-                mapIndex,
+                mapIndex + 1,
                 reduceId,
-                reduceId)
+                reduceId + 1)
                 .filter(_._1 != address)
             case ShuffleBlockBatchId(shuffleId, _, startReduceId, endReduceId) =>
+              mapOutputTracker.unregisterShuffle(shuffleId)
               mapOutputTracker.getMapSizesByExecutorId(
                   shuffleId,
                   mapIndex,
-                  mapIndex,
+                  mapIndex + 1,
                   startReduceId,
                   endReduceId)
                 .filter(_._1 != address)
@@ -996,8 +998,7 @@ final class ShuffleBlockFetcherIterator(
               Iterator.empty
           }
           if (newBlocksByAddr.nonEmpty) {
-            logInfo(s"New addresses found for block $blockId and mapIndex $mapIndex, " +
-              s"rescheduling request: $address -> ${newBlocksByAddr.map(_._1).mkString(", ")}")
+            logInfo(s"New addresses found for block $blockId and mapIndex $mapIndex")
             fallbackFetch(newBlocksByAddr)
             result = null
           } else {
@@ -1226,6 +1227,7 @@ final class ShuffleBlockFetcherIterator(
     while (isRemoteBlockFetchable(fetchRequests)) {
       val request = fetchRequests.dequeue()
       val remoteAddress = request.address
+      // TODO: check if remote address is dead, schedule to retry migration destination
       if (isRemoteAddressMaxedOut(remoteAddress, request)) {
         logDebug(s"Deferring fetch request for $remoteAddress with ${request.blocks.size} blocks")
         val defReqQueue = deferredFetchRequests.getOrElse(remoteAddress, new Queue[FetchRequest]())
