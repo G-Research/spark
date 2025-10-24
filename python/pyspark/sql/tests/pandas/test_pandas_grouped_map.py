@@ -22,7 +22,7 @@ from collections import OrderedDict
 from decimal import Decimal
 from typing import cast
 
-from pyspark.sql import Row
+from pyspark.sql import Row, functions as sf
 from pyspark.sql.functions import (
     array,
     explode,
@@ -73,7 +73,7 @@ if have_pyarrow:
     not have_pandas or not have_pyarrow,
     cast(str, pandas_requirement_message or pyarrow_requirement_message),
 )
-class GroupedApplyInPandasTestsMixin:
+class ApplyInPandasTestsMixin:
     @property
     def data(self):
         return (
@@ -208,23 +208,22 @@ class GroupedApplyInPandasTestsMixin:
         assert_frame_equal(expected, result)
 
     def test_register_grouped_map_udf(self):
-        with self.quiet():
-            self.check_register_grouped_map_udf()
+        with self.quiet(), self.temp_func("foo_udf"):
+            foo_udf = pandas_udf(lambda x: x, "id long", PandasUDFType.GROUPED_MAP)
 
-    def check_register_grouped_map_udf(self):
-        foo_udf = pandas_udf(lambda x: x, "id long", PandasUDFType.GROUPED_MAP)
+            with self.assertRaises(PySparkTypeError) as pe:
+                self.spark.catalog.registerFunction("foo_udf", foo_udf)
 
-        with self.assertRaises(PySparkTypeError) as pe:
-            self.spark.catalog.registerFunction("foo_udf", foo_udf)
-
-        self.check_error(
-            exception=pe.exception,
-            errorClass="INVALID_UDF_EVAL_TYPE",
-            messageParameters={
-                "eval_type": "SQL_BATCHED_UDF, SQL_ARROW_BATCHED_UDF, SQL_SCALAR_PANDAS_UDF, "
-                "SQL_SCALAR_PANDAS_ITER_UDF or SQL_GROUPED_AGG_PANDAS_UDF"
-            },
-        )
+            self.check_error(
+                exception=pe.exception,
+                errorClass="INVALID_UDF_EVAL_TYPE",
+                messageParameters={
+                    "eval_type": "SQL_BATCHED_UDF, SQL_ARROW_BATCHED_UDF, "
+                    "SQL_SCALAR_PANDAS_UDF, SQL_SCALAR_ARROW_UDF, "
+                    "SQL_SCALAR_PANDAS_ITER_UDF, SQL_SCALAR_ARROW_ITER_UDF, "
+                    "SQL_GROUPED_AGG_PANDAS_UDF or SQL_GROUPED_AGG_ARROW_UDF"
+                },
+            )
 
     def test_decorator(self):
         df = self.data
@@ -299,17 +298,17 @@ class GroupedApplyInPandasTestsMixin:
         return pd.DataFrame([key + (pdf.v.mean(),)])
 
     def test_apply_in_pandas_returning_column_names(self):
-        self._test_apply_in_pandas(GroupedApplyInPandasTestsMixin.stats_with_column_names)
+        self._test_apply_in_pandas(ApplyInPandasTestsMixin.stats_with_column_names)
 
     def test_apply_in_pandas_returning_no_column_names(self):
-        self._test_apply_in_pandas(GroupedApplyInPandasTestsMixin.stats_with_no_column_names)
+        self._test_apply_in_pandas(ApplyInPandasTestsMixin.stats_with_no_column_names)
 
     def test_apply_in_pandas_returning_column_names_sometimes(self):
         def stats(key, pdf):
             if key[0] % 2:
-                return GroupedApplyInPandasTestsMixin.stats_with_column_names(key, pdf)
+                return ApplyInPandasTestsMixin.stats_with_column_names(key, pdf)
             else:
-                return GroupedApplyInPandasTestsMixin.stats_with_no_column_names(key, pdf)
+                return ApplyInPandasTestsMixin.stats_with_no_column_names(key, pdf)
 
         self._test_apply_in_pandas(stats)
 
@@ -370,7 +369,7 @@ class GroupedApplyInPandasTestsMixin:
                         )
                     with self.assertRaisesRegex(PythonException, expected + "\n"):
                         self._test_apply_in_pandas(
-                            lambda key, pdf: pd.DataFrame([key + (str(pdf.v.mean()),)]),
+                            lambda key, pdf: pd.DataFrame([key + ("test_string",)]),
                             output_schema="id long, mean double",
                         )
 
@@ -385,6 +384,37 @@ class GroupedApplyInPandasTestsMixin:
                             lambda key, pdf: pd.DataFrame([key + (pdf.v.mean(),)]),
                             output_schema="id long, mean string",
                         )
+
+    def test_apply_in_pandas_int_to_decimal_coercion(self):
+        def int_to_decimal_func(key, pdf):
+            return pd.DataFrame([{"id": key[0], "decimal_result": 12345}])
+
+        with self.sql_conf(
+            {"spark.sql.execution.pythonUDF.pandas.intToDecimalCoercionEnabled": True}
+        ):
+            result = (
+                self.data.groupby("id")
+                .applyInPandas(int_to_decimal_func, schema="id long, decimal_result decimal(10,2)")
+                .collect()
+            )
+
+            self.assertTrue(len(result) > 0)
+            for row in result:
+                self.assertEqual(row.decimal_result, 12345.00)
+
+        with self.sql_conf(
+            {"spark.sql.execution.pythonUDF.pandas.intToDecimalCoercionEnabled": False}
+        ):
+            with self.assertRaisesRegex(
+                PythonException, "Exception thrown when converting pandas.Series"
+            ):
+                (
+                    self.data.groupby("id")
+                    .applyInPandas(
+                        int_to_decimal_func, schema="id long, decimal_result decimal(10,2)"
+                    )
+                    .collect()
+                )
 
     def test_datatype_string(self):
         df = self.data
@@ -846,7 +876,7 @@ class GroupedApplyInPandasTestsMixin:
 
         def stats(key, pdf):
             if key[0] % 2 == 0:
-                return GroupedApplyInPandasTestsMixin.stats_with_no_column_names(key, pdf)
+                return ApplyInPandasTestsMixin.stats_with_no_column_names(key, pdf)
             return empty_df
 
         result = (
@@ -868,8 +898,95 @@ class GroupedApplyInPandasTestsMixin:
             with self.assertRaisesRegex(PythonException, error):
                 self._test_apply_in_pandas_returning_empty_dataframe(empty_df)
 
+    def test_arrow_cast_enabled_numeric_to_decimal(self):
+        import numpy as np
 
-class GroupedApplyInPandasTests(GroupedApplyInPandasTestsMixin, ReusedSQLTestCase):
+        columns = [
+            "int8",
+            "int16",
+            "int32",
+            "uint8",
+            "uint16",
+            "uint32",
+            "float64",
+        ]
+
+        pdf = pd.DataFrame({key: np.arange(1, 2).astype(key) for key in columns})
+        df = self.spark.range(2).repartition(1)
+
+        for column in columns:
+            with self.subTest(column=column):
+                v = pdf[column].iloc[:1]
+                schema_str = "id long, value decimal(10,0)"
+
+                @pandas_udf(schema_str, PandasUDFType.GROUPED_MAP)
+                def test(pdf):
+                    return pdf.assign(**{"value": v})
+
+                row = df.groupby("id").apply(test).first()
+                res = row[1]
+                self.assertEqual(res, Decimal("1"))
+
+    def test_arrow_cast_enabled_str_to_numeric(self):
+        df = self.spark.range(2).repartition(1)
+
+        types = ["int", "long", "float", "double"]
+
+        for type_str in types:
+            with self.subTest(type=type_str):
+                schema_str = "id long, value " + type_str
+
+                @pandas_udf(schema_str, PandasUDFType.GROUPED_MAP)
+                def test(pdf):
+                    return pdf.assign(value=pd.Series(["123"]))
+
+                row = df.groupby("id").apply(test).first()
+                self.assertEqual(row[1], 123)
+
+    def test_arrow_batch_slicing(self):
+        df = self.spark.range(10000000).select(
+            (sf.col("id") % 2).alias("key"), sf.col("id").alias("v")
+        )
+        cols = {f"col_{i}": sf.col("v") + i for i in range(20)}
+        df = df.withColumns(cols)
+
+        def min_max_v(pdf):
+            assert len(pdf) == 10000000 / 2, len(pdf)
+            return pd.DataFrame(
+                {
+                    "key": [pdf.key.iloc[0]],
+                    "min": [pdf.v.min()],
+                    "max": [pdf.v.max()],
+                }
+            )
+
+        expected = (
+            df.groupby("key").agg(sf.min("v").alias("min"), sf.max("v").alias("max")).sort("key")
+        ).collect()
+
+        for maxRecords, maxBytes in [(1000, 2**31 - 1), (0, 1048576), (1000, 1048576)]:
+            with self.subTest(maxRecords=maxRecords, maxBytes=maxBytes):
+                with self.sql_conf(
+                    {
+                        "spark.sql.execution.arrow.maxRecordsPerBatch": maxRecords,
+                        "spark.sql.execution.arrow.maxBytesPerBatch": maxBytes,
+                    }
+                ):
+                    result = (
+                        df.groupBy("key")
+                        .applyInPandas(min_max_v, "key long, min long, max long")
+                        .sort("key")
+                    ).collect()
+
+                    self.assertEqual(expected, result)
+
+    def test_negative_and_zero_batch_size(self):
+        for batch_size in [0, -1]:
+            with self.sql_conf({"spark.sql.execution.arrow.maxRecordsPerBatch": batch_size}):
+                ApplyInPandasTestsMixin.test_complex_groupby(self)
+
+
+class ApplyInPandasTests(ApplyInPandasTestsMixin, ReusedSQLTestCase):
     pass
 
 

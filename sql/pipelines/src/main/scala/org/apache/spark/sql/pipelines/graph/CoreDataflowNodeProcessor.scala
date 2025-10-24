@@ -80,12 +80,6 @@ class CoreDataflowNodeProcessor(rawGraph: DataflowGraph) {
         val resolvedFlowsToTable = flowsToTable.map { flow =>
           resolvedFlowNodesMap.get(flow.identifier)
         }
-
-        // Assign isStreamingTable (MV or ST) to the table based on the resolvedFlowsToTable
-        val tableWithType = table.copy(
-          isStreamingTableOpt = Option(resolvedFlowsToTable.exists(f => f.df.isStreaming))
-        )
-
         // We mark all tables as virtual to ensure resolution uses incoming flows
         // rather than previously materialized tables.
         val virtualTableInput = VirtualTableInput(
@@ -95,7 +89,7 @@ class CoreDataflowNodeProcessor(rawGraph: DataflowGraph) {
           availableFlows = resolvedFlowsToTable
         )
         resolvedInputs.put(table.identifier, virtualTableInput)
-        Seq(tableWithType)
+        Seq(table)
       case view: View =>
         // For view, add the flow to resolvedInputs and return empty.
         require(upstreamNodes.size == 1, "Found multiple flows to view")
@@ -109,6 +103,7 @@ class CoreDataflowNodeProcessor(rawGraph: DataflowGraph) {
               s"${upstreamNodes.getClass}"
             )
         }
+      case sink: Sink => Seq(sink)
       case _ =>
         throw new IllegalArgumentException(s"Unsupported node type: ${node.getClass}")
     }
@@ -129,7 +124,8 @@ private class FlowResolver(rawGraph: DataflowGraph) {
       allInputs = allInputs,
       availableInputs = availableResolvedInputs.values.toList,
       configuration = flowToResolve.sqlConf,
-      queryContext = flowToResolve.queryContext
+      queryContext = flowToResolve.queryContext,
+      queryOrigin = flowToResolve.origin
     )
     val result =
       flowFunctionResult match {
@@ -175,7 +171,8 @@ private class FlowResolver(rawGraph: DataflowGraph) {
               allInputs = allInputs,
               availableInputs = availableResolvedInputs.values.toList,
               configuration = newSqlConf,
-              queryContext = flowToResolve.queryContext
+              queryContext = flowToResolve.queryContext,
+              queryOrigin = flowToResolve.origin
             )
           } else {
             f

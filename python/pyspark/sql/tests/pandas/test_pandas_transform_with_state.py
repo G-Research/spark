@@ -35,6 +35,10 @@ from pyspark.sql.types import (
     Row,
     IntegerType,
     TimestampType,
+    DecimalType,
+    ArrayType,
+    MapType,
+    DoubleType,
 )
 from pyspark.testing import assertDataFrameEqual
 from pyspark.testing.sqlutils import (
@@ -61,6 +65,7 @@ from pyspark.sql.tests.pandas.helper.helper_pandas_transform_with_state import (
     ListStateLargeTTLProcessorFactory,
     MapStateProcessorFactory,
     MapStateLargeTTLProcessorFactory,
+    LargeValueStatefulProcessorFactory,
     BasicProcessorFactory,
     BasicProcessorNotNullableFactory,
     AddFieldsProcessorFactory,
@@ -68,6 +73,10 @@ from pyspark.sql.tests.pandas.helper.helper_pandas_transform_with_state import (
     ReorderedFieldsProcessorFactory,
     UpcastProcessorFactory,
     MinEventTimeStatefulProcessorFactory,
+    StatefulProcessorCompositeTypeFactory,
+    ChunkCountProcessorFactory,
+    ChunkCountProcessorWithInitialStateFactory,
+    CompositeOutputProcessorFactory,
 )
 
 
@@ -138,6 +147,12 @@ class TransformWithStateTestsMixin:
         timeMode="None",
         checkpoint_path=None,
         initial_state=None,
+        output_schema=StructType(
+            [
+                StructField("id", StringType(), True),
+                StructField("countAsString", StringType(), True),
+            ]
+        ),
     ):
         input_path = tempfile.mkdtemp()
         if checkpoint_path is None:
@@ -152,13 +167,6 @@ class TransformWithStateTestsMixin:
         for q in self.spark.streams.active:
             q.stop()
         self.assertTrue(df.isStreaming)
-
-        output_schema = StructType(
-            [
-                StructField("id", StringType(), True),
-                StructField("countAsString", StringType(), True),
-            ]
-        )
 
         stateful_processor = self.get_processor(stateful_processor_factory)
         if self.use_pandas():
@@ -194,6 +202,7 @@ class TransformWithStateTestsMixin:
 
     def test_transform_with_state_basic(self):
         def check_results(batch_df, batch_id):
+            batch_df.collect()
             if batch_id == 0:
                 assert set(batch_df.sort("id").collect()) == {
                     Row(id="0", countAsString="2"),
@@ -209,6 +218,7 @@ class TransformWithStateTestsMixin:
 
     def test_transform_with_state_non_exist_value_state(self):
         def check_results(batch_df, _):
+            batch_df.collect()
             assert set(batch_df.sort("id").collect()) == {
                 Row(id="0", countAsString="0"),
                 Row(id="1", countAsString="0"),
@@ -294,6 +304,7 @@ class TransformWithStateTestsMixin:
 
     def test_transform_with_state_list_state(self):
         def check_results(batch_df, _):
+            batch_df.collect()
             assert set(batch_df.sort("id").collect()) == {
                 Row(id="0", countAsString="2"),
                 Row(id="1", countAsString="2"),
@@ -305,13 +316,14 @@ class TransformWithStateTestsMixin:
 
     def test_transform_with_state_list_state_large_list(self):
         def check_results(batch_df, batch_id):
+            batch_df.collect()
             if batch_id == 0:
                 expected_prev_elements = ""
-                expected_updated_elements = ",".join(map(lambda x: str(x), range(90)))
+                expected_updated_elements = ",".join(map(lambda x: str(x), range(100)))
             else:
                 # batch_id == 1:
-                expected_prev_elements = ",".join(map(lambda x: str(x), range(90)))
-                expected_updated_elements = ",".join(map(lambda x: str(x), range(180)))
+                expected_prev_elements = ",".join(map(lambda x: str(x), range(100)))
+                expected_updated_elements = ",".join(map(lambda x: str(x), range(190)))
 
             assert set(batch_df.sort("id").collect()) == {
                 Row(
@@ -379,6 +391,7 @@ class TransformWithStateTestsMixin:
     # test list state with ttl has the same behavior as list state when state doesn't expire.
     def test_transform_with_state_list_state_large_ttl(self):
         def check_results(batch_df, batch_id):
+            batch_df.collect()
             assert set(batch_df.sort("id").collect()) == {
                 Row(id="0", countAsString="2"),
                 Row(id="1", countAsString="2"),
@@ -390,6 +403,7 @@ class TransformWithStateTestsMixin:
 
     def test_transform_with_state_map_state(self):
         def check_results(batch_df, _):
+            batch_df.collect()
             assert set(batch_df.sort("id").collect()) == {
                 Row(id="0", countAsString="2"),
                 Row(id="1", countAsString="2"),
@@ -400,6 +414,7 @@ class TransformWithStateTestsMixin:
     # test map state with ttl has the same behavior as map state when state doesn't expire.
     def test_transform_with_state_map_state_large_ttl(self):
         def check_results(batch_df, batch_id):
+            batch_df.collect()
             assert set(batch_df.sort("id").collect()) == {
                 Row(id="0", countAsString="2"),
                 Row(id="1", countAsString="2"),
@@ -413,6 +428,7 @@ class TransformWithStateTestsMixin:
     # state doesn't expire.
     def test_value_state_ttl_basic(self):
         def check_results(batch_df, batch_id):
+            batch_df.collect()
             if batch_id == 0:
                 assert set(batch_df.sort("id").collect()) == {
                     Row(id="0", countAsString="2"),
@@ -432,6 +448,7 @@ class TransformWithStateTestsMixin:
     @unittest.skip("test is flaky and it is only a timing issue, skipping until we can resolve")
     def test_value_state_ttl_expiration(self):
         def check_results(batch_df, batch_id):
+            batch_df.collect()
             if batch_id == 0:
                 assertDataFrameEqual(
                     batch_df,
@@ -580,6 +597,8 @@ class TransformWithStateTestsMixin:
 
     def test_transform_with_state_proc_timer(self):
         def check_results(batch_df, batch_id):
+            batch_df.collect()
+
             # helper function to check expired timestamp is smaller than current processing time
             def check_timestamp(batch_df):
                 expired_df = (
@@ -695,6 +714,7 @@ class TransformWithStateTestsMixin:
 
     def test_transform_with_state_event_time(self):
         def check_results(batch_df, batch_id):
+            batch_df.collect()
             if batch_id == 0:
                 # watermark for late event = 0
                 # watermark for eviction = 0
@@ -726,6 +746,7 @@ class TransformWithStateTestsMixin:
 
     def test_transform_with_state_with_wmark_and_non_event_time(self):
         def check_results(batch_df, batch_id):
+            batch_df.collect()
             if batch_id == 0:
                 # watermark for late event = 0 and min event = 20
                 assert set(batch_df.sort("id").collect()) == {
@@ -823,6 +844,7 @@ class TransformWithStateTestsMixin:
 
     def test_transform_with_state_init_state(self):
         def check_results(batch_df, batch_id):
+            batch_df.collect()
             if batch_id == 0:
                 # for key 0, initial state was processed and it was only processed once;
                 # for key 1, it did not appear in the initial state df;
@@ -846,6 +868,7 @@ class TransformWithStateTestsMixin:
 
     def test_transform_with_state_init_state_with_extra_transformation(self):
         def check_results(batch_df, batch_id):
+            batch_df.collect()
             if batch_id == 0:
                 # for key 0, initial state was processed and it was only processed once;
                 # for key 1, it did not appear in the initial state df;
@@ -924,6 +947,7 @@ class TransformWithStateTestsMixin:
 
     def test_transform_with_state_non_contiguous_grouping_cols(self):
         def check_results(batch_df, batch_id):
+            batch_df.collect()
             assert set(batch_df.collect()) == {
                 Row(id1="0", id2="1", value=str(123 + 46)),
                 Row(id1="1", id2="2", value=str(146 + 346)),
@@ -935,6 +959,7 @@ class TransformWithStateTestsMixin:
 
     def test_transform_with_state_non_contiguous_grouping_cols_with_init_state(self):
         def check_results(batch_df, batch_id):
+            batch_df.collect()
             # initial state for key (0, 1) is processed
             assert set(batch_df.collect()) == {
                 Row(id1="0", id2="1", value=str(789 + 123 + 46)),
@@ -1017,6 +1042,7 @@ class TransformWithStateTestsMixin:
 
     def test_transform_with_state_chaining_ops(self):
         def check_results(batch_df, batch_id):
+            batch_df.collect()
             import datetime
 
             if batch_id == 0:
@@ -1052,6 +1078,7 @@ class TransformWithStateTestsMixin:
 
     def test_transform_with_state_init_state_with_timers(self):
         def check_results(batch_df, batch_id):
+            batch_df.collect()
             if batch_id == 0:
                 # timers are registered and handled in the first batch for
                 # rows in initial state; For key=0 and key=3 which contains
@@ -1176,6 +1203,7 @@ class TransformWithStateTestsMixin:
             expected_operator_name = "transformWithStateInPySparkExec"
 
         def check_results(batch_df, batch_id):
+            batch_df.collect()
             if batch_id == 0:
                 assert set(batch_df.sort("id").collect()) == {
                     Row(id="0", countAsString="2"),
@@ -1292,6 +1320,7 @@ class TransformWithStateTestsMixin:
         checkpoint_path = tempfile.mktemp()
 
         def check_results(batch_df, batch_id):
+            batch_df.collect()
             if batch_id == 0:
                 assert set(batch_df.sort("id").collect()) == {
                     Row(id="0", countAsString="2"),
@@ -1371,6 +1400,7 @@ class TransformWithStateTestsMixin:
         checkpoint_path = tempfile.mktemp()
 
         def check_results(batch_df, batch_id):
+            batch_df.collect()
             if batch_id == 0:
                 assert set(batch_df.sort("id").collect()) == {
                     Row(id="0", countAsString="2"),
@@ -1458,12 +1488,14 @@ class TransformWithStateTestsMixin:
 
     def test_transform_with_state_restart_with_multiple_rows_init_state(self):
         def check_results(batch_df, _):
+            batch_df.collect()
             assert set(batch_df.sort("id").collect()) == {
                 Row(id="0", countAsString="2"),
                 Row(id="1", countAsString="2"),
             }
 
         def check_results_for_new_query(batch_df, batch_id):
+            batch_df.collect()
             if batch_id == 0:
                 assert set(batch_df.sort("id").collect()) == {
                     Row(id="0", value=str(123 + 46)),
@@ -1511,6 +1543,364 @@ class TransformWithStateTestsMixin:
             check_results_for_new_query,
             checkpoint_path=new_checkpoint_path,
             initial_state=init_df,
+        )
+
+    def test_transform_with_state_in_pandas_composite_type(self):
+        def check_results(batch_df, batch_id):
+            if batch_id == 0:
+                map_val = {"key1": [1], "key2": [10]}
+                nested_map_val = {"e1": {"e2": 5, "e3": 10}}
+                assert set(batch_df.sort("id").collect()) == {
+                    Row(
+                        id="0",
+                        value_arr="0",
+                        list_state_arr="0",
+                        map_state_arr=json.dumps(map_val, sort_keys=True),
+                        nested_map_state_arr=json.dumps(nested_map_val, sort_keys=True),
+                    ),
+                    Row(
+                        id="1",
+                        value_arr="0",
+                        list_state_arr="0",
+                        map_state_arr=json.dumps(map_val, sort_keys=True),
+                        nested_map_state_arr=json.dumps(nested_map_val, sort_keys=True),
+                    ),
+                }, f"batch id: {batch_id}, real df is: {batch_df.collect()}"
+            else:
+                map_val_0 = {"key1": [1], "key2": [10], "0": [669]}
+                map_val_1 = {"key1": [1], "key2": [10], "1": [252]}
+                nested_map_val_0 = {"e1": {"e2": 5, "e3": 10, "0": 669}}
+                nested_map_val_1 = {"e1": {"e2": 5, "e3": 10, "1": 252}}
+                assert set(batch_df.sort("id").collect()) == {
+                    Row(
+                        id="0",
+                        countAsString="669",
+                        list_state_arr="0,669",
+                        map_state_arr=json.dumps(map_val_0, sort_keys=True),
+                        nested_map_state_arr=json.dumps(nested_map_val_0, sort_keys=True),
+                    ),
+                    Row(
+                        id="1",
+                        countAsString="252",
+                        list_state_arr="0,252",
+                        map_state_arr=json.dumps(map_val_1, sort_keys=True),
+                        nested_map_state_arr=json.dumps(nested_map_val_1, sort_keys=True),
+                    ),
+                }, f"batch id: {batch_id}, real df is: {batch_df.collect()}"
+
+        output_schema = StructType(
+            [
+                StructField("id", StringType(), True),
+                StructField("value_arr", StringType(), True),
+                StructField("list_state_arr", StringType(), True),
+                StructField("map_state_arr", StringType(), True),
+                StructField("nested_map_state_arr", StringType(), True),
+            ]
+        )
+
+        self._test_transform_with_state_basic(
+            StatefulProcessorCompositeTypeFactory(), check_results, output_schema=output_schema
+        )
+
+    # run a test with composite types where the output of TWS (not just the states) are complex.
+    def test_composite_output_schema(self):
+        def check_results(batch_df, batch_id):
+            batch_df.collect()
+            # Cannot use set() wrapper because Row objects contain unhashable types (lists)
+            if batch_id == 0:
+                assert batch_df.sort("primitiveValue").collect() == [
+                    Row(
+                        primitiveValue="key_0_count_2",
+                        listOfPrimitive=["item_0", "item_1"],
+                        mapOfPrimitive={"key0": "value0", "key1": "value1"},
+                        listOfComposite=[
+                            Row(
+                                intValue=0,
+                                doubleValue=0.0,
+                                arrayValue=["elem_0_0"],
+                                mapValue={"map_0_0": "val_0_0"},
+                            ),
+                            Row(
+                                intValue=1,
+                                doubleValue=1.5,
+                                arrayValue=["elem_1_0", "elem_1_1"],
+                                mapValue={"map_1_0": "val_1_0", "map_1_1": "val_1_1"},
+                            ),
+                        ],
+                        mapOfComposite={
+                            "nested_key0": Row(
+                                intValue=0,
+                                doubleValue=0.0,
+                                arrayValue=["elem_0_0"],
+                                mapValue={"map_0_0": "val_0_0"},
+                            ),
+                            "nested_key1": Row(
+                                intValue=10,
+                                doubleValue=2.5,
+                                arrayValue=["elem_1_0", "elem_1_1"],
+                                mapValue={"map_1_0": "val_1_0", "map_1_1": "val_1_1"},
+                            ),
+                        },
+                    ),
+                    Row(
+                        primitiveValue="key_1_count_2",
+                        listOfPrimitive=["item_0", "item_1"],
+                        mapOfPrimitive={"key0": "value0", "key1": "value1"},
+                        listOfComposite=[
+                            Row(
+                                intValue=0,
+                                doubleValue=0.0,
+                                arrayValue=["elem_0_0"],
+                                mapValue={"map_0_0": "val_0_0"},
+                            ),
+                            Row(
+                                intValue=1,
+                                doubleValue=1.5,
+                                arrayValue=["elem_1_0", "elem_1_1"],
+                                mapValue={"map_1_0": "val_1_0", "map_1_1": "val_1_1"},
+                            ),
+                        ],
+                        mapOfComposite={
+                            "nested_key0": Row(
+                                intValue=0,
+                                doubleValue=0.0,
+                                arrayValue=["elem_0_0"],
+                                mapValue={"map_0_0": "val_0_0"},
+                            ),
+                            "nested_key1": Row(
+                                intValue=10,
+                                doubleValue=2.5,
+                                arrayValue=["elem_1_0", "elem_1_1"],
+                                mapValue={"map_1_0": "val_1_0", "map_1_1": "val_1_1"},
+                            ),
+                        },
+                    ),
+                ]
+            else:
+                assert batch_df.sort("primitiveValue").collect() == [
+                    Row(
+                        primitiveValue="key_0_count_5",
+                        listOfPrimitive=["item_0", "item_1", "item_2", "item_3", "item_4"],
+                        mapOfPrimitive={
+                            "key0": "value0",
+                            "key1": "value1",
+                            "key2": "value2",
+                            "key3": "value3",
+                            "key4": "value4",
+                        },
+                        listOfComposite=[
+                            Row(
+                                intValue=0,
+                                doubleValue=0.0,
+                                arrayValue=["elem_0_0"],
+                                mapValue={"map_0_0": "val_0_0"},
+                            ),
+                            Row(
+                                intValue=1,
+                                doubleValue=1.5,
+                                arrayValue=["elem_1_0", "elem_1_1"],
+                                mapValue={"map_1_0": "val_1_0", "map_1_1": "val_1_1"},
+                            ),
+                            Row(
+                                intValue=2,
+                                doubleValue=3.0,
+                                arrayValue=["elem_2_0", "elem_2_1", "elem_2_2"],
+                                mapValue={
+                                    "map_2_0": "val_2_0",
+                                    "map_2_1": "val_2_1",
+                                    "map_2_2": "val_2_2",
+                                },
+                            ),
+                            Row(
+                                intValue=3,
+                                doubleValue=4.5,
+                                arrayValue=["elem_3_0", "elem_3_1", "elem_3_2", "elem_3_3"],
+                                mapValue={
+                                    "map_3_0": "val_3_0",
+                                    "map_3_1": "val_3_1",
+                                    "map_3_2": "val_3_2",
+                                    "map_3_3": "val_3_3",
+                                },
+                            ),
+                            Row(
+                                intValue=4,
+                                doubleValue=6.0,
+                                arrayValue=[
+                                    "elem_4_0",
+                                    "elem_4_1",
+                                    "elem_4_2",
+                                    "elem_4_3",
+                                    "elem_4_4",
+                                ],
+                                mapValue={
+                                    "map_4_0": "val_4_0",
+                                    "map_4_1": "val_4_1",
+                                    "map_4_2": "val_4_2",
+                                    "map_4_3": "val_4_3",
+                                    "map_4_4": "val_4_4",
+                                },
+                            ),
+                        ],
+                        mapOfComposite={
+                            "nested_key0": Row(
+                                intValue=0,
+                                doubleValue=0.0,
+                                arrayValue=["elem_0_0"],
+                                mapValue={"map_0_0": "val_0_0"},
+                            ),
+                            "nested_key1": Row(
+                                intValue=10,
+                                doubleValue=2.5,
+                                arrayValue=["elem_1_0", "elem_1_1"],
+                                mapValue={"map_1_0": "val_1_0", "map_1_1": "val_1_1"},
+                            ),
+                            "nested_key2": Row(
+                                intValue=20,
+                                doubleValue=5.0,
+                                arrayValue=["elem_2_0", "elem_2_1", "elem_2_2"],
+                                mapValue={
+                                    "map_2_0": "val_2_0",
+                                    "map_2_1": "val_2_1",
+                                    "map_2_2": "val_2_2",
+                                },
+                            ),
+                            "nested_key3": Row(
+                                intValue=30,
+                                doubleValue=7.5,
+                                arrayValue=["elem_3_0", "elem_3_1", "elem_3_2", "elem_3_3"],
+                                mapValue={
+                                    "map_3_0": "val_3_0",
+                                    "map_3_1": "val_3_1",
+                                    "map_3_2": "val_3_2",
+                                    "map_3_3": "val_3_3",
+                                },
+                            ),
+                            "nested_key4": Row(
+                                intValue=40,
+                                doubleValue=10.0,
+                                arrayValue=[
+                                    "elem_4_0",
+                                    "elem_4_1",
+                                    "elem_4_2",
+                                    "elem_4_3",
+                                    "elem_4_4",
+                                ],
+                                mapValue={
+                                    "map_4_0": "val_4_0",
+                                    "map_4_1": "val_4_1",
+                                    "map_4_2": "val_4_2",
+                                    "map_4_3": "val_4_3",
+                                    "map_4_4": "val_4_4",
+                                },
+                            ),
+                        },
+                    ),
+                    Row(
+                        primitiveValue="key_1_count_4",
+                        listOfPrimitive=["item_0", "item_1", "item_2", "item_3"],
+                        mapOfPrimitive={
+                            "key0": "value0",
+                            "key1": "value1",
+                            "key2": "value2",
+                            "key3": "value3",
+                        },
+                        listOfComposite=[
+                            Row(
+                                intValue=0,
+                                doubleValue=0.0,
+                                arrayValue=["elem_0_0"],
+                                mapValue={"map_0_0": "val_0_0"},
+                            ),
+                            Row(
+                                intValue=1,
+                                doubleValue=1.5,
+                                arrayValue=["elem_1_0", "elem_1_1"],
+                                mapValue={"map_1_0": "val_1_0", "map_1_1": "val_1_1"},
+                            ),
+                            Row(
+                                intValue=2,
+                                doubleValue=3.0,
+                                arrayValue=["elem_2_0", "elem_2_1", "elem_2_2"],
+                                mapValue={
+                                    "map_2_0": "val_2_0",
+                                    "map_2_1": "val_2_1",
+                                    "map_2_2": "val_2_2",
+                                },
+                            ),
+                            Row(
+                                intValue=3,
+                                doubleValue=4.5,
+                                arrayValue=["elem_3_0", "elem_3_1", "elem_3_2", "elem_3_3"],
+                                mapValue={
+                                    "map_3_0": "val_3_0",
+                                    "map_3_1": "val_3_1",
+                                    "map_3_2": "val_3_2",
+                                    "map_3_3": "val_3_3",
+                                },
+                            ),
+                        ],
+                        mapOfComposite={
+                            "nested_key0": Row(
+                                intValue=0,
+                                doubleValue=0.0,
+                                arrayValue=["elem_0_0"],
+                                mapValue={"map_0_0": "val_0_0"},
+                            ),
+                            "nested_key1": Row(
+                                intValue=10,
+                                doubleValue=2.5,
+                                arrayValue=["elem_1_0", "elem_1_1"],
+                                mapValue={"map_1_0": "val_1_0", "map_1_1": "val_1_1"},
+                            ),
+                            "nested_key2": Row(
+                                intValue=20,
+                                doubleValue=5.0,
+                                arrayValue=["elem_2_0", "elem_2_1", "elem_2_2"],
+                                mapValue={
+                                    "map_2_0": "val_2_0",
+                                    "map_2_1": "val_2_1",
+                                    "map_2_2": "val_2_2",
+                                },
+                            ),
+                            "nested_key3": Row(
+                                intValue=30,
+                                doubleValue=7.5,
+                                arrayValue=["elem_3_0", "elem_3_1", "elem_3_2", "elem_3_3"],
+                                mapValue={
+                                    "map_3_0": "val_3_0",
+                                    "map_3_1": "val_3_1",
+                                    "map_3_2": "val_3_2",
+                                    "map_3_3": "val_3_3",
+                                },
+                            ),
+                        },
+                    ),
+                ]
+
+        # Define the output schema with inner nested class schema
+        inner_nested_class_schema = StructType(
+            [
+                StructField("intValue", IntegerType(), True),
+                StructField("doubleValue", DoubleType(), True),
+                StructField("arrayValue", ArrayType(StringType()), True),
+                StructField("mapValue", MapType(StringType(), StringType()), True),
+            ]
+        )
+
+        output_schema = StructType(
+            [
+                StructField("primitiveValue", StringType(), True),
+                StructField("listOfPrimitive", ArrayType(StringType()), True),
+                StructField("mapOfPrimitive", MapType(StringType(), StringType()), True),
+                StructField("listOfComposite", ArrayType(inner_nested_class_schema), True),
+                StructField(
+                    "mapOfComposite", MapType(StringType(), inner_nested_class_schema), True
+                ),
+            ]
+        )
+
+        self._test_transform_with_state_basic(
+            CompositeOutputProcessorFactory(), check_results, output_schema=output_schema
         )
 
     # run the same test suites again but with single shuffle partition
@@ -1713,6 +2103,211 @@ class TransformWithStateTestsMixin:
                         "[TRANSFORM_WITH_STATE_SCHEMA_MUST_BE_NULLABLE]" in error_msg
                         and "column family state must be nullable" in error_msg
                     )
+
+    def test_transform_with_state_int_to_decimal_coercion(self):
+        if not self.use_pandas():
+            return
+
+        class IntToDecimalProcessor(StatefulProcessor):
+            def init(self, handle):
+                count_schema = StructType([StructField("value", IntegerType(), True)])
+                self.count_state = handle.getValueState("count", count_schema)
+
+            def handleInputRows(self, key, rows, timerValues):
+                if self.count_state.exists():
+                    count = self.count_state.get()[0]
+                else:
+                    count = 0
+                count += len(list(rows))
+                self.count_state.update((count,))
+
+                import pandas as pd
+
+                yield pd.DataFrame(
+                    {"id": [key[0]], "decimal_result": [12345]}  # Integer to be coerced to decimal
+                )
+
+            def close(self):
+                pass
+
+        data = [("1", "a"), ("1", "b"), ("2", "c")]
+        df = self.spark.createDataFrame(data, ["id", "value"])
+
+        output_schema = StructType(
+            [
+                StructField("id", StringType(), True),
+                StructField("decimal_result", DecimalType(10, 2), True),
+            ]
+        )
+
+        with self.sql_conf(
+            {"spark.sql.execution.pythonUDF.pandas.intToDecimalCoercionEnabled": True}
+        ):
+            result = (
+                df.groupBy("id")
+                .transformWithStateInPandas(
+                    statefulProcessor=IntToDecimalProcessor(),
+                    outputStructType=output_schema,
+                    outputMode="Update",
+                    timeMode="None",
+                )
+                .collect()
+            )
+            self.assertTrue(len(result) > 0)
+
+        with self.sql_conf(
+            {"spark.sql.execution.pythonUDF.pandas.intToDecimalCoercionEnabled": False}
+        ):
+            with self.assertRaisesRegex(
+                Exception, "Exception thrown when converting pandas.Series"
+            ):
+                (
+                    df.groupBy("id")
+                    .transformWithStateInPandas(
+                        statefulProcessor=IntToDecimalProcessor(),
+                        outputStructType=output_schema,
+                        outputMode="Update",
+                        timeMode="None",
+                    )
+                    .collect()
+                )
+
+    def test_transform_with_state_with_bytes_limit(self):
+        if not self.use_pandas():
+            return
+
+        def make_check_results(expected_per_batch):
+            def check_results(batch_df, batch_id):
+                batch_df.collect()
+                if batch_id == 0:
+                    assert set(batch_df.sort("id").collect()) == expected_per_batch[0]
+                else:
+                    assert set(batch_df.sort("id").collect()) == expected_per_batch[1]
+
+            return check_results
+
+        result_with_small_limit = [
+            {
+                Row(id="0", chunkCount=2),
+                Row(id="1", chunkCount=2),
+            },
+            {
+                Row(id="0", chunkCount=3),
+                Row(id="1", chunkCount=2),
+            },
+        ]
+
+        result_with_large_limit = [
+            {
+                Row(id="0", chunkCount=1),
+                Row(id="1", chunkCount=1),
+            },
+            {
+                Row(id="0", chunkCount=1),
+                Row(id="1", chunkCount=1),
+            },
+        ]
+
+        data = [("0", 789), ("3", 987)]
+        initial_state = self.spark.createDataFrame(data, "id string, initVal int").groupBy("id")
+
+        with self.sql_conf(
+            # Set it to a very small number so that every row would be a separate pandas df
+            {"spark.sql.execution.arrow.maxBytesPerBatch": "2"}
+        ):
+            self._test_transform_with_state_basic(
+                ChunkCountProcessorFactory(),
+                make_check_results(result_with_small_limit),
+                output_schema=StructType(
+                    [
+                        StructField("id", StringType(), True),
+                        StructField("chunkCount", IntegerType(), True),
+                    ]
+                ),
+            )
+
+            self._test_transform_with_state_basic(
+                ChunkCountProcessorWithInitialStateFactory(),
+                make_check_results(result_with_small_limit),
+                initial_state=initial_state,
+                output_schema=StructType(
+                    [
+                        StructField("id", StringType(), True),
+                        StructField("chunkCount", IntegerType(), True),
+                    ]
+                ),
+            )
+
+        with self.sql_conf(
+            # Set it to a very large number so that every row would be in the same pandas df
+            {"spark.sql.execution.arrow.maxBytesPerBatch": "100000"}
+        ):
+            self._test_transform_with_state_basic(
+                ChunkCountProcessorFactory(),
+                make_check_results(result_with_large_limit),
+                output_schema=StructType(
+                    [
+                        StructField("id", StringType(), True),
+                        StructField("chunkCount", IntegerType(), True),
+                    ]
+                ),
+            )
+
+            self._test_transform_with_state_basic(
+                ChunkCountProcessorWithInitialStateFactory(),
+                make_check_results(result_with_large_limit),
+                initial_state=initial_state,
+                output_schema=StructType(
+                    [
+                        StructField("id", StringType(), True),
+                        StructField("chunkCount", IntegerType(), True),
+                    ]
+                ),
+            )
+
+    # test all state types (value, list, map) with large values (512 KB)
+    def test_transform_with_state_large_values(self):
+        def check_results(batch_df, batch_id):
+            batch_df.collect()
+            # Create expected large string (512 KB)
+            target_size_bytes = 512 * 1024
+            large_string = "a" * target_size_bytes
+            expected_list_elements = ",".join(
+                [large_string, large_string + "b", large_string + "c"]
+            )
+            expected_map_result = f"large_string_key:{large_string}"
+
+            assert set(batch_df.sort("id").collect()) == {
+                Row(
+                    id="0",
+                    valueStateResult=large_string,
+                    listStateResult=expected_list_elements,
+                    mapStateResult=expected_map_result,
+                ),
+                Row(
+                    id="1",
+                    valueStateResult=large_string,
+                    listStateResult=expected_list_elements,
+                    mapStateResult=expected_map_result,
+                ),
+            }
+
+        output_schema = StructType(
+            [
+                StructField("id", StringType(), True),
+                StructField("valueStateResult", StringType(), True),
+                StructField("listStateResult", StringType(), True),
+                StructField("mapStateResult", StringType(), True),
+            ]
+        )
+
+        self._test_transform_with_state_basic(
+            LargeValueStatefulProcessorFactory(),
+            check_results,
+            True,
+            "None",
+            output_schema=output_schema,
+        )
 
 
 @unittest.skipIf(

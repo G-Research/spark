@@ -206,6 +206,7 @@ DECLARE: 'DECLARE';
 DEFAULT: 'DEFAULT';
 DEFINED: 'DEFINED';
 DEFINER: 'DEFINER';
+DELAY: 'DELAY';
 DELETE: 'DELETE';
 DELIMITED: 'DELIMITED';
 DESC: 'DESC';
@@ -257,6 +258,8 @@ FULL: 'FULL';
 FUNCTION: 'FUNCTION';
 FUNCTIONS: 'FUNCTIONS';
 GENERATED: 'GENERATED';
+GEOGRAPHY: 'GEOGRAPHY';
+GEOMETRY: 'GEOMETRY';
 GLOBAL: 'GLOBAL';
 GRANT: 'GRANT';
 GROUP: 'GROUP';
@@ -499,6 +502,7 @@ VERSION: 'VERSION';
 VIEW: 'VIEW';
 VIEWS: 'VIEWS';
 VOID: 'VOID';
+WATERMARK: 'WATERMARK';
 WEEK: 'WEEK';
 WEEKS: 'WEEKS';
 WHEN: 'WHEN';
@@ -507,6 +511,7 @@ WHILE: 'WHILE';
 WINDOW: 'WINDOW';
 WITH: 'WITH';
 WITHIN: 'WITHIN';
+WITHOUT: 'WITHOUT';
 YEAR: 'YEAR';
 YEARS: 'YEARS';
 ZONE: 'ZONE';
@@ -547,13 +552,13 @@ HENT_END: '*/';
 QUESTION: '?';
 
 STRING_LITERAL
-    : '\'' ( ~('\''|'\\') | ('\\' .) )* '\''
+    : '\'' ( ~('\''|'\\') | ('\\' .) | ('\'' '\'') )* '\''
     | 'R\'' (~'\'')* '\''
     | 'R"'(~'"')* '"'
     ;
 
 DOUBLEQUOTED_STRING
-    :'"' ( ~('"'|'\\') | ('\\' .) )* '"'
+    :'"' ( ~('"'|'\\') | '""' | ('\\' .) )* '"'
     ;
 
 // NOTE: If you move a numeric literal, you should modify `ParserUtils.toExprAlias()`

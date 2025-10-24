@@ -30,7 +30,7 @@ import org.apache.spark.sql.catalyst.util.SparkParserUtils.{string, withOrigin}
 import org.apache.spark.sql.connector.catalog.IdentityColumnSpec
 import org.apache.spark.sql.errors.QueryParsingErrors
 import org.apache.spark.sql.internal.SqlApiConf
-import org.apache.spark.sql.types.{ArrayType, BinaryType, BooleanType, ByteType, CalendarIntervalType, CharType, DataType, DateType, DayTimeIntervalType, DecimalType, DoubleType, FloatType, IntegerType, LongType, MapType, MetadataBuilder, NullType, ShortType, StringType, StructField, StructType, TimestampNTZType, TimestampType, TimeType, VarcharType, VariantType, YearMonthIntervalType}
+import org.apache.spark.sql.types.{ArrayType, BinaryType, BooleanType, ByteType, CalendarIntervalType, CharType, DataType, DateType, DayTimeIntervalType, DecimalType, DoubleType, FloatType, GeographyType, GeometryType, IntegerType, LongType, MapType, MetadataBuilder, NullType, ShortType, StringType, StructField, StructType, TimestampNTZType, TimestampType, TimeType, VarcharType, VariantType, YearMonthIntervalType}
 
 class DataTypeAstBuilder extends SqlBaseParserBaseVisitor[AnyRef] {
   protected def typedVisit[T](ctx: ParseTree): T = {
@@ -45,17 +45,65 @@ class DataTypeAstBuilder extends SqlBaseParserBaseVisitor[AnyRef] {
     withOrigin(ctx)(StructType(visitColTypeList(ctx.colTypeList)))
   }
 
-  override def visitStringLit(ctx: StringLitContext): Token = {
-    if (ctx != null) {
-      if (ctx.STRING_LITERAL != null) {
-        ctx.STRING_LITERAL.getSymbol
-      } else {
-        ctx.DOUBLEQUOTED_STRING.getSymbol
-      }
-    } else {
-      null
-    }
+  override def visitStringLiteralValue(ctx: StringLiteralValueContext): Token =
+    Option(ctx).map(_.STRING_LITERAL.getSymbol).orNull
+
+  override def visitDoubleQuotedStringLiteralValue(
+      ctx: DoubleQuotedStringLiteralValueContext): Token =
+    Option(ctx).map(_.DOUBLEQUOTED_STRING.getSymbol).orNull
+
+  override def visitIntegerVal(ctx: IntegerValContext): Token =
+    Option(ctx).map(_.INTEGER_VALUE.getSymbol).orNull
+
+  override def visitStringLiteralInContext(ctx: StringLiteralInContextContext): Token = {
+    visit(ctx.stringLitWithoutMarker).asInstanceOf[Token]
   }
+
+  override def visitNamedParameterMarkerRule(ctx: NamedParameterMarkerRuleContext): Token = {
+    // This should be unreachable due to grammar-level blocking of parameter markers
+    // when legacy parameter substitution is enabled
+    QueryParsingErrors.unexpectedUseOfParameterMarker(ctx)
+  }
+
+  override def visitPositionalParameterMarkerRule(
+      ctx: PositionalParameterMarkerRuleContext): Token = {
+    // This should be unreachable due to grammar-level blocking of parameter markers
+    // when legacy parameter substitution is enabled
+    QueryParsingErrors.unexpectedUseOfParameterMarker(ctx)
+  }
+
+  override def visitNamedParameterLiteral(ctx: NamedParameterLiteralContext): AnyRef = {
+    // Parameter markers are not allowed in data type definitions
+    QueryParsingErrors.unexpectedUseOfParameterMarker(ctx)
+  }
+
+  override def visitPosParameterLiteral(ctx: PosParameterLiteralContext): AnyRef = {
+    // Parameter markers are not allowed in data type definitions
+    QueryParsingErrors.unexpectedUseOfParameterMarker(ctx)
+  }
+
+  /**
+   * Gets the integer value from an IntegerValueContext after parameter replacement. Asserts that
+   * parameter markers have been substituted before reaching DataTypeAstBuilder.
+   *
+   * @param ctx
+   *   The IntegerValueContext to extract the integer from
+   * @return
+   *   The integer value
+   */
+  protected def getIntegerValue(ctx: IntegerValueContext): Int = {
+    assert(
+      !ctx.isInstanceOf[ParameterIntegerValueContext],
+      "Parameter markers should be substituted before DataTypeAstBuilder processes the " +
+        s"parse tree. Found unsubstituted parameter: ${ctx.getText}")
+    ctx.getText.toInt
+  }
+
+  /**
+   * Visit a stringLit context by delegating to the appropriate labeled visitor.
+   */
+  def visitStringLit(ctx: StringLitContext): Token =
+    Option(ctx).map(visit(_).asInstanceOf[Token]).orNull
 
   /**
    * Create a multi-part identifier.
@@ -69,54 +117,113 @@ class DataTypeAstBuilder extends SqlBaseParserBaseVisitor[AnyRef] {
    * Resolve/create a primitive type.
    */
   override def visitPrimitiveDataType(ctx: PrimitiveDataTypeContext): DataType = withOrigin(ctx) {
-    val typeCtx = ctx.`type`
-    (typeCtx.start.getType, ctx.INTEGER_VALUE().asScala.toList) match {
-      case (BOOLEAN, Nil) => BooleanType
-      case (TINYINT | BYTE, Nil) => ByteType
-      case (SMALLINT | SHORT, Nil) => ShortType
-      case (INT | INTEGER, Nil) => IntegerType
-      case (BIGINT | LONG, Nil) => LongType
-      case (FLOAT | REAL, Nil) => FloatType
-      case (DOUBLE, Nil) => DoubleType
-      case (DATE, Nil) => DateType
-      case (TIME, Nil) => TimeType(TimeType.MICROS_PRECISION)
-      case (TIME, precision :: Nil) => TimeType(precision.getText.toInt)
-      case (TIMESTAMP, Nil) => SqlApiConf.get.timestampType
-      case (TIMESTAMP_NTZ, Nil) => TimestampNTZType
-      case (TIMESTAMP_LTZ, Nil) => TimestampType
-      case (STRING, Nil) =>
-        typeCtx.children.asScala.toSeq match {
-          case Seq(_) => StringType
-          case Seq(_, ctx: CollateClauseContext) =>
-            val collationNameParts = visitCollateClause(ctx).toArray
-            val collationId = CollationFactory.collationNameToId(
-              CollationFactory.resolveFullyQualifiedName(collationNameParts))
-            StringType(collationId)
-        }
-      case (CHARACTER | CHAR, length :: Nil) => CharType(length.getText.toInt)
-      case (VARCHAR, length :: Nil) => VarcharType(length.getText.toInt)
-      case (BINARY, Nil) => BinaryType
-      case (DECIMAL | DEC | NUMERIC, Nil) => DecimalType.USER_DEFAULT
-      case (DECIMAL | DEC | NUMERIC, precision :: Nil) =>
-        DecimalType(precision.getText.toInt, 0)
-      case (DECIMAL | DEC | NUMERIC, precision :: scale :: Nil) =>
-        DecimalType(precision.getText.toInt, scale.getText.toInt)
-      case (VOID, Nil) => NullType
-      case (INTERVAL, Nil) => CalendarIntervalType
-      case (VARIANT, Nil) => VariantType
-      case (CHARACTER | CHAR | VARCHAR, Nil) =>
-        throw QueryParsingErrors.charTypeMissingLengthError(ctx.`type`.getText, ctx)
-      case (ARRAY | STRUCT | MAP, Nil) =>
-        throw QueryParsingErrors.nestedTypeMissingElementTypeError(ctx.`type`.getText, ctx)
-      case (_, params) =>
-        val badType = ctx.`type`.getText
-        val dtStr = if (params.nonEmpty) s"$badType(${params.mkString(",")})" else badType
-        throw QueryParsingErrors.dataTypeUnsupportedError(dtStr, ctx)
+    val typeCtx = ctx.primitiveType
+    if (typeCtx.nonTrivialPrimitiveType != null) {
+      // This is a primitive type with parameters, e.g. VARCHAR(10), DECIMAL(10, 2), etc.
+      val currentCtx = typeCtx.nonTrivialPrimitiveType
+      currentCtx.start.getType match {
+        case STRING =>
+          currentCtx.children.asScala.toSeq match {
+            case Seq(_) => StringType
+            case Seq(_, ctx: CollateClauseContext) =>
+              val collationNameParts = visitCollateClause(ctx).toArray
+              val collationId = CollationFactory.collationNameToId(
+                CollationFactory.resolveFullyQualifiedName(collationNameParts))
+              StringType(collationId)
+          }
+        case CHARACTER | CHAR =>
+          if (currentCtx.length == null) {
+            throw QueryParsingErrors.charVarcharTypeMissingLengthError(typeCtx.getText, ctx)
+          } else CharType(currentCtx.length.getText.toInt)
+        case VARCHAR =>
+          if (currentCtx.length == null) {
+            throw QueryParsingErrors.charVarcharTypeMissingLengthError(typeCtx.getText, ctx)
+          } else VarcharType(currentCtx.length.getText.toInt)
+        case DECIMAL | DEC | NUMERIC =>
+          if (currentCtx.precision == null) {
+            DecimalType.USER_DEFAULT
+          } else if (currentCtx.scale == null) {
+            DecimalType(currentCtx.precision.getText.toInt, 0)
+          } else {
+            DecimalType(currentCtx.precision.getText.toInt, currentCtx.scale.getText.toInt)
+          }
+        case INTERVAL =>
+          if (currentCtx.fromDayTime != null) {
+            visitDayTimeIntervalDataType(currentCtx)
+          } else if (currentCtx.fromYearMonth != null) {
+            visitYearMonthIntervalDataType(currentCtx)
+          } else {
+            CalendarIntervalType
+          }
+        case TIMESTAMP =>
+          if (currentCtx.WITHOUT() == null) {
+            SqlApiConf.get.timestampType
+          } else TimestampNTZType
+        case TIME =>
+          val precision = if (currentCtx.precision == null) {
+            TimeType.DEFAULT_PRECISION
+          } else {
+            currentCtx.precision.getText.toInt
+          }
+          TimeType(precision)
+        case GEOGRAPHY =>
+          // Unparameterized geometry type isn't supported and will be caught by the default branch.
+          // Here, we only handle the parameterized GEOGRAPHY type syntax, which comes in two forms:
+          if (currentCtx.any != null) {
+            // The special parameterized GEOGRAPHY type syntax uses a single "ANY" string value.
+            // This implies a mixed GEOGRAPHY type, with potentially different SRIDs across rows.
+            GeographyType("ANY")
+          } else {
+            // The explicitly parameterzied GEOGRAPHY syntax uses a specified integer SRID value.
+            // This implies a fixed GEOGRAPHY type, with a single fixed SRID value across all rows.
+            GeographyType(currentCtx.srid.getText.toInt)
+          }
+        case GEOMETRY =>
+          // Unparameterized geometry type isn't supported and will be caught by the default branch.
+          // Here, we only handle the parameterized GEOMETRY type syntax, which comes in two forms:
+          if (currentCtx.any != null) {
+            // The special parameterized GEOMETRY type syntax uses a single "ANY" string value.
+            // This implies a mixed GEOMETRY type, with potentially different SRIDs across rows.
+            GeometryType("ANY")
+          } else {
+            // The explicitly parameterzied GEOMETRY type syntax has a single integer SRID value.
+            // This implies a fixed GEOMETRY type, with a single fixed SRID value across all rows.
+            GeometryType(currentCtx.srid.getText.toInt)
+          }
+      }
+    } else if (typeCtx.trivialPrimitiveType != null) {
+      // This is a primitive type without parameters, e.g. BOOLEAN, TINYINT, etc.
+      typeCtx.trivialPrimitiveType.start.getType match {
+        case BOOLEAN => BooleanType
+        case TINYINT | BYTE => ByteType
+        case SMALLINT | SHORT => ShortType
+        case INT | INTEGER => IntegerType
+        case BIGINT | LONG => LongType
+        case FLOAT | REAL => FloatType
+        case DOUBLE => DoubleType
+        case DATE => DateType
+        case TIMESTAMP_LTZ => TimestampType
+        case TIMESTAMP_NTZ => TimestampNTZType
+        case BINARY => BinaryType
+        case VOID => NullType
+        case VARIANT => VariantType
+      }
+    } else {
+      val badType = typeCtx.unsupportedType.getText
+      val params = typeCtx
+        .integerValue()
+        .asScala
+        .map(getIntegerValue(_).toString)
+        .toList
+      val dtStr =
+        if (params.nonEmpty) s"$badType(${params.mkString(",")})"
+        else badType
+      throw QueryParsingErrors.dataTypeUnsupportedError(dtStr, ctx)
     }
   }
 
-  override def visitYearMonthIntervalDataType(ctx: YearMonthIntervalDataTypeContext): DataType = {
-    val startStr = ctx.from.getText.toLowerCase(Locale.ROOT)
+  private def visitYearMonthIntervalDataType(ctx: NonTrivialPrimitiveTypeContext): DataType = {
+    val startStr = ctx.fromYearMonth.getText.toLowerCase(Locale.ROOT)
     val start = YearMonthIntervalType.stringToField(startStr)
     if (ctx.to != null) {
       val endStr = ctx.to.getText.toLowerCase(Locale.ROOT)
@@ -130,8 +237,8 @@ class DataTypeAstBuilder extends SqlBaseParserBaseVisitor[AnyRef] {
     }
   }
 
-  override def visitDayTimeIntervalDataType(ctx: DayTimeIntervalDataTypeContext): DataType = {
-    val startStr = ctx.from.getText.toLowerCase(Locale.ROOT)
+  private def visitDayTimeIntervalDataType(ctx: NonTrivialPrimitiveTypeContext): DataType = {
+    val startStr = ctx.fromDayTime.getText.toLowerCase(Locale.ROOT)
     val start = DayTimeIntervalType.stringToField(startStr)
     if (ctx.to != null) {
       val endStr = ctx.to.getText.toLowerCase(Locale.ROOT)
@@ -149,6 +256,9 @@ class DataTypeAstBuilder extends SqlBaseParserBaseVisitor[AnyRef] {
    * Create a complex DataType. Arrays, Maps and Structures are supported.
    */
   override def visitComplexDataType(ctx: ComplexDataTypeContext): DataType = withOrigin(ctx) {
+    if (ctx.LT() == null && ctx.NEQ() == null) {
+      throw QueryParsingErrors.nestedTypeMissingElementTypeError(ctx.getText, ctx)
+    }
     ctx.complex.getType match {
       case SqlBaseParser.ARRAY =>
         ArrayType(typedVisit(ctx.dataType(0)))
