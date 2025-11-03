@@ -20,7 +20,9 @@ package org.apache.spark.shuffle
 import org.apache.spark.{ShuffleDependency, SparkEnv, TaskContext}
 import org.apache.spark.internal.Logging
 import org.apache.spark.internal.LogKeys.{NUM_MERGER_LOCATIONS, SHUFFLE_ID, STAGE_ID}
+import org.apache.spark.internal.config.STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE
 import org.apache.spark.scheduler.MapStatus
+import org.apache.spark.storage.FallbackStorage
 
 /**
  * The interface for customizing shuffle write process. The driver create a ShuffleWriteProcessor
@@ -83,6 +85,11 @@ private[spark] class ShuffleWriteProcessor extends Serializable with Logging {
                 .initiateBlockPush(dataFile, writer.getPartitionLengths(), dep, mapIndex)
             case _ =>
           }
+        }
+        // copy block to fallback storage if pro-active replication to fallback storage is enabled
+        if (SparkEnv.get.conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE)) {
+          FallbackStorage.getFallbackStorage(SparkEnv.get.conf)
+            .foreach(_.copyAsync(ShuffleBlockInfo(dep.shuffleId, mapId), SparkEnv.get.blockManager))
         }
       }
       mapStatus.get
