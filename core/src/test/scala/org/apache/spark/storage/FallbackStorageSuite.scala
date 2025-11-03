@@ -20,6 +20,7 @@ import java.io.{DataOutputStream, File, FileOutputStream, InputStream, IOExcepti
 import java.nio.file.Files
 import java.util.concurrent.ConcurrentHashMap
 
+import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.util.Random
 
@@ -41,6 +42,7 @@ import org.apache.spark.scheduler.ExecutorDecommissionInfo
 import org.apache.spark.scheduler.cluster.StandaloneSchedulerBackend
 import org.apache.spark.shuffle.{IndexShuffleBlockResolver, ShuffleBlockInfo}
 import org.apache.spark.shuffle.IndexShuffleBlockResolver.NOOP_REDUCE_ID
+import org.apache.spark.util.ThreadUtils
 import org.apache.spark.util.Utils.tryWithResource
 
 class FallbackStorageSuite extends SparkFunSuite with LocalSparkContext {
@@ -123,8 +125,8 @@ class FallbackStorageSuite extends SparkFunSuite with LocalSparkContext {
         Files.createTempDirectory("tmp").toFile.getAbsolutePath + "/")
     val hadoopConf = SparkHadoopUtil.get.newConfiguration(conf)
     val rpcEndpointRef = new FallbackStorageRpcEndpointRef(conf, hadoopConf)
-    val threads = new ConcurrentHashMap[ShuffleBlockInfo, Thread]()
-    val fallbackStorage = new FallbackStorage(conf, threads)
+    val asyncCopies = new ConcurrentHashMap[ShuffleBlockInfo, Future[Unit]]()
+    val fallbackStorage = new FallbackStorage(conf, asyncCopies)
     val bmm = new BlockManagerMaster(rpcEndpointRef, null, conf, false)
 
     val bm = mock(classOf[BlockManager])
@@ -152,15 +154,14 @@ class FallbackStorageSuite extends SparkFunSuite with LocalSparkContext {
       }
     }
 
-    assert(threads.size() === 0)
+    assert(asyncCopies.size() === 0)
     fallbackStorage.copyAsync(ShuffleBlockInfo(1, 1L), bm)
-    assert(threads.size() === 1)
     fallbackStorage.copyAsync(ShuffleBlockInfo(1, 2L), bm)
-    assert(threads.size() === 2)
+    assert(asyncCopies.size() <= 2)
 
-    // wait for threads to complete
-    threads.forEachValue(2, _.join(1000L))
-    assert(threads.values().removeIf(_.isAlive) === false)
+    // wait for async copies to complete
+    asyncCopies.forEachValue(2, ThreadUtils.awaitResult(_, Duration(1, SECONDS)))
+    assert(asyncCopies.size() === 0)
 
     assert(fallbackStorage.exists(1, ShuffleIndexBlockId(1, 1L, NOOP_REDUCE_ID).name))
     assert(fallbackStorage.exists(1, ShuffleDataBlockId(1, 1L, NOOP_REDUCE_ID).name))

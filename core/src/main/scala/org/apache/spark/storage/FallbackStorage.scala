@@ -21,8 +21,10 @@ import java.io.DataInputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.{ConcurrentHashMap, ConcurrentMap}
 
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.duration.Duration
 import scala.reflect.ClassTag
+import scala.util.Success
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FileSystem, Path}
@@ -38,14 +40,15 @@ import org.apache.spark.rpc.{RpcAddress, RpcEndpointRef, RpcTimeout}
 import org.apache.spark.shuffle.{IndexShuffleBlockResolver, ShuffleBlockInfo}
 import org.apache.spark.shuffle.IndexShuffleBlockResolver.NOOP_REDUCE_ID
 import org.apache.spark.storage.BlockManagerMessages.RemoveShuffle
-import org.apache.spark.util.Utils
+import org.apache.spark.storage.FallbackStorage.asyncCopyExecutionContext
+import org.apache.spark.util.{ThreadUtils, Utils}
 
 /**
  * A fallback storage used by storage decommissioners.
  */
 private[storage] class FallbackStorage(
     conf: SparkConf,
-    copyThreads: ConcurrentMap[ShuffleBlockInfo, Thread]) extends Logging {
+    asyncCopies: ConcurrentMap[ShuffleBlockInfo, Future[Unit]]) extends Logging {
   require(conf.contains("spark.app.id"))
   require(conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH).isDefined)
 
@@ -57,16 +60,17 @@ private[storage] class FallbackStorage(
   // Visible for testing
   def copy(
       shuffleBlockInfo: ShuffleBlockInfo,
-      bm: BlockManager): Unit = {
+      bm: BlockManager,
+      waitForAsyncCopy: Boolean = true): Unit = {
     val shuffleId = shuffleBlockInfo.shuffleId
     val mapId = shuffleBlockInfo.mapId
 
-    // wait for the ongoing copy thread to finish
-    Option(copyThreads.get(shuffleBlockInfo)).foreach { thread =>
-      if (!thread.equals(Thread.currentThread())) {
-        logInfo("Waiting for the ongoing copy thread to finish: " +
+    // wait for the ongoing async copy to finish
+    if (waitForAsyncCopy) {
+      Option(asyncCopies.get(shuffleBlockInfo)).foreach { asyncCopy =>
+        logInfo("Waiting for the ongoing async copy to finish: " +
           log"${MDC(SHUFFLE_BLOCK_INFO, shuffleBlockInfo)}")
-        thread.join()
+        ThreadUtils.awaitResult(asyncCopy, Duration.Inf)
       }
     }
 
@@ -110,13 +114,12 @@ private[storage] class FallbackStorage(
   def copyAsync(
       shuffleBlockInfo: ShuffleBlockInfo,
       bm: BlockManager): Unit = {
-    copyThreads.computeIfAbsent(shuffleBlockInfo, _ => {
-      val thread = new Thread() {
-        override def run(): Unit = copy(shuffleBlockInfo, bm)
-      }
-      thread.start()
-      thread
-    })
+    asyncCopies.computeIfAbsent(shuffleBlockInfo, _ => Future {
+        copy(shuffleBlockInfo, bm, waitForAsyncCopy = false)
+      }(asyncCopyExecutionContext)
+    ).andThen {
+      case Success(_) => asyncCopies.remove(shuffleBlockInfo)
+    }(asyncCopyExecutionContext)
   }
 
   def getFallbackFilePath(shuffleId: Int, filename: String): Path =
@@ -148,13 +151,16 @@ private[storage] class FallbackStorageRpcEndpointRef(conf: SparkConf, hadoopConf
 private[spark] object FallbackStorage extends Logging {
   /** We use one block manager id as a place holder. */
   val FALLBACK_BLOCK_MANAGER_ID: BlockManagerId = BlockManagerId("fallback", "remote", 7337)
-  // TODO: use Future, don't care which thread is copying
-  val FALLBACK_COPY_THREADS: ConcurrentMap[ShuffleBlockInfo, Thread] =
-    new ConcurrentHashMap[ShuffleBlockInfo, Thread]()
+  /** Holds a future for each async copy in progress. Removed by the future on completion. */
+  val FALLBACK_ASYNC_COPIES: ConcurrentMap[ShuffleBlockInfo, Future[Unit]] =
+    new ConcurrentHashMap[ShuffleBlockInfo, Future[Unit]]()
+
+  private val asyncCopyExecutionContext = ExecutionContext.fromExecutorService(
+    ThreadUtils.newDaemonCachedThreadPool("fallback-storage-async-copy", 16))
 
   def getFallbackStorage(conf: SparkConf): Option[FallbackStorage] = {
     if (conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH).isDefined) {
-      Some(new FallbackStorage(conf, FALLBACK_COPY_THREADS))
+      Some(new FallbackStorage(conf, FALLBACK_ASYNC_COPIES))
     } else {
       None
     }
