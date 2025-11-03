@@ -218,11 +218,12 @@ private[spark] object FallbackStorage extends Logging {
     new Path(fallbackPath, s"$appId/$shuffleId/$hash/$filename")
   }
 
-  /**
-   * Read a ManagedBuffer.
-   */
-  def read(conf: SparkConf, blockId: BlockId): ManagedBuffer = {
-    logInfo(log"Read ${MDC(BLOCK_ID, blockId)}")
+  def exists(conf: SparkConf, blockId: BlockId): Boolean = {
+    val (fallbackFileSystem, indexFile, dataFile, _, _) = getShuffleFiles(conf, blockId)
+    fallbackFileSystem.exists(indexFile) && fallbackFileSystem.exists(dataFile)
+  }
+
+  def getShuffleFiles(conf: SparkConf, blockId: BlockId): (FileSystem, Path, Path, Long, Long) = {
     val fallbackPath = new Path(conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH).get)
     val hadoopConf = SparkHadoopUtil.get.newConfiguration(conf)
     val fallbackFileSystem = FileSystem.get(fallbackPath.toUri, hadoopConf)
@@ -238,18 +239,27 @@ private[spark] object FallbackStorage extends Logging {
           s"unexpected shuffle block id format: $blockId", category = "STORAGE")
     }
 
-    val name = ShuffleIndexBlockId(shuffleId, mapId, NOOP_REDUCE_ID).name
-    val indexFile = getFallbackFilePath(fallbackPath, appId, shuffleId, name)
+    val indexName = ShuffleIndexBlockId(shuffleId, mapId, NOOP_REDUCE_ID).name
+    val indexFile = getFallbackFilePath(fallbackPath, appId, shuffleId, indexName)
+    val dataName = ShuffleDataBlockId(shuffleId, mapId, NOOP_REDUCE_ID).name
+    val dataFile = getFallbackFilePath(fallbackPath, appId, shuffleId, dataName)
     val start = startReduceId * 8L
     val end = endReduceId * 8L
+    (fallbackFileSystem, indexFile, dataFile, start, end)
+  }
+
+  /**
+   * Read a ManagedBuffer.
+   */
+  def read(conf: SparkConf, blockId: BlockId): ManagedBuffer = {
+    logInfo(log"Read ${MDC(BLOCK_ID, blockId)}")
+    val (fallbackFileSystem, indexFile, dataFile, start, end) = getShuffleFiles(conf, blockId)
     Utils.tryWithResource(fallbackFileSystem.open(indexFile)) { inputStream =>
       Utils.tryWithResource(new DataInputStream(inputStream)) { index =>
         index.skip(start)
         val offset = index.readLong()
         index.skip(end - (start + 8L))
         val nextOffset = index.readLong()
-        val name = ShuffleDataBlockId(shuffleId, mapId, NOOP_REDUCE_ID).name
-        val dataFile = getFallbackFilePath(fallbackPath, appId, shuffleId, name)
         val size = nextOffset - offset
         logDebug(s"To byte array $size")
         val array = new Array[Byte](size.toInt)
