@@ -27,7 +27,7 @@ import scala.util.Random
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FSDataInputStream, LocalFileSystem, Path, PositionedReadable, Seekable}
 import org.mockito.{ArgumentMatchers => mc}
-import org.mockito.Mockito.{mock, never, verify, when}
+import org.mockito.Mockito.{mock, never, times, verify, when}
 import org.scalatest.concurrent.Eventually.{eventually, interval, timeout}
 
 import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkFunSuite, TestUtils}
@@ -42,7 +42,6 @@ import org.apache.spark.scheduler.ExecutorDecommissionInfo
 import org.apache.spark.scheduler.cluster.StandaloneSchedulerBackend
 import org.apache.spark.shuffle.{IndexShuffleBlockResolver, ShuffleBlockInfo}
 import org.apache.spark.shuffle.IndexShuffleBlockResolver.NOOP_REDUCE_ID
-import org.apache.spark.util.ThreadUtils
 import org.apache.spark.util.Utils.tryWithResource
 
 class FallbackStorageSuite extends SparkFunSuite with LocalSparkContext {
@@ -123,11 +122,9 @@ class FallbackStorageSuite extends SparkFunSuite with LocalSparkContext {
       .set(STORAGE_DECOMMISSION_SHUFFLE_BLOCKS_ENABLED, true)
       .set(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH,
         Files.createTempDirectory("tmp").toFile.getAbsolutePath + "/")
-    val hadoopConf = SparkHadoopUtil.get.newConfiguration(conf)
-    val rpcEndpointRef = new FallbackStorageRpcEndpointRef(conf, hadoopConf)
     val asyncCopies = new ConcurrentHashMap[ShuffleBlockInfo, Future[Unit]]()
     val fallbackStorage = new FallbackStorage(conf, asyncCopies)
-    val bmm = new BlockManagerMaster(rpcEndpointRef, null, conf, false)
+    val bmm = mock(classOf[BlockManagerMaster])
 
     val bm = mock(classOf[BlockManager])
     val dbm = new DiskBlockManager(conf, deleteFilesOnStop = false, isDriver = false)
@@ -154,15 +151,40 @@ class FallbackStorageSuite extends SparkFunSuite with LocalSparkContext {
       }
     }
 
+    // async copy files
     assert(asyncCopies.size() === 0)
     fallbackStorage.copyAsync(ShuffleBlockInfo(1, 1L), bm)
     fallbackStorage.copyAsync(ShuffleBlockInfo(1, 2L), bm)
     assert(asyncCopies.size() <= 2)
 
     // wait for async copies to complete
-    asyncCopies.forEachValue(2, ThreadUtils.awaitResult(_, Duration(1, SECONDS)))
-    assert(asyncCopies.size() === 0)
+    // all async copy futures should get removed after they have finished
+    eventually(timeout(1.second), interval(100.milliseconds)) {
+      assert(asyncCopies.size() === 0)
+    }
 
+    // the copied blocks should not have been reported to the master BlockManager
+    verify(bmm, never()).updateBlockInfo(mc.any(), mc.any(), mc.any(), mc.any(), mc.any())
+
+    // the copied files should exist and be readable
+    assert(fallbackStorage.exists(1, ShuffleIndexBlockId(1, 1L, NOOP_REDUCE_ID).name))
+    assert(fallbackStorage.exists(1, ShuffleDataBlockId(1, 1L, NOOP_REDUCE_ID).name))
+    assert(fallbackStorage.exists(1, ShuffleIndexBlockId(1, 2L, NOOP_REDUCE_ID).name))
+    assert(fallbackStorage.exists(1, ShuffleDataBlockId(1, 2L, NOOP_REDUCE_ID).name))
+
+    // The files for shuffle 1 and map 1 are empty intentionally.
+    intercept[java.io.EOFException] {
+      FallbackStorage.read(conf, ShuffleBlockId(1, 1L, 0))
+    }
+    FallbackStorage.read(conf, ShuffleBlockId(1, 2L, 0))
+
+    // decommissioning phase triggers copying the files again,
+    // now they get reported to the master BlockManager
+    fallbackStorage.copy(ShuffleBlockInfo(1, 1L), bm)
+    fallbackStorage.copy(ShuffleBlockInfo(1, 2L), bm)
+    verify(bmm, times(4)).updateBlockInfo(mc.any(), mc.any(), mc.any(), mc.any(), mc.any())
+
+    // still the copied files should exist and be readable
     assert(fallbackStorage.exists(1, ShuffleIndexBlockId(1, 1L, NOOP_REDUCE_ID).name))
     assert(fallbackStorage.exists(1, ShuffleDataBlockId(1, 1L, NOOP_REDUCE_ID).name))
     assert(fallbackStorage.exists(1, ShuffleIndexBlockId(1, 2L, NOOP_REDUCE_ID).name))

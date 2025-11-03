@@ -61,12 +61,12 @@ private[storage] class FallbackStorage(
   def copy(
       shuffleBlockInfo: ShuffleBlockInfo,
       bm: BlockManager,
-      waitForAsyncCopy: Boolean = true): Unit = {
+      isAsyncCopy: Boolean = false): Unit = {
     val shuffleId = shuffleBlockInfo.shuffleId
     val mapId = shuffleBlockInfo.mapId
 
     // wait for the ongoing async copy to finish
-    if (waitForAsyncCopy) {
+    if (!isAsyncCopy) {
       Option(asyncCopies.get(shuffleBlockInfo)).foreach { asyncCopy =>
         logInfo("Waiting for the ongoing async copy to finish: " +
           log"${MDC(SHUFFLE_BLOCK_INFO, shuffleBlockInfo)}")
@@ -98,12 +98,14 @@ private[storage] class FallbackStorage(
           }
 
           // Report block statuses
-          val reduceId = NOOP_REDUCE_ID
-          val indexBlockId = ShuffleIndexBlockId(shuffleId, mapId, reduceId)
-          FallbackStorage.reportBlockStatus(bm, indexBlockId, indexFile.length)
-          if (fallbackDataFileExist || dataFile.exists) {
-            val dataBlockId = ShuffleDataBlockId(shuffleId, mapId, reduceId)
-            FallbackStorage.reportBlockStatus(bm, dataBlockId, dataFile.length)
+          if (!isAsyncCopy) {
+            val reduceId = NOOP_REDUCE_ID
+            val indexBlockId = ShuffleIndexBlockId(shuffleId, mapId, reduceId)
+            FallbackStorage.reportBlockStatus(bm, indexBlockId, indexFile.length)
+            if (fallbackDataFileExist || dataFile.exists) {
+              val dataBlockId = ShuffleDataBlockId(shuffleId, mapId, reduceId)
+              FallbackStorage.reportBlockStatus(bm, dataBlockId, dataFile.length)
+            }
           }
         }
       case r =>
@@ -115,7 +117,7 @@ private[storage] class FallbackStorage(
       shuffleBlockInfo: ShuffleBlockInfo,
       bm: BlockManager): Unit = {
     asyncCopies.computeIfAbsent(shuffleBlockInfo, _ => Future {
-        copy(shuffleBlockInfo, bm, waitForAsyncCopy = false)
+        copy(shuffleBlockInfo, bm, isAsyncCopy = true)
       }(asyncCopyExecutionContext)
     ).andThen {
       case Success(_) => asyncCopies.remove(shuffleBlockInfo)
