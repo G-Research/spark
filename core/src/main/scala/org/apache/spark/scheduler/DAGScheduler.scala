@@ -19,9 +19,10 @@ package org.apache.spark.scheduler
 
 import java.io.NotSerializableException
 import java.util.Properties
-import java.util.concurrent.{ConcurrentHashMap, ExecutorService, ScheduledFuture, TimeUnit, TimeoutException}
+import java.util.concurrent.{ConcurrentHashMap, ExecutorService, ScheduledFuture, TimeoutException, TimeUnit}
 import java.util.concurrent.{Future => JFutrue}
 import java.util.concurrent.atomic.AtomicInteger
+
 import scala.annotation.tailrec
 import scala.collection.Map
 import scala.collection.mutable
@@ -29,14 +30,16 @@ import scala.collection.mutable.{HashMap, HashSet, ListBuffer}
 import scala.concurrent.Promise
 import scala.concurrent.duration._
 import scala.util.control.NonFatal
+
 import com.google.common.util.concurrent.{Futures, SettableFuture}
+
 import org.apache.spark._
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.errors.SparkCoreErrors
 import org.apache.spark.executor.{ExecutorMetrics, TaskMetrics}
-import org.apache.spark.internal.{LogKeys, Logging, config}
+import org.apache.spark.internal.{config, Logging, LogKeys}
 import org.apache.spark.internal.LogKeys._
-import org.apache.spark.internal.config.{LEGACY_ABORT_STAGE_AFTER_KILL_TASKS, RDD_CACHE_VISIBILITY_TRACKING_ENABLED, STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE}
+import org.apache.spark.internal.config.{LEGACY_ABORT_STAGE_AFTER_KILL_TASKS, RDD_CACHE_VISIBILITY_TRACKING_ENABLED}
 import org.apache.spark.internal.config.Tests.TEST_NO_STAGE_RETRY
 import org.apache.spark.network.shuffle.{BlockStoreClient, MergeFinalizerListener}
 import org.apache.spark.network.shuffle.protocol.MergeStatuses
@@ -2796,22 +2799,6 @@ private[spark] class DAGScheduler(
     val currentEpoch = maybeEpoch.getOrElse(mapOutputTracker.getEpoch)
     logDebug(s"Considering removal of executor $execId; " +
       s"fileLost: $fileLost, currentEpoch: $currentEpoch")
-    // recover shuffle data pro-actively replicated to the fallback storage
-    if (env.conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE)) {
-      FallbackStorage.getFallbackStorage(env.conf).foreach { fb =>
-        hostToUnregisterOutputs match {
-          case Some(host) =>
-            logInfo(log"Recovering shuffle files of host: ${MDC(HOST, host)} (epoch " +
-              log"${MDC(EPOCH, currentEpoch)}")
-            mapOutputTracker.recoverOutputsOnHost(host, fb.recover(env.blockManager))
-          case None =>
-            logInfo(log"Recovering shuffle files of executor: ${MDC(EXECUTOR_ID, execId)} " +
-              log"(epoch ${MDC(EPOCH, currentEpoch)})")
-            mapOutputTracker.recoverOutputsOnExecutor(execId, fb.recover(env.blockManager))
-        }
-      }
-    }
-    // move shuffle data from host/execId into live shuffle data dir on fallback storage
     // Check if the execId is a shuffle push merger. We do not remove the executor if it is,
     // and only remove the outputs on the host.
     val isShuffleMerger = execId.equals(BlockManagerId.SHUFFLE_MERGER_IDENTIFIER)

@@ -33,14 +33,13 @@ import org.apache.spark.{MapOutputTrackerMaster, SparkConf, SparkContext, SparkE
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.internal.{config, Logging}
 import org.apache.spark.internal.LogKeys._
-import org.apache.spark.internal.config.{RDD_CACHE_VISIBILITY_TRACKING_ENABLED, STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE}
+import org.apache.spark.internal.config.RDD_CACHE_VISIBILITY_TRACKING_ENABLED
 import org.apache.spark.network.shuffle.{ExternalBlockStoreClient, RemoteBlockPushResolver}
 import org.apache.spark.rpc.{IsolatedThreadSafeRpcEndpoint, RpcCallContext, RpcEndpointRef, RpcEnv}
 import org.apache.spark.scheduler._
 import org.apache.spark.scheduler.cluster.{CoarseGrainedClusterMessages, CoarseGrainedSchedulerBackend}
 import org.apache.spark.shuffle.ShuffleManager
 import org.apache.spark.storage.BlockManagerMessages._
-import org.apache.spark.storage.FallbackStorage.FALLBACK_BLOCK_MANAGER_ID
 import org.apache.spark.util.{RpcUtils, ThreadUtils, Utils}
 import org.apache.spark.util.ArrayImplicits._
 
@@ -500,13 +499,6 @@ class BlockManagerMasterEndpoint(
 
   private def removeBlockManager(blockManagerId: BlockManagerId): Unit = {
     val info = blockManagerInfo(blockManagerId)
-    logInfo(log"Removing block manager ${MDC(BLOCK_MANAGER_ID, blockManagerId)} with blocks:")
-    info.blocks.keySet.forEach { blockId =>
-      logInfo(log"${MDC(BLOCK_MANAGER_ID, blockManagerId)}: ${MDC(BLOCK_ID, blockId)}")
-      blockLocations.get(blockId).foreach { location =>
-        logInfo(log"${MDC(BLOCK_ID, blockId)}: ${MDC(LOCATION, location)}")
-      }
-    }
 
     // Remove the block manager from blockManagerIdByExecutor.
     blockManagerIdByExecutor -= blockManagerId.executorId
@@ -520,26 +512,14 @@ class BlockManagerMasterEndpoint(
       val blockId = iterator.next
       val locations = blockLocations.get(blockId)
       locations -= blockManagerId
-      // Recover the lost shuffle block if it has been copied to the fallback storage pro-actively.
       // De-register the block if none of the block managers have it. Otherwise, if pro-active
       // replication is enabled, and a block is either an RDD or a test block (the latter is used
       // for unit testing), we send a message to a randomly chosen executor location to replicate
       // the given block. Note that we ignore other block types (such as broadcast/shuffle blocks
       // etc.) as replication doesn't make much sense in that context.
       if (locations.isEmpty) {
-        if (blockId.isShuffle &&
-          conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE) &&
-          FallbackStorage.exists(conf, blockId)) {
-          info.getStatus(blockId).foreach { status =>
-            updateBlockInfo(FALLBACK_BLOCK_MANAGER_ID, blockId,
-              status.storageLevel, status.memSize, status.diskSize)
-            logInfo(log"Recovering lost shuffle block from " +
-              log"fallback storage: ${MDC(BLOCK_ID, blockId)}!")
-          }
-        } else {
-          blockLocations.remove(blockId)
-          logWarning(log"No more replicas available for ${MDC(BLOCK_ID, blockId)}!")
-        }
+        blockLocations.remove(blockId)
+        logWarning(log"No more replicas available for ${MDC(BLOCK_ID, blockId)}!")
       } else if (proactivelyReplicate && (blockId.isRDD || blockId.isInstanceOf[TestBlockId])) {
         // As a heuristic, assume single executor failure to find out the number of replicas that
         // existed before failure

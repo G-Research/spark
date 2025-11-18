@@ -60,7 +60,8 @@ private[storage] class FallbackStorage(
   def copy(
       shuffleBlockInfo: ShuffleBlockInfo,
       bm: BlockManager,
-      isAsyncCopy: Boolean = false): Unit = {
+      isAsyncCopy: Boolean = false,
+      reportBlockStatus: Boolean = true): Unit = {
     val shuffleId = shuffleBlockInfo.shuffleId
     val mapId = shuffleBlockInfo.mapId
 
@@ -97,7 +98,7 @@ private[storage] class FallbackStorage(
           }
 
           // Report block statuses
-          if (!isAsyncCopy) {
+          if (reportBlockStatus) {
             val reduceId = NOOP_REDUCE_ID
             val indexBlockId = ShuffleIndexBlockId(shuffleId, mapId, reduceId)
             FallbackStorage.reportBlockStatus(bm, indexBlockId, indexFile.length)
@@ -117,37 +118,12 @@ private[storage] class FallbackStorage(
       bm: BlockManager): Unit = {
     asyncCopies.computeIfAbsent(shuffleBlockInfo, _ => Future {
         logInfo(log"Starting copying shuffle block ${MDC(SHUFFLE_BLOCK_INFO, shuffleBlockInfo)}")
-        copy(shuffleBlockInfo, bm, isAsyncCopy = true)
+        copy(shuffleBlockInfo, bm, isAsyncCopy = true, reportBlockStatus = false)
         logInfo(log"Finished copying shuffle block ${MDC(SHUFFLE_BLOCK_INFO, shuffleBlockInfo)}")
       }(asyncCopyExecutionContext)
     ).andThen {
       case _ => asyncCopies.remove(shuffleBlockInfo)
     }(asyncCopyExecutionContext)
-  }
-
-  def recover(bm: BlockManager)(shuffleId: Int)(mapId: Long): Option[BlockManagerId] = {
-    bm.migratableResolver match {
-      case r: IndexShuffleBlockResolver =>
-        val indexFile = r.getIndexFile(shuffleId, mapId)
-        val dataFile = r.getDataFile(shuffleId, mapId)
-        val fallbackIndexFilePath = getFallbackFilePath(shuffleId, indexFile.getName)
-        val fallbackDataFilePath = getFallbackFilePath(shuffleId, dataFile.getName)
-        if (fallbackFileSystem.exists(fallbackIndexFilePath) &&
-            fallbackFileSystem.exists(fallbackDataFilePath)) {
-          logInfo(log"Recovered shuffle id ${MDC(SHUFFLE_ID, shuffleId)} " +
-            log"mapid ${MDC(MAP_ID, mapId)}")
-          Some(FallbackStorage.FALLBACK_BLOCK_MANAGER_ID)
-        } else {
-          logInfo(s"Not recoverable shuffle id ${shuffleId} " +
-            s"mapid ${mapId}: " +
-            s"${fallbackIndexFilePath} (${fallbackFileSystem.exists(fallbackIndexFilePath)}) " +
-            s"${fallbackDataFilePath} ${fallbackFileSystem.exists(fallbackDataFilePath)}")
-          None
-        }
-      case r =>
-        logWarning(log"Unsupported Resolver: ${MDC(CLASS_NAME, r.getClass.getName)}")
-        None
-    }
   }
 
   def getFallbackFilePath(shuffleId: Int, filename: String): Path =

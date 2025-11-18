@@ -625,8 +625,8 @@ package object config {
       .checkValue(_.endsWith(java.io.File.separator), "Path should end with separator.")
       .createOptional
 
-  private[spark] val STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE =
-    ConfigBuilder("spark.storage.decommission.fallbackStorage.proactive")
+  private[spark] val STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE_ENABLED =
+    ConfigBuilder("spark.storage.decommission.fallbackStorage.proactive.enabled")
       .doc("Enables proactive shuffle block replication for fallback storage. " +
         "If enabled, all shuffle blocks are copied asynchronously to the fallback storage. " +
         "This speeds-up decommissioning as most shuffle data might have been replicated by then, " +
@@ -635,6 +635,14 @@ package object config {
       .version("4.2.0")
       .booleanConf
       .createWithDefault(false)
+
+  private[spark] val STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE_ASYNC =
+    ConfigBuilder("spark.storage.decommission.fallbackStorage.proactive.async")
+      .doc("Enables asynchronously copying shuffle data so that a task does not wait for the " +
+        "completion of copying shuffle data to the fallback storage.")
+      .version("4.2.0")
+      .booleanConf
+      .createWithDefault(true)
 
   private[spark] val STORAGE_DECOMMISSION_SHUFFLE_MAX_DISK_SIZE =
     ConfigBuilder("spark.storage.decommission.shuffleBlocks.maxDiskSize")

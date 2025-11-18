@@ -20,7 +20,7 @@ package org.apache.spark.shuffle
 import org.apache.spark.{ShuffleDependency, SparkEnv, TaskContext}
 import org.apache.spark.internal.Logging
 import org.apache.spark.internal.LogKeys.{NUM_MERGER_LOCATIONS, SHUFFLE_ID, STAGE_ID}
-import org.apache.spark.internal.config.STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE
+import org.apache.spark.internal.config
 import org.apache.spark.scheduler.MapStatus
 import org.apache.spark.storage.FallbackStorage
 
@@ -87,9 +87,21 @@ private[spark] class ShuffleWriteProcessor extends Serializable with Logging {
           }
         }
         // copy block to fallback storage if pro-active replication to fallback storage is enabled
-        if (SparkEnv.get.conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE)) {
-          FallbackStorage.getFallbackStorage(SparkEnv.get.conf)
-            .foreach(_.copyAsync(ShuffleBlockInfo(dep.shuffleId, mapId), SparkEnv.get.blockManager))
+        if (SparkEnv.get.conf.get(config.STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE_ENABLED)) {
+          val shuffleBlockInfo = ShuffleBlockInfo(dep.shuffleId, mapId)
+          val fallbackStorage = FallbackStorage.getFallbackStorage(SparkEnv.get.conf)
+          val blockManager = SparkEnv.get.blockManager
+
+          if (SparkEnv.get.conf.get(config.STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE_ASYNC)) {
+            // we ignore IO errors in this branch
+            fallbackStorage
+              .foreach(_.copyAsync(shuffleBlockInfo, blockManager))
+          } else {
+            // reliable fallback storage requires IO errors to fail the task for retry
+            fallbackStorage.foreach(
+              _.copy(shuffleBlockInfo, blockManager, isAsyncCopy = false, reportBlockStatus = false)
+            )
+          }
         }
       }
       mapStatus.get

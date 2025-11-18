@@ -290,27 +290,6 @@ private class ShuffleStatus(
   }
 
   /**
-   * Recovers shuffle outputs associated with this host. Any shuffle blocks
-   * that can be recovered from another block manager are updated, other
-   * blocks are kept as is.
-   */
-  def recoverOutputsOnHost(host: String, r: Long => Option[BlockManagerId]): Unit = withWriteLock {
-    logInfo(s"Recovering outputs of host ${host}")
-    recoverOutputsByFilter(x => x.host == host, r)
-  }
-
-  /**
-   * Recovers shuffle outputs associated with the specified executor. Any shuffle blocks
-   * that can be recovered from another block manager are updated, other
-   * blocks are kept as is.
-   */
-  def recoverOutputsOnExecutor(
-      execId: String, r: Long => Option[BlockManagerId]): Unit = withWriteLock {
-    logInfo(s"Recovering outputs of execId ${execId}")
-    recoverOutputsByFilter(x => x.executorId == execId, r)
-  }
-
-  /**
    * Removes all shuffle outputs associated with this host. Note that this will also remove
    * outputs which are served by an external shuffle server (if one exists).
    */
@@ -331,27 +310,6 @@ private class ShuffleStatus(
   }
 
   /**
-   * Recovers all shuffle outputs which satisfies the filter by updating the
-   * respective block manager id.
-   */
-  def recoverOutputsByFilter(
-      f: BlockManagerId => Boolean,
-      r: Long => Option[BlockManagerId]): Unit = withWriteLock {
-    for (mapIndex <- mapStatuses.indices) {
-      val currentMapStatus = mapStatuses(mapIndex)
-      if (currentMapStatus != null && f(currentMapStatus.location)) {
-        r(currentMapStatus.mapId).foreach { recoveryBlockManagerId =>
-          logInfo(log"Updating location of ${MDC(MAP_ID, currentMapStatus.mapId)} " +
-            log"from ${MDC(LOCATION, currentMapStatus.location)} " +
-            log"to ${MDC(LOCATION, recoveryBlockManagerId)}")
-          currentMapStatus.updateLocation(recoveryBlockManagerId)
-          invalidateSerializedMapOutputStatusCache()
-        }
-      }
-    }
-  }
-
-  /**
    * Removes all shuffle outputs which satisfies the filter. Note that this will also
    * remove outputs which are served by an external shuffle server (if one exists).
    */
@@ -359,8 +317,6 @@ private class ShuffleStatus(
     for (mapIndex <- mapStatuses.indices) {
       val currentMapStatus = mapStatuses(mapIndex)
       if (currentMapStatus != null && f(currentMapStatus.location)) {
-        logInfo(s"Removing output for mapid ${currentMapStatus.mapId} " +
-          s"on ${currentMapStatus.location}")
         _numAvailableMapOutputs -= 1
         mapIdToMapIndex.remove(currentMapStatus.mapId)
         mapStatusesDeleted(mapIndex) = currentMapStatus
@@ -991,28 +947,6 @@ private[spark] class MapOutputTrackerMaster(
     shuffleStatuses.remove(shuffleId).foreach { shuffleStatus =>
       shuffleStatus.invalidateSerializedMapOutputStatusCache()
       shuffleStatus.invalidateSerializedMergeOutputStatusCache()
-    }
-  }
-
-  /**
-   * Recovers shuffle outputs associated with this host. Any shuffle blocks
-   * that can be recovered from another block manager are updated, other
-   * blocks are kept as is.
-   */
-  def recoverOutputsOnHost(host: String, r: Int => Long => Option[BlockManagerId]): Unit = {
-    shuffleStatuses.iterator.foreach { case (shuffleId: Int, shuffleStatus: ShuffleStatus) =>
-      shuffleStatus.recoverOutputsOnHost(host, r(shuffleId))
-    }
-  }
-
-  /**
-   * Recovers shuffle outputs associated with this executor. Any shuffle blocks
-   * that can be recovered from another block manager are updated, other
-   * blocks are kept as is.
-   */
-  def recoverOutputsOnExecutor(execId: String, r: Int => Long => Option[BlockManagerId]): Unit = {
-    shuffleStatuses.iterator.foreach { case (shuffleId: Int, shuffleStatus: ShuffleStatus) =>
-      shuffleStatus.recoverOutputsOnExecutor(execId, r(shuffleId))
     }
   }
 
