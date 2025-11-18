@@ -125,6 +125,31 @@ private[storage] class FallbackStorage(
     }(asyncCopyExecutionContext)
   }
 
+  def recover(bm: BlockManager)(shuffleId: Int)(mapId: Long): Option[BlockManagerId] = {
+    bm.migratableResolver match {
+      case r: IndexShuffleBlockResolver =>
+        val indexFile = r.getIndexFile(shuffleId, mapId)
+        val dataFile = r.getDataFile(shuffleId, mapId)
+        val fallbackIndexFilePath = getFallbackFilePath(shuffleId, indexFile.getName)
+        val fallbackDataFilePath = getFallbackFilePath(shuffleId, dataFile.getName)
+        if (fallbackFileSystem.exists(fallbackIndexFilePath) &&
+            fallbackFileSystem.exists(fallbackDataFilePath)) {
+          logInfo(log"Recovered shuffle id ${MDC(SHUFFLE_ID, shuffleId)} " +
+            log"mapid ${MDC(MAP_ID, mapId)}")
+          Some(FallbackStorage.FALLBACK_BLOCK_MANAGER_ID)
+        } else {
+          logInfo(s"Not recoverable shuffle id ${shuffleId} " +
+            s"mapid ${mapId}: " +
+            s"${fallbackIndexFilePath} (${fallbackFileSystem.exists(fallbackIndexFilePath)}) " +
+            s"${fallbackDataFilePath} ${fallbackFileSystem.exists(fallbackDataFilePath)}")
+          None
+        }
+      case r =>
+        logWarning(log"Unsupported Resolver: ${MDC(CLASS_NAME, r.getClass.getName)}")
+        None
+    }
+  }
+
   def getFallbackFilePath(shuffleId: Int, filename: String): Path =
     FallbackStorage.getFallbackFilePath(fallbackPath, appId, shuffleId, filename)
 

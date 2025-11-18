@@ -500,6 +500,13 @@ class BlockManagerMasterEndpoint(
 
   private def removeBlockManager(blockManagerId: BlockManagerId): Unit = {
     val info = blockManagerInfo(blockManagerId)
+    logInfo(log"Removing block manager ${MDC(BLOCK_MANAGER_ID, blockManagerId)} with blocks:")
+    info.blocks.keySet.forEach { blockId =>
+      logInfo(log"${MDC(BLOCK_MANAGER_ID, blockManagerId)}: ${MDC(BLOCK_ID, blockId)}")
+      blockLocations.get(blockId).foreach { location =>
+        logInfo(log"${MDC(BLOCK_ID, blockId)}: ${MDC(LOCATION, location)}")
+      }
+    }
 
     // Remove the block manager from blockManagerIdByExecutor.
     blockManagerIdByExecutor -= blockManagerId.executorId
