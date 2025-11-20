@@ -2842,6 +2842,20 @@ private[spark] class DAGScheduler(
             mapOutputTracker.removeOutputsOnExecutor(execId)
         }
       }
+    } else {
+      if (FallbackStorage.isConfigured(env.conf) &&
+        env.conf.get(config.STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE_ENABLED)) {
+        hostToUnregisterOutputs match {
+          case Some(host) =>
+            logInfo(log"Relocating shuffle files of host to Fallback Storage: ${MDC(HOST, host)} (epoch " +
+              log"${MDC(EPOCH, currentEpoch)}")
+            mapOutputTracker.updateOutputsOnHost(host, FallbackStorage.FALLBACK_BLOCK_MANAGER_ID)
+          case None =>
+            logInfo(log"Recovering shuffle files of executor to Fallback Storage: ${MDC(EXECUTOR_ID, execId)} " +
+              log"(epoch ${MDC(EPOCH, currentEpoch)})")
+            mapOutputTracker.updateOutputsOnExecutor(execId, FallbackStorage.FALLBACK_BLOCK_MANAGER_ID)
+        }
+      }
     }
   }
 
