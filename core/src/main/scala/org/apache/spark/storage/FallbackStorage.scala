@@ -32,7 +32,7 @@ import org.apache.spark.{SparkConf, SparkException}
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.internal.Logging
 import org.apache.spark.internal.LogKeys._
-import org.apache.spark.internal.config.{STORAGE_DECOMMISSION_FALLBACK_STORAGE_CLEANUP, STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH}
+import org.apache.spark.internal.config.{STORAGE_DECOMMISSION_FALLBACK_STORAGE_CLEANUP, STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH, STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE_ENABLED, STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE_RELIABLE}
 import org.apache.spark.network.buffer.{ManagedBuffer, NioManagedBuffer}
 import org.apache.spark.network.util.JavaUtils
 import org.apache.spark.rpc.{RpcAddress, RpcEndpointRef, RpcTimeout}
@@ -49,7 +49,7 @@ private[storage] class FallbackStorage(
     conf: SparkConf,
     asyncCopies: ConcurrentMap[ShuffleBlockInfo, Future[Unit]]) extends Logging {
   require(conf.contains("spark.app.id"))
-  require(conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH).isDefined)
+  require(FallbackStorage.isConfigured(conf))
 
   private val fallbackPath = FallbackStorage.getPath(conf)
   private val hadoopConf = SparkHadoopUtil.get.newConfiguration(conf)
@@ -161,6 +161,15 @@ private[spark] object FallbackStorage extends Logging {
 
   def isConfigured(conf: SparkConf): Boolean =
     conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH).isDefined
+
+  def isProactive(conf: SparkConf): Boolean = {
+    isConfigured(conf) &&
+      conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE_ENABLED)
+  }
+
+  def isReliable(conf: SparkConf): Boolean =
+    isConfigured(conf) &&
+      conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE_RELIABLE)
 
   def getPath(conf: SparkConf): Path =
     new Path(conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH).get)

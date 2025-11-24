@@ -24,7 +24,7 @@ import org.apache.spark.SparkConf;
 import org.apache.spark.SparkEnv;
 import org.apache.spark.shuffle.api.ShuffleDriverComponents;
 import org.apache.spark.storage.BlockManagerMaster;
-import org.apache.spark.internal.config.package$;
+import org.apache.spark.storage.FallbackStorage;
 
 public class LocalDiskShuffleDriverComponents implements ShuffleDriverComponents {
 
@@ -56,6 +56,6 @@ public class LocalDiskShuffleDriverComponents implements ShuffleDriverComponents
   }
 
   public boolean supportsReliableStorage() {
-    return (boolean) this.sparkConf.get(package$.MODULE$.STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE_ENABLED());
+    return FallbackStorage.isReliable(this.sparkConf);
   }
 }

@@ -636,13 +636,14 @@ package object config {
       .booleanConf
       .createWithDefault(false)
 
-  private[spark] val STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE_ASYNC =
-    ConfigBuilder("spark.storage.decommission.fallbackStorage.proactive.async")
-      .doc("Enables asynchronously copying shuffle data so that a task does not wait for the " +
-        "completion of copying shuffle data to the fallback storage.")
+  private[spark] val STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE_RELIABLE =
+    ConfigBuilder("spark.storage.decommission.fallbackStorage.proactive.reliable")
+      .doc("Enables reliable shuffle data replication to fallback storage. " +
+        "The task success depends on the successful transfer of shuffle data " +
+        "to the fallback storage. This allows to recover from node failures.")
       .version("4.2.0")
       .booleanConf
-      .createWithDefault(true)
+      .createWithDefault(false)
 
   private[spark] val STORAGE_DECOMMISSION_SHUFFLE_MAX_DISK_SIZE =
     ConfigBuilder("spark.storage.decommission.shuffleBlocks.maxDiskSize")
