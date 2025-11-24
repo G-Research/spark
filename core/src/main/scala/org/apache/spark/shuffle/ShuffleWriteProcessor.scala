@@ -92,9 +92,9 @@ private[spark] class ShuffleWriteProcessor extends Serializable with Logging {
           val blockManager = SparkEnv.get.blockManager
 
           if (FallbackStorage.isReliable(SparkEnv.get.conf)) {
-            // we are not catching exceptions here as we want them to fail the task to retry it
-            // otherwise the next stage would see a fetch-failed exception,
-            // which will retry this stage entirely
+            // we are not catching exceptions here as we want them to fail the task to retry it,
+            // otherwise the next stage would see a fetch-failed exception when it has to read
+            // from the fallback storage, which will then retry this stage entirely
             fallbackStorage.foreach(
               _.copy(shuffleBlockInfo, blockManager, isAsyncCopy = false, reportBlockStatus = false)
             )
