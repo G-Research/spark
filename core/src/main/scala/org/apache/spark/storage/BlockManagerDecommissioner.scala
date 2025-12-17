@@ -111,8 +111,7 @@ private[storage] class BlockManagerDecommissioner(
             try {
               val startTime = System.currentTimeMillis()
               if (fallbackStorage.isDefined && peer == FallbackStorage.FALLBACK_BLOCK_MANAGER_ID) {
-                logInfo("not copying to fallback storage to test recovery")
-                // fallbackStorage.foreach(_.copy(shuffleBlockInfo, bm))
+                fallbackStorage.foreach(_.copy(shuffleBlockInfo, bm))
               } else {
                 blocks.foreach { case (blockId, buffer) =>
                   logDebug(s"Migrating sub-block ${blockId}")
@@ -143,8 +142,7 @@ private[storage] class BlockManagerDecommissioner(
                     // Confirm peer is not the fallback BM ID because fallbackStorage would already
                     // have been used in the try-block above so there's no point trying again
                     && peer != FallbackStorage.FALLBACK_BLOCK_MANAGER_ID) {
-                  logInfo("not falling back to copying to fallback storage to test recovery")
-                  // fallbackStorage.foreach(_.copy(shuffleBlockInfo, bm))
+                  fallbackStorage.foreach(_.copy(shuffleBlockInfo, bm))
                 } else {
                   logError(s"Error occurred during migrating $shuffleBlockInfo", e)
                   keepRunning = false
