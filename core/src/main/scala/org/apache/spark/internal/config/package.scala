@@ -504,22 +504,11 @@ package object config {
     ConfigBuilder("spark.storage.decommission.fallbackStorage.path")
       .doc("The location for fallback storage during block manager decommissioning. " +
         "For example, `s3a://spark-storage/`. In case of empty, fallback storage is disabled. " +
-        "The storage should be managed by TTL because Spark will not clean it up, " +
-        "unless spark.storage.decommission.fallbackStorage.cleanUp is true.")
+        "The storage should be managed by TTL because Spark will not clean it up.")
       .version("3.1.0")
       .stringConf
       .checkValue(_.endsWith(java.io.File.separator), "Path should end with separator.")
       .createOptional
-
-  private[spark] val STORAGE_DECOMMISSION_FALLBACK_STORAGE_SUBPATHS =
-    ConfigBuilder("spark.storage.decommission.fallbackStorage.subPaths")
-      .doc("The fallback storage puts all files of one shuffle in one directory when this is 0. " +
-        "When this option is larger than 0, it will instead distribute the files across " +
-        "this number of subdirectories.")
-      .version("4.0.0")
-      .intConf
-      .checkValue(_ >= 0, "The number of subdirectories must be 0 or larger.")
-      .createWithDefault(Int.MaxValue)
 
   private[spark] val STORAGE_DECOMMISSION_FALLBACK_STORAGE_REPLICATION_DELAY =
     ConfigBuilder("spark.storage.decommission.fallbackStorage.replicationDelay")
@@ -544,6 +533,26 @@ package object config {
     ConfigBuilder("spark.storage.decommission.fallbackStorage.cleanUp")
       .doc("If true, Spark cleans up its fallback storage data during shutting down.")
       .version("3.2.0")
+      .booleanConf
+      .createWithDefault(false)
+
+  private[spark] val STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE_ENABLED =
+    ConfigBuilder("spark.storage.decommission.fallbackStorage.proactive.enabled")
+      .doc("Enables proactive shuffle block replication for fallback storage. " +
+        "If enabled, all shuffle blocks are copied asynchronously to the fallback storage. " +
+        "This speeds-up decommissioning as most shuffle data might have been replicated by then, " +
+        "at the cost of extra network traffic and storage usage if no decommission occurs. " +
+        "This does not migrate any shuffle data until decommission is started.")
+      .version("4.2.0")
+      .booleanConf
+      .createWithDefault(false)
+
+  private[spark] val STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE_RELIABLE =
+    ConfigBuilder("spark.storage.decommission.fallbackStorage.proactive.reliable")
+      .doc("Enables reliable shuffle data replication to fallback storage. " +
+        "The task success depends on the successful transfer of shuffle data " +
+        "to the fallback storage. This allows to recover from node failures.")
+      .version("4.2.0")
       .booleanConf
       .createWithDefault(false)
 
