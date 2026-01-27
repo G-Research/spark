@@ -78,6 +78,8 @@ fi
 # SPARK-43540: add current working directory into executor classpath
 SPARK_CLASSPATH="$SPARK_CLASSPATH:$PWD"
 
+echo Setting Armada Executor Service
+export EXECUTOR_SERVICE_NAME=armada-$JOB_ID-0-service-0
 case "$1" in
   driver)
     shift 1
