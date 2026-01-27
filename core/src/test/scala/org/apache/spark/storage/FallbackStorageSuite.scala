@@ -32,6 +32,7 @@ import org.scalatest.concurrent.Eventually.{eventually, interval, timeout}
 
 import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkFunSuite, TestUtils}
 import org.apache.spark.LocalSparkContext.withSpark
+import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.internal.config._
 import org.apache.spark.launcher.SparkLauncher.{EXECUTOR_MEMORY, SPARK_MASTER}
 import org.apache.spark.network.BlockTransferService
@@ -70,7 +71,7 @@ class FallbackStorageSuite extends SparkFunSuite with LocalSparkContext {
     val hadoopConf = SparkHadoopUtil.get.newConfiguration(conf)
     val rpcEndpointRef = new FallbackStorageRpcEndpointRef(conf, hadoopConf)
     val fallbackStorage = FallbackStorage.getFallbackStorage(conf).get
-    val bmm = spy(new BlockManagerMaster(rpcEndpointRef, null, conf, false))
+    val bmm = spy[BlockManagerMaster](new BlockManagerMaster(rpcEndpointRef, null, conf, false))
 
     val bm = mock(classOf[BlockManager])
     val dbm = new DiskBlockManager(conf, deleteFilesOnStop = false, isDriver = false)
@@ -126,7 +127,7 @@ class FallbackStorageSuite extends SparkFunSuite with LocalSparkContext {
     val hadoopConf = SparkHadoopUtil.get.newConfiguration(conf)
     val rpcEndpointRef = new FallbackStorageRpcEndpointRef(conf, hadoopConf)
     val fallbackStorage = new FallbackStorage(conf, asyncCopies)
-    val bmm = spy(new BlockManagerMaster(rpcEndpointRef, null, conf, false))
+    val bmm = spy[BlockManagerMaster](new BlockManagerMaster(rpcEndpointRef, null, conf, false))
 
     val bm = mock(classOf[BlockManager])
     val dbm = new DiskBlockManager(conf, deleteFilesOnStop = false, isDriver = false)
