@@ -1174,7 +1174,7 @@ class DAGSchedulerSuite extends SparkFunSuite with TempLocalSparkContext with Ti
           s"host${('A' + idx).toChar}"
         }
         val status = makeMapStatus(
-          hostName, numShufflePartitions, mapTaskId = task.partitionId, checksumVal = checksumVal)
+          hostName, numShufflePartitions, mapTaskId = task.partitionId)
         (Success, status)
     }.toSeq)
   }

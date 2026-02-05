@@ -68,7 +68,8 @@ class FallbackStorageSuite extends SparkFunSuite with LocalSparkContext {
       .set(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH,
         Files.createTempDirectory("tmp").toFile.getAbsolutePath + "/")
     val fallbackStorage = FallbackStorage.getFallbackStorage(conf).get
-    val bmm = spy(new BlockManagerMaster(new NoopRpcEndpointRef(conf), null, conf, false))
+    val bmm = spy[BlockManagerMaster](
+      new BlockManagerMaster(new NoopRpcEndpointRef(conf), null, conf, false))
 
     val bm = mock(classOf[BlockManager])
     val dbm = new DiskBlockManager(conf, deleteFilesOnStop = false, isDriver = false)
@@ -121,10 +122,9 @@ class FallbackStorageSuite extends SparkFunSuite with LocalSparkContext {
       .set(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH,
         Files.createTempDirectory("tmp").toFile.getAbsolutePath + "/")
     val asyncCopies = new ConcurrentHashMap[ShuffleBlockInfo, Future[Unit]]()
-    val hadoopConf = SparkHadoopUtil.get.newConfiguration(conf)
-    val rpcEndpointRef = new FallbackStorageRpcEndpointRef(conf, hadoopConf)
+    val rpcEndpointRef = new NoopRpcEndpointRef(conf)
     val fallbackStorage = new FallbackStorage(conf, asyncCopies)
-    val bmm = spy(new BlockManagerMaster(rpcEndpointRef, null, conf, false))
+    val bmm = spy[BlockManagerMaster](new BlockManagerMaster(rpcEndpointRef, null, conf, false))
 
     val bm = mock(classOf[BlockManager])
     val dbm = new DiskBlockManager(conf, deleteFilesOnStop = false, isDriver = false)
@@ -322,8 +322,7 @@ class FallbackStorageSuite extends SparkFunSuite with LocalSparkContext {
       .set("spark.app.id", "testId")
       .set(STORAGE_DECOMMISSION_SHUFFLE_BLOCKS_ENABLED, true)
       .set(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH, fallbackStoragePath)
-    val hadoopConf = SparkHadoopUtil.get.newConfiguration(conf)
-    val rpcEndpointRef = new FallbackStorageRpcEndpointRef(conf, hadoopConf)
+    val rpcEndpointRef = new NoopRpcEndpointRef(conf)
 
     val ids = Set((1, 1L, 1))
     val bm = mock(classOf[BlockManager])
