@@ -507,6 +507,13 @@ package object config {
       .booleanConf
       .createWithDefault(false)
 
+  private[spark] val STORAGE_DECOMMISSION_FALLBACK_STORAGE_CLEANUP_THREADS =
+    ConfigBuilder("spark.storage.decommission.fallbackStorage.cleanUp.threads")
+      .doc("Number of threads that clean up fallback storage data.")
+      .version("4.2.0")
+      .intConf
+      .createWithDefault(5)
+
   private[spark] val STORAGE_DECOMMISSION_FALLBACK_STORAGE_CLEANUP_WAIT_ON_SHUTDOWN =
     ConfigBuilder("spark.storage.decommission.fallbackStorage.cleanUp.waitOnShutdown")
       .doc("If true, Spark waits for all fallback storage data to be cleaned up " +
