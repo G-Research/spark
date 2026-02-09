@@ -28,7 +28,7 @@ import org.mockito.{ArgumentMatchers => mc}
 import org.mockito.Mockito.{mock, never, verify, when}
 import org.scalatest.concurrent.Eventually.{eventually, interval, timeout}
 
-import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkFunSuite, TestUtils}
+import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkEnv, SparkFunSuite, TestUtils}
 import org.apache.spark.LocalSparkContext.withSpark
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.internal.config._
@@ -58,6 +58,13 @@ class FallbackStorageSuite extends SparkFunSuite with LocalSparkContext {
       .set(STORAGE_DECOMMISSION_SHUFFLE_BLOCKS_ENABLED, true)
       .set(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH,
          Files.createTempDirectory("tmp").toFile.getAbsolutePath + "/")
+  }
+
+  override def beforeAll(): Unit = {
+    // some tests need a SparkEnv set
+    val sparkEnv = mock(classOf[SparkEnv])
+    when(sparkEnv.conf).thenReturn(getSparkConf())
+    SparkEnv.set(sparkEnv)
   }
 
   test("fallback storage APIs - copy/exists") {
