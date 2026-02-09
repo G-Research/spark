@@ -19,6 +19,7 @@ package org.apache.spark.storage
 
 import java.io.DataInputStream
 import java.nio.ByteBuffer
+import java.util.concurrent.{BlockingQueue, LinkedBlockingQueue}
 
 import scala.concurrent.Future
 import scala.reflect.ClassTag
@@ -106,7 +107,7 @@ private[storage] class FallbackStorageRpcEndpointRef(conf: SparkConf, hadoopConf
   override def ask[T: ClassTag](message: Any, timeout: RpcTimeout): Future[T] = {
     message match {
       case RemoveShuffle(shuffleId) =>
-        FallbackStorage.cleanUp(conf, hadoopConf, Some(shuffleId))
+        FallbackStorage.cleanUpAsync(conf, hadoopConf, Some(shuffleId))
       case _ => // no-op
     }
     Future{true.asInstanceOf[T]}
@@ -116,6 +117,23 @@ private[storage] class FallbackStorageRpcEndpointRef(conf: SparkConf, hadoopConf
 private[spark] object FallbackStorage extends Logging {
   /** We use one block manager id as a place holder. */
   val FALLBACK_BLOCK_MANAGER_ID: BlockManagerId = BlockManagerId("fallback", "remote", 7337)
+
+  /** Shuffle data can be cleaned up asynchronously by adding them to cleanupShufflesQueue. */
+  private case class CleanUp(
+    conf: SparkConf, hadoopConf: Configuration, shuffleId: Option[Int] = None)
+
+  private val cleanupShufflesQueue: BlockingQueue[CleanUp] = new LinkedBlockingQueue[CleanUp]()
+  private val cleanupShufflesThread: Thread = new Thread(new Runnable {
+    override def run(): Unit = {
+      while (true) {
+        Utils.tryLogNonFatalError {
+          val cleanup = cleanupShufflesQueue.poll()
+          cleanUp(cleanup.conf, cleanup.hadoopConf, cleanup.shuffleId)
+        }
+      }
+    }
+  }, "fallback-storage-cleanup")
+  cleanupShufflesThread.start()
 
   def getFallbackStorage(conf: SparkConf): Option[FallbackStorage] = {
     if (conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH).isDefined) {
@@ -137,11 +155,24 @@ private[spark] object FallbackStorage extends Logging {
     }
   }
 
+  /**
+   * Asynchronously clean up the generated fallback location for this app (and shuffle id if given).
+   */
+  def cleanUpAsync(
+    conf: SparkConf, hadoopConf: Configuration, shuffleId: Option[Int] = None): Unit = {
+    cleanupShufflesQueue.put(CleanUp(conf, hadoopConf, shuffleId))
+  }
+
   /** Clean up the generated fallback location for this app (and shuffle id if given). */
   def cleanUp(conf: SparkConf, hadoopConf: Configuration, shuffleId: Option[Int] = None): Unit = {
     if (conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH).isDefined &&
         conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_CLEANUP) &&
         conf.contains("spark.app.id")) {
+      if (shuffleId.isDefined) {
+        logInfo(log"Cleaning up shuffle ${MDC(SHUFFLE_ID, shuffleId.get)}")
+      } else {
+        logInfo(log"Cleaning up app shuffle data")
+      }
       val fallbackPath = shuffleId.foldLeft(
         new Path(conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH).get, conf.getAppId)
       ) { case (path, shuffleId) => new Path(path, shuffleId.toString) }
