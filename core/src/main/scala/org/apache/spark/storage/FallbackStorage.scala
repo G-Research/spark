@@ -19,7 +19,8 @@ package org.apache.spark.storage
 
 import java.io.DataInputStream
 import java.nio.ByteBuffer
-import java.util.concurrent.{BlockingQueue, LinkedBlockingQueue}
+import java.util.concurrent.{BlockingQueue, LinkedBlockingQueue, TimeUnit}
+import java.util.concurrent.atomic.AtomicBoolean
 
 import scala.concurrent.Future
 import scala.reflect.ClassTag
@@ -30,14 +31,15 @@ import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.spark.{SparkConf, SparkException}
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.internal.Logging
-import org.apache.spark.internal.config.{STORAGE_DECOMMISSION_FALLBACK_STORAGE_CLEANUP, STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH}
+import org.apache.spark.internal.config.{STORAGE_DECOMMISSION_FALLBACK_STORAGE_CLEANUP, STORAGE_DECOMMISSION_FALLBACK_STORAGE_CLEANUP_WAIT_ON_SHUTDOWN, STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH}
 import org.apache.spark.network.buffer.{ManagedBuffer, NioManagedBuffer}
 import org.apache.spark.network.util.JavaUtils
 import org.apache.spark.rpc.{RpcAddress, RpcEndpointRef, RpcTimeout}
 import org.apache.spark.shuffle.{IndexShuffleBlockResolver, ShuffleBlockInfo}
 import org.apache.spark.shuffle.IndexShuffleBlockResolver.NOOP_REDUCE_ID
 import org.apache.spark.storage.BlockManagerMessages.RemoveShuffle
-import org.apache.spark.util.Utils
+import org.apache.spark.storage.FallbackStorage.{cleanupShufflesThread, stopped}
+import org.apache.spark.util.{ShutdownHookManager, Utils}
 
 /**
  * A fallback storage used by storage decommissioners.
@@ -50,6 +52,18 @@ private[storage] class FallbackStorage(conf: SparkConf) extends Logging {
   private val hadoopConf = SparkHadoopUtil.get.newConfiguration(conf)
   private val fallbackFileSystem = FileSystem.get(fallbackPath.toUri, hadoopConf)
   private val appId = conf.getAppId
+
+  // Ensure cleanup work only blocks Spark shutdown when configured so
+  ShutdownHookManager.addShutdownHook { () =>
+    // indicate cleanup thread to shut down once queue is drained
+    stopped.set(true)
+
+    // only wait for cleanup thread to finish when configured so
+    // thread is set daemon so JVM can shut down while it is running
+    if (conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_CLEANUP_WAIT_ON_SHUTDOWN)) {
+      cleanupShufflesThread.join()
+    }
+  }
 
   // Visible for testing
   def copy(
@@ -122,17 +136,26 @@ private[spark] object FallbackStorage extends Logging {
   private case class CleanUp(
     conf: SparkConf, hadoopConf: Configuration, shuffleId: Option[Int] = None)
 
+  private val stopped = new AtomicBoolean(false)
+
+  // a queue of shuffle cleanup requests and a daemon thread processing them
   private val cleanupShufflesQueue: BlockingQueue[CleanUp] = new LinkedBlockingQueue[CleanUp]()
   private val cleanupShufflesThread: Thread = new Thread(new Runnable {
     override def run(): Unit = {
-      while (true) {
+      // if stopped and queue is empty, this thread terminates
+      while (!stopped.get() || !cleanupShufflesQueue.isEmpty) {
         Utils.tryLogNonFatalError {
-          val cleanup = cleanupShufflesQueue.poll()
-          cleanUp(cleanup.conf, cleanup.hadoopConf, cleanup.shuffleId)
+          // wait a second for another cleanup request, then check while condition
+          val cleanup = Option(cleanupShufflesQueue.poll(1L, TimeUnit.SECONDS))
+          cleanup.foreach { c => cleanUp(c.conf, c.hadoopConf, c.shuffleId) }
         }
       }
     }
   }, "fallback-storage-cleanup")
+  // this is a daemon thread so JVM shutdown is not blocked by this thread running
+  // we block ShutdownHook above if STORAGE_DECOMMISSION_FALLBACK_STORAGE_CLEANUP_WAIT_ON_SHUTDOWN
+  // is true
+  cleanupShufflesThread.setDaemon(true)
   cleanupShufflesThread.start()
 
   def getFallbackStorage(conf: SparkConf): Option[FallbackStorage] = {
@@ -160,13 +183,19 @@ private[spark] object FallbackStorage extends Logging {
    */
   def cleanUpAsync(
     conf: SparkConf, hadoopConf: Configuration, shuffleId: Option[Int] = None): Unit = {
-    cleanupShufflesQueue.put(CleanUp(conf, hadoopConf, shuffleId))
+    if (stopped.get()) {
+      logInfo("Not queueing cleanup due to shutdown")
+    } else {
+      cleanupShufflesQueue.put(CleanUp(conf, hadoopConf, shuffleId))
+    }
   }
 
   /** Clean up the generated fallback location for this app (and shuffle id if given). */
   def cleanUp(conf: SparkConf, hadoopConf: Configuration, shuffleId: Option[Int] = None): Unit = {
     if (conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH).isDefined &&
         conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_CLEANUP) &&
+        (shuffleId.isDefined ||
+          conf.get(STORAGE_DECOMMISSION_FALLBACK_STORAGE_CLEANUP_WAIT_ON_SHUTDOWN)) &&
         conf.contains("spark.app.id")) {
       if (shuffleId.isDefined) {
         logInfo(log"Cleaning up shuffle ${MDC(SHUFFLE_ID, shuffleId.get)}")
