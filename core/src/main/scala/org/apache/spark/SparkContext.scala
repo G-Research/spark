@@ -2375,6 +2375,7 @@ class SparkContext(config: SparkConf) extends Logging {
       }
     }
     Utils.tryLogNonFatalError {
+      // not calling cleanUpAsync here as we want cleanup to complete before exiting
       FallbackStorage.cleanUp(_conf, _hadoopConfiguration)
     }
     Utils.tryLogNonFatalError {
