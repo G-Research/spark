@@ -19,13 +19,14 @@ package org.apache.spark.storage
 
 import java.io.{InputStream, IOException}
 import java.nio.channels.ClosedByInterruptException
-import java.util.concurrent.{LinkedBlockingQueue, TimeUnit}
+import java.util.concurrent.{LinkedBlockingQueue, ThreadPoolExecutor, TimeUnit}
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.CheckedInputStream
 import javax.annotation.concurrent.GuardedBy
 
 import scala.collection.mutable
 import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet, Queue}
+import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success}
 
 import io.netty.util.internal.OutOfDirectMemoryError
@@ -36,12 +37,12 @@ import org.apache.spark.{MapOutputTracker, TaskContext}
 import org.apache.spark.MapOutputTracker.SHUFFLE_PUSH_MAP_ID
 import org.apache.spark.errors.SparkCoreErrors
 import org.apache.spark.internal.Logging
-import org.apache.spark.network.buffer.{FileSegmentManagedBuffer, ManagedBuffer}
+import org.apache.spark.network.buffer.{FileSegmentManagedBuffer, ManagedBuffer, NioManagedBuffer}
 import org.apache.spark.network.shuffle._
 import org.apache.spark.network.shuffle.checksum.{Cause, ShuffleChecksumHelper}
 import org.apache.spark.network.util.{NettyUtils, TransportConf}
 import org.apache.spark.shuffle.ShuffleReadMetricsReporter
-import org.apache.spark.util.{CompletionIterator, TaskCompletionListener, Utils}
+import org.apache.spark.util.{Clock, CompletionIterator, SystemClock, TaskCompletionListener, ThreadUtils, Utils}
 
 /**
  * An iterator that fetches multiple blocks. For local blocks, it fetches from the local block
@@ -72,6 +73,7 @@ import org.apache.spark.util.{CompletionIterator, TaskCompletionListener, Utils}
  * @param maxReqSizeShuffleToMem max size (in bytes) of a request that can be shuffled to memory.
  * @param maxAttemptsOnNettyOOM The max number of a block could retry due to Netty OOM before
  *                              throwing the fetch failure.
+ * @param fallbackStorageReadThreads number of threads reading concurrently from fallback storage
  * @param detectCorrupt         whether to detect any corruption in fetched blocks.
  * @param checksumEnabled whether the shuffle checksum is enabled. When enabled, Spark will try to
  *                        diagnose the cause of the block corruption.
@@ -94,6 +96,7 @@ final class ShuffleBlockFetcherIterator(
     maxBlocksInFlightPerAddress: Int,
     val maxReqSizeShuffleToMem: Long,
     maxAttemptsOnNettyOOM: Int,
+    fallbackStorageReadThreads: Int,
     detectCorrupt: Boolean,
     detectCorruptUseExtraMemory: Boolean,
     checksumEnabled: Boolean,
@@ -138,8 +141,24 @@ final class ShuffleBlockFetcherIterator(
   @volatile private[this] var currentResult: SuccessFetchResult = null
 
   /**
+   * Queue of fallback storage requests to issue; we'll pull requests off this gradually to make
+   * sure that the number of bytes and requests in flight is limited to maxBytesInFlight and
+   * maxReqsInFlight.
+   */
+  private[this] val fallbackStorageRequests = new Queue[FallbackStorageRequest]
+
+  /**
+   * Thread pool reading from fallback storage, first creating FallbackStorageRequest from
+   * block id and map index, then materializing requests to SuccessFetchResult.
+   */
+  private[this] val fallbackStorageReadPool: ThreadPoolExecutor =
+    ThreadUtils.newDaemonFixedThreadPool(fallbackStorageReadThreads, "fallback-storage-read")
+  private[this] val fallbackStorageReadContext: ExecutionContextExecutor =
+    ExecutionContext.fromExecutor(fallbackStorageReadPool)
+
+  /**
    * Queue of fetch requests to issue; we'll pull requests off this gradually to make sure that
-   * the number of bytes in flight is limited to maxBytesInFlight.
+   * the number of bytes and requests in flight is limited to maxBytesInFlight and maxReqsInFlight.
    */
   private[this] val fetchRequests = new Queue[FetchRequest]
 
@@ -253,6 +272,24 @@ final class ShuffleBlockFetcherIterator(
         logWarning("Failed to cleanup shuffle fetch temp file " + file.path())
       }
     }
+    fallbackStorageReadPool.shutdownNow()
+  }
+
+  private[this] def createFallbackStorageRequest(blockId: BlockId, mapIndex: Int): Unit = {
+    Future {
+      try {
+        val block = blockManager.getFallbackStorageBlockData(blockId)
+        val request = FallbackStorageRequest(blockId, mapIndex, block)
+        results.put(PreparedFallbackStorageRequestResult(request))
+      } catch {
+        case e: Throwable =>
+          logError(s"Failed to prepare request to read block $blockId from fallback storage", e)
+          results.put(
+            FailureFetchResult(blockId, mapIndex, FallbackStorage.FALLBACK_BLOCK_MANAGER_ID, e))
+          // stop processing any further fallback storage requests
+          fallbackStorageReadPool.shutdownNow()
+      }
+    }(fallbackStorageReadContext)
   }
 
   private[this] def sendRequest(req: FetchRequest): Unit = {
@@ -626,8 +663,7 @@ final class ShuffleBlockFetcherIterator(
               logError(s"Error occurred while fetching local blocks, ${ce.getMessage}")
             case ex: Exception => logError("Error occurred while fetching local blocks", ex)
           }
-          results.put(
-            FailureFetchResult(blockId, mapIndex, blockManager.blockManagerId, e))
+          results.put(FailureFetchResult(blockId, mapIndex, blockManager.blockManagerId, e))
           return
       }
     }
@@ -736,15 +772,22 @@ final class ShuffleBlockFetcherIterator(
     context.addTaskCompletionListener(onCompleteCallback)
     // Local blocks to fetch, excluding zero-sized blocks.
     val localBlocks = mutable.LinkedHashSet[(BlockId, Int)]()
-    val fallbackStorageBlocks = mutable.LinkedHashSet[(BlockId, Int)]()
+    val fallbackBlocks = mutable.LinkedHashSet[(BlockId, Int)]()
     val hostLocalBlocksByExecutor =
       mutable.LinkedHashMap[BlockManagerId, Seq[(BlockId, Long, Int)]]()
     val pushMergedLocalBlocks = mutable.LinkedHashSet[BlockId]()
-    // Partition blocks by the different fetch modes: local, host-local, push-merged-local and
-    // remote blocks.
+
+    // Partition blocks by the different fetch modes: local, host-local, push-merged-local,
+    // fallback storage and remote blocks.
     val remoteRequests = partitionBlocksByFetchMode(
       blocksByAddress, localBlocks, hostLocalBlocksByExecutor, pushMergedLocalBlocks,
-      fallbackStorageBlocks)
+      fallbackBlocks)
+
+    // Turn the fallback storage blocks into read requests in random order.
+    Utils.randomize(fallbackBlocks).foreach { case (blockId, mapIndex) =>
+      createFallbackStorageRequest(blockId, mapIndex)
+    }
+
     // Add the remote requests into our queue in a random order
     fetchRequests ++= Utils.randomize(remoteRequests)
     assert ((0 == reqsInFlight) == (0 == bytesInFlight),
@@ -762,10 +805,6 @@ final class ShuffleBlockFetcherIterator(
     // Get Local Blocks
     fetchLocalBlocks(localBlocks)
     logDebug(s"Got local blocks in ${Utils.getUsedTimeNs(startTimeNs)}")
-
-    // Get Fallback Storage Blocks
-    fetchFallbackStorageBlocks(fallbackStorageBlocks)
-    logDebug(s"Got fallback storage blocks in ${Utils.getUsedTimeNs(startTimeNs)}")
 
     // Get host local blocks if any
     fetchAllHostLocalBlocks(hostLocalBlocksByExecutor)
@@ -987,6 +1026,10 @@ final class ShuffleBlockFetcherIterator(
           defReqQueue.enqueue(request)
           result = null
 
+        case PreparedFallbackStorageRequestResult(request) =>
+          fallbackStorageRequests.enqueue(request)
+          result = null
+
         case FallbackOnPushMergedFailureResult(blockId, address, size, isNetworkReqDone) =>
           // We get this result in 3 cases:
           // 1. Failure to fetch the data of a remote shuffle chunk. In this case, the
@@ -1168,13 +1211,18 @@ final class ShuffleBlockFetcherIterator(
       }
     }
 
+    // Send fallback storage requests up to maxBytesInFlight
+    while (isBlockFetchable(fallbackStorageRequests)) {
+      sendFallbackStorageRequest(fallbackStorageRequests.dequeue())
+    }
+
     // Send fetch requests up to maxBytesInFlight. If you cannot fetch from a remote host
     // immediately, defer the request until the next time it can be processed.
 
     // Process any outstanding deferred fetch requests if possible.
     if (deferredFetchRequests.nonEmpty) {
       for ((remoteAddress, defReqQueue) <- deferredFetchRequests) {
-        while (isRemoteBlockFetchable(defReqQueue) &&
+        while (isBlockFetchable(defReqQueue) &&
             !isRemoteAddressMaxedOut(remoteAddress, defReqQueue.front)) {
           val request = defReqQueue.dequeue()
           logDebug(s"Processing deferred fetch request for $remoteAddress with "
@@ -1188,7 +1236,7 @@ final class ShuffleBlockFetcherIterator(
     }
 
     // Process any regular fetch requests if possible.
-    while (isRemoteBlockFetchable(fetchRequests)) {
+    while (isBlockFetchable(fetchRequests)) {
       val request = fetchRequests.dequeue()
       val remoteAddress = request.address
       if (isRemoteAddressMaxedOut(remoteAddress, request)) {
@@ -1211,7 +1259,41 @@ final class ShuffleBlockFetcherIterator(
         numBlocksInFlightPerAddress.getOrElse(remoteAddress, 0) + request.blocks.size
     }
 
-    def isRemoteBlockFetchable(fetchReqQueue: Queue[FetchRequest]): Boolean = {
+    def sendFallbackStorageRequest(request: FallbackStorageRequest): Unit = {
+      bytesInFlight += request.size
+      reqsInFlight += 1
+
+      Future {
+        if (!isZombie) {
+          logDebug(s"Reading block ${request.blockId} from fallback storage")
+          try {
+            // materialize the block ManagedBuffer and store data in SuccessFetchResult
+            val buf = new NioManagedBuffer(request.block.nioByteBuffer())
+            // TODO: add fallback storage metrics
+            shuffleMetrics.incLocalBlocksFetched(1)
+            shuffleMetrics.incLocalBytesRead(buf.size)
+            val result = SuccessFetchResult(
+              request.blockId, request.mapIndex, FallbackStorage.FALLBACK_BLOCK_MANAGER_ID,
+              request.size, buf, isNetworkReqDone = true)
+            results.put(result)
+          } catch {
+            case e: Throwable =>
+              logError(s"Failed to read block ${request.blockId} from fallback storage", e)
+              val result = FailureFetchResult(
+                request.blockId, request.mapIndex, FallbackStorage.FALLBACK_BLOCK_MANAGER_ID, e)
+              results.put(result)
+              // stop processing any further fallback storage requests
+              fallbackStorageReadPool.shutdownNow()
+          }
+        }
+      }(fallbackStorageReadContext)
+
+      // TODO: needed?
+      numBlocksInFlightPerAddress(FallbackStorage.FALLBACK_BLOCK_MANAGER_ID) =
+        numBlocksInFlightPerAddress.getOrElse(FallbackStorage.FALLBACK_BLOCK_MANAGER_ID, 0) + 1
+    }
+
+    def isBlockFetchable[T <: Request](fetchReqQueue: Queue[T]): Boolean = {
       fetchReqQueue.nonEmpty &&
         (bytesInFlight == 0 ||
           (reqsInFlight + 1 <= maxReqsInFlight &&
@@ -1270,13 +1352,15 @@ final class ShuffleBlockFetcherIterator(
     val originalRemoteReqs = partitionBlocksByFetchMode(originalBlocksByAddr,
       originalLocalBlocks, originalHostLocalBlocksByExecutor, originalMergedLocalBlocks,
       originalFallbackStorageBlocks)
+    // Turn the fallback storage blocks into read requests in random order.
+    Utils.randomize(originalFallbackStorageBlocks).foreach { case (blockId, mapIndex) =>
+      createFallbackStorageRequest(blockId, mapIndex)
+    }
     // Add the remote requests into our queue in a random order
     fetchRequests ++= Utils.randomize(originalRemoteReqs)
     logInfo(s"Created ${originalRemoteReqs.size} fallback remote requests for push-merged")
     // fetch all the fallback blocks that are local.
     fetchLocalBlocks(originalLocalBlocks)
-    // fetch all the fallback blocks from fallback storage.
-    fetchFallbackStorageBlocks(originalFallbackStorageBlocks)
     // Merged local blocks should be empty during fallback
     assert(originalMergedLocalBlocks.isEmpty,
       "There should be zero push-merged blocks during fallback")
@@ -1515,6 +1599,10 @@ object ShuffleBlockFetcherIterator {
     result.toSeq
   }
 
+  private[storage] trait Request {
+    val size: Long
+  }
+
   /**
    * The block information to fetch used in FetchRequest.
    * @param blockId block id
@@ -1537,8 +1625,23 @@ object ShuffleBlockFetcherIterator {
   case class FetchRequest(
       address: BlockManagerId,
       blocks: Seq[FetchBlockInfo],
-      forMergedMetas: Boolean = false) {
+      forMergedMetas: Boolean = false) extends Request {
     val size = blocks.map(_.size).sum
+  }
+
+  /**
+   * A request to fetch blocks from the Fallback Storage. Holds block data lazily.
+   * We read the data asynchronously and multithreaded. The result is a SuccessFetchResult
+   * where buf contains the materialized data.
+   * @param blockId The block id to read
+   * @param mapIndex The mapId of the block
+   * @param block the block as a lazy ManagedBuffer
+   */
+  case class FallbackStorageRequest(
+      blockId: BlockId,
+      mapIndex: Int,
+      block: ManagedBuffer) extends Request {
+    val size: Long = block.size()
   }
 
   /**
@@ -1586,6 +1689,16 @@ object ShuffleBlockFetcherIterator {
    */
   private[storage]
   case class DeferFetchRequestResult(fetchRequest: FetchRequest) extends FetchResult
+
+  /**
+   * Fetching block data from the fallback storage is a two-steps process:
+   * 1. read offset and size of the shuffle block from fallback storage
+   * 2. read the block data from fallback storage
+   * A PreparedFallbackStorageRequestResult is the outcome of the first step,
+   * the SuccessFetchResult is the outcome of the second step.
+   */
+  private[storage] case class PreparedFallbackStorageRequestResult(
+    fallbackStorageRequest: FallbackStorageRequest) extends FetchResult
 
   /**
    * Result of an un-successful fetch of either of these:
