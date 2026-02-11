@@ -623,6 +623,17 @@ package object config {
       .booleanConf
       .createWithDefault(false)
 
+  private[spark] val STORAGE_DECOMMISSION_FALLBACK_STORAGE_CLEANUP_WAIT_ON_SHUTDOWN =
+    ConfigBuilder("spark.storage.decommission.fallbackStorage.cleanUp.waitOnShutdown")
+      .doc("If true, Spark waits for all fallback storage data to be cleaned up " +
+        "when shutting down. This may defer the termination of the Spark application " +
+        "for a significant time. " +
+        s"Only used when $STORAGE_DECOMMISSION_FALLBACK_STORAGE_CLEANUP is true. " +
+        "Use an external clean up mechanism when false, for instance a TTL.")
+      .version("4.2.0")
+      .booleanConf
+      .createWithDefault(true)
+
   private[spark] val STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH =
     ConfigBuilder("spark.storage.decommission.fallbackStorage.path")
       .doc("The location for fallback storage during block manager decommissioning. " +
