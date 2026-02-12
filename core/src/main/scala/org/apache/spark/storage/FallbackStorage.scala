@@ -24,6 +24,7 @@ import scala.concurrent.Future
 import scala.reflect.ClassTag
 
 import io.netty.buffer.Unpooled
+import org.apache.commons.io.IOUtils
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FileSystem, Path}
 
@@ -124,7 +125,8 @@ private[storage] class FileSystemSegmentManagedBuffer(
 
   override def nioByteBuffer(): ByteBuffer = {
     Utils.tryWithResource(createInputStream()) { in =>
-      ByteBuffer.wrap(in.readAllBytes())
+      val bytes = IOUtils.toByteArray(in)
+      ByteBuffer.wrap(bytes)
     }
   }
 
@@ -144,10 +146,6 @@ private[storage] class FileSystemSegmentManagedBuffer(
   override def release(): ManagedBuffer = this
 
   override def convertToNetty(): AnyRef = {
-    Unpooled.wrappedBuffer(nioByteBuffer());
-  }
-
-  override def convertToNettyForSsl(): AnyRef = {
     Unpooled.wrappedBuffer(nioByteBuffer());
   }
 }

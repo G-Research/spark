@@ -23,6 +23,7 @@ import scala.concurrent.duration._
 import scala.util.Random
 
 import io.netty.buffer.ByteBuf
+import org.apache.commons.io.IOUtils
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, LocalFileSystem, Path, PositionedReadable, Seekable}
 import org.mockito.{ArgumentMatchers => mc}
@@ -167,14 +168,14 @@ class FallbackStorageSuite extends SparkFunSuite with LocalSparkContext {
         val clue = s"offset: $offset, length: $length"
 
         // creating the managed buffer does not open the file
-        val mfs = spy(fs)
+        val mfs = spy[FileSystem](fs)
         val buf = new FileSystemSegmentManagedBuffer(mfs, file, offset, length)
         verify(mfs, never()).open(mc.any[Path]())
         assert(buf.size() === length, clue)
 
         // creating the input stream opens the file
         {
-          val bytes = buf.createInputStream().readAllBytes()
+          val bytes = IOUtils.toByteArray(buf.createInputStream())
           verify(mfs, times(1)).open(mc.any[Path]())
           assert(bytes.mkString(",") === data.slice(offset, offset + length).mkString(","), clue)
         }
@@ -186,11 +187,9 @@ class FallbackStorageSuite extends SparkFunSuite with LocalSparkContext {
           assert(bytes.mkString(",") === data.slice(offset, offset + length).mkString(","), clue)
         }
 
-        // getting a Netty ByteBufs opens the file again and again
+        // getting a Netty ByteBufs opens the file again
         assert(buf.convertToNetty().asInstanceOf[ByteBuf].release() === length > 0, clue)
         verify(mfs, times(3)).open(mc.any[Path]())
-        assert(buf.convertToNettyForSsl().asInstanceOf[ByteBuf].release() === length > 0, clue)
-        verify(mfs, times(4)).open(mc.any[Path]())
       }
     }
   }

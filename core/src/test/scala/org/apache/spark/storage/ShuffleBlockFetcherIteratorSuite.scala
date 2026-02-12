@@ -352,7 +352,6 @@ class ShuffleBlockFetcherIteratorSuite extends SparkFunSuite with PrivateMethodT
       verify(mockBuf, never()).nioByteBuffer()
       verify(mockBuf, never()).createInputStream()
       verify(mockBuf, never()).convertToNetty()
-      verify(mockBuf, never()).convertToNettyForSsl()
     }
 
     val allBlocks = localBlocks ++ remoteBlocks ++ hostLocalBlocks ++ fallbackBlocks
@@ -380,7 +379,6 @@ class ShuffleBlockFetcherIteratorSuite extends SparkFunSuite with PrivateMethodT
       verify(mockBuf, never()).nioByteBuffer()
       verify(mockBuf, times(1)).createInputStream()
       verify(mockBuf, never()).convertToNetty()
-      verify(mockBuf, never()).convertToNettyForSsl()
     }
   }
 
@@ -542,7 +540,6 @@ class ShuffleBlockFetcherIteratorSuite extends SparkFunSuite with PrivateMethodT
       verify(mockBuf, never()).nioByteBuffer()
       verify(mockBuf, never()).createInputStream()
       verify(mockBuf, never()).convertToNetty()
-      verify(mockBuf, never()).convertToNettyForSsl()
     }
 
     val allBlocks = mergedLocalBlocks ++ mergedFallbackBlocks ++ mergedRemoteBlocks ++
@@ -566,7 +563,6 @@ class ShuffleBlockFetcherIteratorSuite extends SparkFunSuite with PrivateMethodT
       verify(mockBuf, never()).nioByteBuffer()
       verify(mockBuf, times(1)).createInputStream()
       verify(mockBuf, never()).convertToNetty()
-      verify(mockBuf, never()).convertToNettyForSsl()
     }
 
     assert(blockManager.hostLocalDirManager.get.getCachedHostLocalDirs.size === 1)
