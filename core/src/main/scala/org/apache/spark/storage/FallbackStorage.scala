@@ -146,10 +146,6 @@ private[storage] class FileSystemSegmentManagedBuffer(
   override def convertToNetty(): AnyRef = {
     Unpooled.wrappedBuffer(nioByteBuffer());
   }
-
-  override def convertToNettyForSsl(): AnyRef = {
-    Unpooled.wrappedBuffer(nioByteBuffer());
-  }
 }
 
 private[spark] object FallbackStorage extends Logging {
