@@ -1315,9 +1315,8 @@ final class ShuffleBlockFetcherIterator(
           try {
             // materialize the block ManagedBuffer and store data in SuccessFetchResult
             val buf = new NioManagedBuffer(request.block.nioByteBuffer())
-            // TODO: add fallback storage metrics
-            shuffleMetrics.incLocalBlocksFetched(1)
-            shuffleMetrics.incLocalBytesRead(buf.size)
+            shuffleMetrics.incFallbackStorageBlocksFetched(1)
+            shuffleMetrics.incFallbackStorageBytesRead(buf.size)
             val result = SuccessFetchResult(
               request.blockId, request.mapIndex, FallbackStorage.FALLBACK_BLOCK_MANAGER_ID,
               request.size, buf, isNetworkReqDone = true)

@@ -46,6 +46,8 @@ class ShuffleReadMetrics private[spark] () extends Serializable {
   private[executor] val _localMergedBytesRead = new LongAccumulator
   private[executor] val _remoteReqsDuration = new LongAccumulator
   private[executor] val _remoteMergedReqsDuration = new LongAccumulator
+  private[executor] val _fallbackStorageBlocksFetched = new LongAccumulator
+  private[executor] val _fallbackStorageBytesRead = new LongAccumulator
 
   /**
    * Number of remote blocks fetched in this shuffle by this task.
@@ -215,6 +217,8 @@ class ShuffleReadMetrics private[spark] () extends Serializable {
     _localMergedBytesRead.setValue(0)
     _remoteReqsDuration.setValue(0)
     _remoteMergedReqsDuration.setValue(0)
+    _fallbackStorageBlocksFetched.setValue(0)
+    _fallbackStorageBytesRead.setValue(0)
     metrics.foreach { metric =>
       _remoteBlocksFetched.add(metric.remoteBlocksFetched)
       _localBlocksFetched.add(metric.localBlocksFetched)
@@ -233,6 +237,8 @@ class ShuffleReadMetrics private[spark] () extends Serializable {
       _localMergedBytesRead.add(metric.localMergedBytesRead)
       _remoteReqsDuration.add(metric.remoteReqsDuration)
       _remoteMergedReqsDuration.add(metric.remoteMergedReqsDuration)
+      _fallbackStorageBlocksFetched.add(metric.fallbackStorageBlocksFetched)
+      _fallbackStorageBytesRead.add(metric.fallbackStorageBytesRead)
     }
   }
 }
@@ -261,6 +267,8 @@ private[spark] class TempShuffleReadMetrics extends ShuffleReadMetricsReporter {
   private[this] var _localMergedBytesRead = 0L
   private[this] var _remoteReqsDuration = 0L
   private[this] var _remoteMergedReqsDuration = 0L
+  private[this] var _fallbackStorageBlocksFetched = 0L
+  private[this] var _fallbackStorageBytesRead = 0L
 
   override def incRemoteBlocksFetched(v: Long): Unit = _remoteBlocksFetched += v
   override def incLocalBlocksFetched(v: Long): Unit = _localBlocksFetched += v
@@ -279,6 +287,8 @@ private[spark] class TempShuffleReadMetrics extends ShuffleReadMetricsReporter {
   override def incLocalMergedBytesRead(v: Long): Unit = _localMergedBytesRead += v
   override def incRemoteReqsDuration(v: Long): Unit = _remoteReqsDuration += v
   override def incRemoteMergedReqsDuration(v: Long): Unit = _remoteMergedReqsDuration += v
+  override def incFallbackStorageBlocksFetched(v: Long): Unit = _fallbackStorageBlocksFetched += v
+  override def incFallbackStorageBytesRead(v: Long): Unit = _fallbackStorageBytesRead += v
 
   def remoteBlocksFetched: Long = _remoteBlocksFetched
   def localBlocksFetched: Long = _localBlocksFetched
@@ -297,4 +307,6 @@ private[spark] class TempShuffleReadMetrics extends ShuffleReadMetricsReporter {
   def localMergedBytesRead: Long = _localMergedBytesRead
   def remoteReqsDuration: Long = _remoteReqsDuration
   def remoteMergedReqsDuration: Long = _remoteMergedReqsDuration
+  def fallbackStorageBlocksFetched: Long = _fallbackStorageBlocksFetched
+  def fallbackStorageBytesRead: Long = _fallbackStorageBytesRead
 }
