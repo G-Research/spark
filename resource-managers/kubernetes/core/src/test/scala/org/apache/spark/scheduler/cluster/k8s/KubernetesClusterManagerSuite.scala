@@ -23,7 +23,7 @@ import org.scalatest.BeforeAndAfter
 
 import org.apache.spark._
 import org.apache.spark.deploy.k8s.Config._
-import org.apache.spark.internal.config._
+import org.apache.spark.scheduler.cluster.k8s.ExecutorLifecycleTestUtils.TEST_SPARK_APP_ID
 
 class KubernetesClusterManagerSuite extends SparkFunSuite with BeforeAndAfter {
 
@@ -36,16 +36,14 @@ class KubernetesClusterManagerSuite extends SparkFunSuite with BeforeAndAfter {
   @Mock
   private var env: SparkEnv = _
 
-  @Mock
   private var sparkConf: SparkConf = _
 
   before {
     MockitoAnnotations.openMocks(this).close()
+    sparkConf = new SparkConf(false)
+      .set("spark.app.id", TEST_SPARK_APP_ID)
+      .set("spark.master", "k8s://test")
     when(sc.conf).thenReturn(sparkConf)
-    when(sc.conf.get(KUBERNETES_DRIVER_POD_NAME)).thenReturn(None)
-    when(sc.conf.get(EXECUTOR_INSTANCES)).thenReturn(None)
-    when(sc.conf.get(MAX_EXECUTOR_FAILURES)).thenReturn(None)
-    when(sc.conf.get(EXECUTOR_ATTEMPT_FAILURE_VALIDITY_INTERVAL_MS)).thenReturn(None)
     when(sc.env).thenReturn(env)
   }
 
@@ -55,7 +53,7 @@ class KubernetesClusterManagerSuite extends SparkFunSuite with BeforeAndAfter {
       classOf[ExecutorPodsAllocator].getName)
     validConfigs.foreach { c =>
       val manager = new KubernetesClusterManager()
-      when(sc.conf.get(KUBERNETES_ALLOCATION_PODS_ALLOCATOR)).thenReturn(c)
+      sparkConf.set(KUBERNETES_ALLOCATION_PODS_ALLOCATOR, c)
       manager.makeExecutorPodsAllocator(sc, kubernetesClient, null)
     }
   }
