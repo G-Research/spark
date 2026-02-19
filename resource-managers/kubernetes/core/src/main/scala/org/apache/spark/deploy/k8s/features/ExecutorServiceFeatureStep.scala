@@ -22,7 +22,8 @@ import io.fabric8.kubernetes.api.model.{ContainerBuilder, HasMetadata, ServiceBu
 
 import org.apache.spark.{SparkException, SparkIllegalArgumentException}
 import org.apache.spark.deploy.k8s.{KubernetesExecutorConf, SparkPod}
-import org.apache.spark.deploy.k8s.Constants.{OWNER_REFERENCE_ANNOTATION, OWNER_REFERENCE_ANNOTATION_DRIVER_VALUE, SPARK_APP_ID_LABEL, SPARK_EXECUTOR_ID_LABEL}
+import org.apache.spark.deploy.k8s.Config.KUBERNETES_EXECUTOR_SERVICE_COOL_DOWN_PERIOD
+import org.apache.spark.deploy.k8s.Constants.{COOLDOWN_PERIOD_ANNOTATION, OWNER_REFERENCE_ANNOTATION, OWNER_REFERENCE_ANNOTATION_DRIVER_VALUE, OWNER_REFERENCE_ANNOTATION_EXECUTOR_VALUE, SPARK_APP_ID_LABEL, SPARK_EXECUTOR_ID_LABEL}
 import org.apache.spark.internal.config.{BLOCK_MANAGER_PORT, SHUFFLE_SERVICE_PORT}
 
 class ExecutorServiceFeatureStep(conf: KubernetesExecutorConf) extends KubernetesFeatureConfigStep {
@@ -35,6 +36,16 @@ class ExecutorServiceFeatureStep(conf: KubernetesExecutorConf) extends Kubernete
   // name length is 8 + 38 + 6 + 10 = 62
   // which fits in KUBERNETES_DNS_LABEL_NAME_MAX_LENGTH = 63
   private lazy val serviceName = s"svc-$sparkAppSelector-exec-$sparkExecId"
+
+  // The service lives for this number of seconds
+  private val coolDownPeriod = conf.sparkConf.get(KUBERNETES_EXECUTOR_SERVICE_COOL_DOWN_PERIOD)
+  if (coolDownPeriod < 0) {
+    throw new SparkIllegalArgumentException(
+      s"The executor Kubernetes service cool down period of $coolDownPeriod seconds " +
+        s"configured via ${KUBERNETES_EXECUTOR_SERVICE_COOL_DOWN_PERIOD.key} must not be negative.",
+      None
+    )
+  }
 
   // The executor kubernetes services requires BLOCK_MANAGER_PORT to be set
   private val blockManagerPortName = "spark-block-manager"
@@ -67,7 +78,16 @@ class ExecutorServiceFeatureStep(conf: KubernetesExecutorConf) extends Kubernete
   }
 
   override def getAdditionalKubernetesResources(): Seq[HasMetadata] = {
-    val annotation = Map(OWNER_REFERENCE_ANNOTATION -> OWNER_REFERENCE_ANNOTATION_DRIVER_VALUE)
+    val owner = if (coolDownPeriod > 0) {
+      OWNER_REFERENCE_ANNOTATION_DRIVER_VALUE
+    } else {
+      OWNER_REFERENCE_ANNOTATION_EXECUTOR_VALUE
+    }
+
+    val annotation = Map(
+      OWNER_REFERENCE_ANNOTATION -> owner,
+      COOLDOWN_PERIOD_ANNOTATION -> coolDownPeriod.toString
+    )
     val service = new ServiceBuilder()
       .withNewMetadata()
       .withName(serviceName)
