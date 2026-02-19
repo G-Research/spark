@@ -20,7 +20,7 @@ import scala.jdk.CollectionConverters._
 
 import io.fabric8.kubernetes.api.model.{ContainerBuilder, HasMetadata, ServiceBuilder}
 
-import org.apache.spark.SparkException
+import org.apache.spark.{SparkException, SparkIllegalArgumentException}
 import org.apache.spark.deploy.k8s.{KubernetesExecutorConf, SparkPod}
 import org.apache.spark.deploy.k8s.Constants.{OWNER_REFERENCE_ANNOTATION, OWNER_REFERENCE_ANNOTATION_DRIVER_VALUE}
 import org.apache.spark.internal.config.{BLOCK_MANAGER_PORT, SHUFFLE_SERVICE_PORT}
@@ -42,9 +42,10 @@ class ExecutorServiceFeatureStep(conf: KubernetesExecutorConf) extends Kubernete
   private val blockManagerPortName = "spark-block-manager"
   private val blockManagerPort = conf.sparkConf.get(BLOCK_MANAGER_PORT)
   if (blockManagerPort <= 0) {
-    throw new SparkException(
+    throw new SparkIllegalArgumentException(
       s"Enabling the executor Kubernetes service requires ${BLOCK_MANAGER_PORT.key} to be set " +
-        s"to a positive number, for instance ${SHUFFLE_SERVICE_PORT.defaultValue.get}."
+        s"to a positive number, for instance ${SHUFFLE_SERVICE_PORT.defaultValue.get}.",
+      None
     )
   }
 

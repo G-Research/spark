@@ -16,7 +16,7 @@
  */
 package org.apache.spark.scheduler.cluster.k8s
 
-import scala.jdk.CollectionConverters.IterableHasAsScala
+import scala.jdk.CollectionConverters.collectionAsScalaIterableConverter
 
 import io.fabric8.kubernetes.api.model.Service
 import io.fabric8.kubernetes.client.KubernetesClient

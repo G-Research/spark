@@ -760,7 +760,7 @@ class ExecutorPodsAllocatorSuite extends SparkFunSuite with BeforeAndAfter {
     // Scale up to one executor
     podsAllocatorUnderTest.setTotalExpectedExecutors(
       Map(defaultProfile -> 1))
-    assert(podsAllocatorUnderTest.invokePrivate(numOutstandingPods).get() == 1)
+    assert(podsAllocatorUnderTest.numOutstandingPods.get() == 1)
     verify(podsWithNamespace).resource(podWithAttachedContainerForId(1))
 
     // service is considered for creation
@@ -831,7 +831,7 @@ class ExecutorPodsAllocatorSuite extends SparkFunSuite with BeforeAndAfter {
     // Scale up to one executor
     podsAllocatorUnderTest.setTotalExpectedExecutors(
       Map(defaultProfile -> 1))
-    assert(podsAllocatorUnderTest.invokePrivate(numOutstandingPods).get() == 1)
+    assert(podsAllocatorUnderTest.numOutstandingPods.get() == 1)
     verify(podsWithNamespace).resource(podWithAttachedContainerForId(1))
     verify(podResource).create()
 
