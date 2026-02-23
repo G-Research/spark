@@ -902,6 +902,13 @@ class ExecutorPodsAllocatorSuite extends SparkFunSuite with BeforeAndAfter {
     val service = new ServiceBuilder()
       .withNewMetadata()
       .withName("service")
+      .withLabels(
+        Map(
+          SPARK_APP_ID_LABEL -> TEST_SPARK_APP_ID,
+          SPARK_EXECUTOR_ID_LABEL -> "1",
+          SPARK_EXECUTOR_SERVICE_STATE_LABEL -> SPARK_EXECUTOR_SERVICE_ALIVE_STATE
+        ).asJava
+      )
       .withAnnotations(
         Map(COOLDOWN_PERIOD_ANNOTATION -> "2").asJava
       )
@@ -927,61 +934,93 @@ class ExecutorPodsAllocatorSuite extends SparkFunSuite with BeforeAndAfter {
     assert(podsAllocatorUnderTest.numOutstandingPods.get() == 1)
     verify(podsWithNamespace).resource(podWithAttachedContainerForId(1))
     verify(podResource).create()
+    verify(resourceList, times(1)).serverSideApply()
 
-    // service should have been registered with cooldown period
-    assert(podsAllocatorUnderTest.aliveServicesWithCooldown.size() == 1)
+    assert(service.getMetadata.getLabels.asScala === Map(
+      "spark-app-selector" -> "spark-app-id",
+      "spark-exec-id" -> "1",
+      "spark-exec-service-state" -> "alive"))
+    assert(service.getMetadata.getAnnotations.asScala === Map("spark.cooldown-period" -> "2"))
 
     // make pods allocator see an empty snapshot
     waitForExecutorPodsClock.setTime(startTime + 10*1000)
     snapshotsStore.removeDeletedExecutors()
     snapshotsStore.notifySubscribers()
-    assert(podsAllocatorUnderTest.aliveServicesWithCooldown.size() == 1)
+    assert(service.getMetadata.getLabels.asScala === Map(
+      "spark-app-selector" -> "spark-app-id",
+      "spark-exec-id" -> "1",
+      "spark-exec-service-state" -> "alive"))
+    assert(service.getMetadata.getAnnotations.asScala === Map("spark.cooldown-period" -> "2"))
 
     // the executor is coming up
     waitForExecutorPodsClock.setTime(startTime + 20*1000)
     snapshotsStore.updatePod(pendingExecutor(1))
     snapshotsStore.notifySubscribers()
-    assert(podsAllocatorUnderTest.aliveServicesWithCooldown.size() == 1)
+    assert(service.getMetadata.getLabels.asScala === Map(
+      "spark-app-selector" -> "spark-app-id",
+      "spark-exec-id" -> "1",
+      "spark-exec-service-state" -> "alive"))
+    assert(service.getMetadata.getAnnotations.asScala === Map("spark.cooldown-period" -> "2"))
 
     // ... and running
     waitForExecutorPodsClock.setTime(startTime + 30*1000)
     snapshotsStore.updatePod(runningExecutor(1))
     snapshotsStore.notifySubscribers()
-    assert(podsAllocatorUnderTest.aliveServicesWithCooldown.size() == 1)
+    assert(service.getMetadata.getLabels.asScala === Map(
+      "spark-app-selector" -> "spark-app-id",
+      "spark-exec-id" -> "1",
+      "spark-exec-service-state" -> "alive"))
+    assert(service.getMetadata.getAnnotations.asScala === Map("spark.cooldown-period" -> "2"))
 
     // the executor gets unscheduled
     waitForExecutorPodsClock.setTime(startTime + 40*1000)
     podsAllocatorUnderTest.setTotalExpectedExecutors(
       Map(defaultProfile -> 0))
     snapshotsStore.notifySubscribers()
-    assert(podsAllocatorUnderTest.aliveServicesWithCooldown.size() == 1)
+    assert(service.getMetadata.getLabels.asScala === Map(
+      "spark-app-selector" -> "spark-app-id",
+      "spark-exec-id" -> "1",
+      "spark-exec-service-state" -> "alive"))
+    assert(service.getMetadata.getAnnotations.asScala === Map("spark.cooldown-period" -> "2"))
 
     // the executor disappears, does not trigger anything
     waitForExecutorPodsClock.setTime(startTime + 50*1000)
     snapshotsStore.updatePod(deletedExecutor(1))
     snapshotsStore.notifySubscribers()
-    assert(podsAllocatorUnderTest.aliveServicesWithCooldown.size() == 1)
-    assert(podsAllocatorUnderTest.serviceDeletionQueue.size() == 0)
+    assert(service.getMetadata.getLabels.asScala === Map(
+      "spark-app-selector" -> "spark-app-id",
+      "spark-exec-id" -> "1",
+      "spark-exec-service-state" -> "alive"))
+    assert(service.getMetadata.getAnnotations.asScala === Map("spark.cooldown-period" -> "2"))
 
     // the executor disappears, this triggers scheduling service for deletion
     waitForExecutorPodsClock.setTime(startTime + 60*1000)
     snapshotsStore.removeDeletedExecutors()
     snapshotsStore.notifySubscribers()
-    assert(podsAllocatorUnderTest.aliveServicesWithCooldown.size() == 0)
-    assert(podsAllocatorUnderTest.serviceDeletionQueue.size() == 1)
+    assert(service.getMetadata.getLabels.asScala === Map(
+      "spark-app-selector" -> "spark-app-id",
+      "spark-exec-id" -> "1",
+      "spark-exec-service-state" -> "alive"))
+    assert(service.getMetadata.getAnnotations.asScala === Map("spark.cooldown-period" -> "2"))
 
     // one second passes by, cooldown period is two seconds
     waitForExecutorPodsClock.setTime(startTime + 61*1000)
     snapshotsStore.notifySubscribers()
-    assert(podsAllocatorUnderTest.aliveServicesWithCooldown.size() == 0)
-    assert(podsAllocatorUnderTest.serviceDeletionQueue.size() == 1)
+    assert(service.getMetadata.getLabels.asScala === Map(
+      "spark-app-selector" -> "spark-app-id",
+      "spark-exec-id" -> "1",
+      "spark-exec-service-state" -> "alive"))
+    assert(service.getMetadata.getAnnotations.asScala === Map("spark.cooldown-period" -> "2"))
     verify(resourceList, never()).delete()
 
     // two seconds passed by, service is being deleted
     waitForExecutorPodsClock.setTime(startTime + 62*1000)
     snapshotsStore.notifySubscribers()
-    assert(podsAllocatorUnderTest.aliveServicesWithCooldown.size() == 0)
-    assert(podsAllocatorUnderTest.serviceDeletionQueue.size() == 0)
+    assert(service.getMetadata.getLabels.asScala === Map(
+      "spark-app-selector" -> "spark-app-id",
+      "spark-exec-id" -> "1",
+      "spark-exec-service-state" -> "alive"))
+    assert(service.getMetadata.getAnnotations.asScala === Map("spark.cooldown-period" -> "2"))
     verify(resourceList, times(1)).delete()
   }
 
