@@ -254,7 +254,8 @@ class ExecutorPodsAllocator(
             val svc = service.get()
             val cooldownString =
               svc.getMetadata.getAnnotations.get(COOLDOWN_PERIOD_ANNOTATION)
-            if (cooldownString != null && cooldownString.toIntOption.isDefined) {
+            if (cooldownString != null && cooldownString.nonEmpty &&
+              cooldownString.forall(Character.isDigit)) {
               val cooldown = cooldownString.toInt
               val deadline =
                 Instant.ofEpochMilli(currentTime + cooldown * 1000).atZone(ZoneOffset.UTC)
