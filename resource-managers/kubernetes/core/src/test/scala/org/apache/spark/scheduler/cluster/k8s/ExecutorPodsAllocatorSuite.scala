@@ -923,12 +923,13 @@ class ExecutorPodsAllocatorSuite extends SparkFunSuite with BeforeAndAfter {
       )
       .endMetadata()
       .build()
-    val serviceMock = spy(service)
+    val serviceMock = spy[Service](service)
 
     val serviceResource = mock[ServiceResource[Service]]
     when(serviceResource.get()).thenReturn(serviceMock)
     val serviceList = mock[MixedOperation[Service, ServiceList, ServiceResource[Service]]]
-    when(serviceList.resources()).thenAnswer(_ => Stream.of(serviceResource))
+    when(serviceList.resources())
+      .thenAnswer(_ => Stream.of[ServiceResource[Service]](serviceResource))
     val emptyServiceList = mock[MixedOperation[Service, ServiceList, ServiceResource[Service]]]
     when(emptyServiceList.resources()).thenAnswer(_ => Stream.empty[ServiceResource[Service]])
 
@@ -1070,7 +1071,8 @@ class ExecutorPodsAllocatorSuite extends SparkFunSuite with BeforeAndAfter {
   test("SPARK-52505: stopping deletes services with state label") {
     val serviceResource = mock[ServiceResource[Service]]
     val serviceList = mock[MixedOperation[Service, ServiceList, ServiceResource[Service]]]
-    when(serviceList.resources()).thenAnswer(_ => Stream.of(serviceResource))
+    when(serviceList.resources())
+      .thenAnswer(_ => Stream.of[ServiceResource[Service]](serviceResource))
     when(serviceList.inNamespace("default")).thenReturn(serviceList)
     when(serviceList.withLabel(SPARK_APP_ID_LABEL, TEST_SPARK_APP_ID)).thenReturn(serviceList)
     when(serviceList.withLabel(SPARK_EXECUTOR_SERVICE_STATE_LABEL)).thenReturn(serviceList)
