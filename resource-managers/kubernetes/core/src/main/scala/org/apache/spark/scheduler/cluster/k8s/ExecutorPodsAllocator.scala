@@ -242,14 +242,8 @@ class ExecutorPodsAllocator(
 
       // schedule all services of not-alive executors that have a cooldown period for deletion
       val aliveExecs = existingExecs ++ newlyCreatedExecutors.keySet.diff(k8sKnownExecIds.toSet)
-      logInfo(s"alive executors: ${aliveExecs.mkString(", ")}")
-      logInfo(s"existing executors: ${existingExecs.mkString(", ")}")
-      logInfo(s"newly created executors: ${newlyCreatedExecutors.keySet.mkString(", ")}")
-      logInfo(s"known executors: ${k8sKnownExecIds.toSet.mkString(", ")}")
-      logInfo(s"newly created minus known executors: " +
-        s"${newlyCreatedExecutors.keySet.diff(k8sKnownExecIds.toSet).mkString(", ")}")
       Utils.tryLogNonFatalError {
-        logInfo("Getting all services with alive state label")
+        val start = clock.getTimeMillis()
         kubernetesClient
           .services()
           .inNamespace(namespace)
@@ -257,14 +251,15 @@ class ExecutorPodsAllocator(
           .withLabel(SPARK_EXECUTOR_SERVICE_STATE_LABEL, SPARK_EXECUTOR_SERVICE_ALIVE_STATE)
           .withLabelNotIn(SPARK_EXECUTOR_ID_LABEL, aliveExecs.toSeq.sorted.map(_.toString): _*)
           .resources().forEach { service =>
+            val svc = service.get()
             val cooldownString =
-              service.get.getMetadata.getAnnotations.get(COOLDOWN_PERIOD_ANNOTATION)
+              svc.getMetadata.getAnnotations.get(COOLDOWN_PERIOD_ANNOTATION)
             if (cooldownString != null && cooldownString.toIntOption.isDefined) {
               val cooldown = cooldownString.toInt
               val deadline =
                 Instant.ofEpochMilli(currentTime + cooldown * 1000).atZone(ZoneOffset.UTC)
               logInfo(s"Executor got deleted, removal of " +
-                s"service ${service.get.getMetadata.getName} scheduled in ${cooldown}s")
+                s"service ${svc.getMetadata.getName} scheduled in ${cooldown}s")
               Utils.tryLogNonFatalError {
                 service.patch(
                   PatchContext.of(PatchType.STRATEGIC_MERGE),
@@ -281,25 +276,27 @@ class ExecutorPodsAllocator(
               }
             }
           }
-        logInfo("Processed all services with alive state label")
+        val end = clock.getTimeMillis()
+        logInfo(s"Processed all services with alive state label in ${end - start}ms")
       }
     }
 
     // delete services that passed their cooldown deadline
-    logInfo("Getting all services with cooldown state label")
     Utils.tryLogNonFatalError {
+      val start = clock.getTimeMillis()
       kubernetesClient
         .services()
         .inNamespace(namespace)
         .withLabel(SPARK_APP_ID_LABEL, applicationId)
         .withLabel(SPARK_EXECUTOR_SERVICE_STATE_LABEL, SPARK_EXECUTOR_SERVICE_COOLDOWN_STATE)
         .resources().forEach { service =>
-          Option(service.get.getMetadata.getAnnotations.get(COOLDOWN_DEADLINE_ANNOTATION))
+          val svc = service.get
+          Option(svc.getMetadata.getAnnotations.get(COOLDOWN_DEADLINE_ANNOTATION))
             .flatMap(s => Try(Instant.parse(s)).toOption)
             .filter(_.toEpochMilli <= currentTime)
             .foreach { deadline =>
               logInfo(s"Service deadline $deadline has passed current time $currentTime, " +
-                s"deleting service $service")
+                s"deleting service ${svc.getMetadata.getName}")
               try {
                 service.delete()
               } catch {
@@ -308,8 +305,9 @@ class ExecutorPodsAllocator(
               }
             }
         }
+      val end = clock.getTimeMillis()
+      logInfo(s"Processed all services with cooldown state label in ${end - start}ms")
     }
-    logInfo("Processed all services with cooldown state label")
 
     val notDeletedPods = lastSnapshot.executorPods.filterKeys(!_deletedExecutorIds.contains(_))
     // Map the pods into per ResourceProfile id so we can check per ResourceProfile,
@@ -631,22 +629,15 @@ class ExecutorPodsAllocator(
         .withLabel(SPARK_ROLE_LABEL, SPARK_POD_EXECUTOR_ROLE)
         .delete()
     }
+
+    // delete all services with cooldown periods
     Utils.tryLogNonFatalError {
-      // delete all services with cooldown periods
       kubernetesClient
         .services()
         .inNamespace(namespace)
         .withLabel(SPARK_APP_ID_LABEL, applicationId)
         .withLabel(SPARK_EXECUTOR_SERVICE_STATE_LABEL)
-        .resources().forEach { service =>
-          logInfo(s"Deleting services with cooldown label: $service")
-          try {
-            service.delete()
-          } catch {
-            case NonFatal(e) =>
-              logWarning(s"Failed to delete service $service", e)
-          }
-        }
+        .delete()
     }
   }
 }
