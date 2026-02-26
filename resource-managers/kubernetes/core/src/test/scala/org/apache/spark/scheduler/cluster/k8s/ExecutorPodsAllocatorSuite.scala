@@ -16,23 +16,26 @@
  */
 package org.apache.spark.scheduler.cluster.k8s
 
-import java.time.Instant
+import java.time.{Instant, ZoneOffset}
 import java.time.temporal.ChronoUnit.MILLIS
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.stream.Stream
 
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
 
 import io.fabric8.kubernetes.api.model._
 import io.fabric8.kubernetes.client.{KubernetesClient, KubernetesClientException}
-import io.fabric8.kubernetes.client.dsl.PodResource
-import org.mockito.{Mock, MockitoAnnotations}
+import io.fabric8.kubernetes.client.dsl.{Deletable, MixedOperation, NamespaceListVisitFromServerGetDeleteRecreateWaitApplicable, PodResource, ServerSideApplicable, ServiceResource}
+import io.fabric8.kubernetes.client.dsl.base.{PatchContext, PatchType}
+import org.mockito.{ArgumentCaptor, Mock, Mockito, MockitoAnnotations}
 import org.mockito.ArgumentMatchers.{any, anyString, eq => meq}
-import org.mockito.Mockito.{never, times, verify, when}
+import org.mockito.Mockito.{never, spy, times, verify, when}
 import org.mockito.invocation.InvocationOnMock
 import org.mockito.stubbing.Answer
 import org.scalatest.BeforeAndAfter
 import org.scalatest.PrivateMethodTester._
+import org.scalatestplus.mockito.MockitoSugar.mock
 
 import org.apache.spark.{SecurityManager, SparkConf, SparkException, SparkFunSuite}
 import org.apache.spark.deploy.k8s.{KubernetesExecutorConf, KubernetesExecutorSpec}
@@ -45,6 +48,8 @@ import org.apache.spark.scheduler.cluster.k8s.ExecutorLifecycleTestUtils._
 import org.apache.spark.util.ManualClock
 
 class ExecutorPodsAllocatorSuite extends SparkFunSuite with BeforeAndAfter {
+
+  private def doReturn(value: Any) = org.mockito.Mockito.doReturn(value, Seq.empty: _*)
 
   private val driverPodName = "driver"
 
@@ -112,6 +117,11 @@ class ExecutorPodsAllocatorSuite extends SparkFunSuite with BeforeAndAfter {
   @Mock
   private var schedulerBackend: KubernetesClusterSchedulerBackend = _
 
+  @Mock
+  private var resourceList: RESOURCE_LIST = _
+
+  private var createdResourcesArgumentCaptor: ArgumentCaptor[Array[HasMetadata]] = _
+
   private var snapshotsStore: DeterministicExecutorPodsSnapshotsStore = _
 
   private var podsAllocatorUnderTest: ExecutorPodsAllocator = _
@@ -121,6 +131,7 @@ class ExecutorPodsAllocatorSuite extends SparkFunSuite with BeforeAndAfter {
   val appId = "testapp"
 
   before {
+    createdResourcesArgumentCaptor = ArgumentCaptor.forClass(classOf[Array[HasMetadata]])
     MockitoAnnotations.openMocks(this).close()
     when(kubernetesClient.pods()).thenReturn(podOperations)
     when(podOperations.inNamespace("default")).thenReturn(podsWithNamespace)
@@ -144,12 +155,21 @@ class ExecutorPodsAllocatorSuite extends SparkFunSuite with BeforeAndAfter {
       conf, secMgr, executorBuilder, kubernetesClient, snapshotsStore, waitForExecutorPodsClock)
     when(schedulerBackend.getExecutorIds()).thenReturn(Seq.empty)
     podsAllocatorUnderTest.start(TEST_SPARK_APP_ID, schedulerBackend)
+    val apl = mock[NamespaceListVisitFromServerGetDeleteRecreateWaitApplicable[HasMetadata]]
+    val ssa = mock[ServerSideApplicable[java.util.List[HasMetadata]]]
+    when(apl.forceConflicts()).thenReturn(ssa)
+    when(kubernetesClient.resourceList()).thenReturn(apl)
+    when(kubernetesClient.resourceList(any[HasMetadata]())).thenReturn(apl)
     when(kubernetesClient.persistentVolumeClaims()).thenReturn(persistentVolumeClaims)
     when(persistentVolumeClaims.inNamespace("default")).thenReturn(pvcWithNamespace)
     when(pvcWithNamespace.withLabel(any(), any())).thenReturn(labeledPersistentVolumeClaims)
     when(pvcWithNamespace.resource(any())).thenReturn(pvcResource)
     when(labeledPersistentVolumeClaims.list()).thenReturn(persistentVolumeClaimList)
     when(persistentVolumeClaimList.getItems).thenReturn(Seq.empty[PersistentVolumeClaim].asJava)
+    when(resourceList.forceConflicts()).thenReturn(resourceList)
+    doReturn(resourceList)
+      .when(kubernetesClient)
+      .resourceList(createdResourcesArgumentCaptor.capture(): _*)
   }
 
   test("SPARK-49447: Prevent small values less than 100 for batch delay") {
@@ -775,6 +795,346 @@ class ExecutorPodsAllocatorSuite extends SparkFunSuite with BeforeAndAfter {
     assert(!podsAllocatorUnderTest.isDeleted("7"))
   }
 
+  test("SPARK-55585: executor feature steps can create resources") {
+    val service = new ServiceBuilder()
+      .withNewMetadata()
+      .withName("servicename")
+      .endMetadata()
+      .build()
+
+    when(executorBuilder.buildFromFeatures(any(classOf[KubernetesExecutorConf]), meq(secMgr),
+      // have the feature step define a kubernetes service (resource)
+      meq(kubernetesClient), any(classOf[ResourceProfile])))
+      .thenAnswer((invocation: InvocationOnMock) => {
+        val k8sConf: KubernetesExecutorConf = invocation.getArgument(0)
+        KubernetesExecutorSpec(
+          executorPodWithId(k8sConf.executorId.toInt, k8sConf.resourceProfileId),
+          Seq(service))
+      })
+
+    val startTime = Instant.now.toEpochMilli
+    waitForExecutorPodsClock.setTime(startTime)
+
+    // Scale up to one executor
+    podsAllocatorUnderTest.setTotalExpectedExecutors(
+      Map(defaultProfile -> 1))
+    assert(podsAllocatorUnderTest.invokePrivate(numOutstandingPods).get() == 1)
+    verify(podsWithNamespace).resource(podWithAttachedContainerForId(1))
+
+    // service is considered for creation
+    // resources should have been created
+    verify(kubernetesClient, times(1)).resourceList(meq(service))
+    verify(resourceList, times(1)).serverSideApply()
+  }
+
+  test("SPARK-55587: executor feature steps resources ownership") {
+    val executorMetadata = mock[ObjectMeta]
+    when(executorMetadata.getName).thenReturn("executor-name")
+    when(executorMetadata.getUid).thenReturn("executor-uid")
+
+    val executorPod = mock[Pod]
+    when(podResource.create()).thenReturn(executorPod)
+    when(executorPod.getMetadata).thenReturn(executorMetadata)
+    when(executorPod.getApiVersion).thenReturn("executor-version")
+    when(executorPod.getKind).thenReturn("executor-kind")
+
+    val service1 = new ServiceBuilder()
+      .withNewMetadata()
+      .withName("service1")
+      .endMetadata()
+      .build()
+    val service2 = new ServiceBuilder()
+      .withNewMetadata()
+      .withName("service2")
+      .withAnnotations(
+        Map(OWNER_REFERENCE_ANNOTATION -> OWNER_REFERENCE_ANNOTATION_EXECUTOR_VALUE).asJava
+      )
+      .endMetadata()
+      .build()
+    val service3 = new ServiceBuilder()
+      .withNewMetadata()
+      .withName("service3")
+      .withAnnotations(
+        Map(OWNER_REFERENCE_ANNOTATION -> OWNER_REFERENCE_ANNOTATION_DRIVER_VALUE).asJava
+      )
+      .endMetadata()
+      .build()
+    val service4 = new ServiceBuilder()
+      .withNewMetadata()
+      .withName("service4")
+      .withAnnotations(
+        Map(OWNER_REFERENCE_ANNOTATION -> "none").asJava
+      )
+      .endMetadata()
+      .build()
+
+    when(executorBuilder.buildFromFeatures(any(classOf[KubernetesExecutorConf]), meq(secMgr),
+      // have the feature step define a kubernetes service (resource)
+      meq(kubernetesClient), any(classOf[ResourceProfile])))
+      .thenAnswer((invocation: InvocationOnMock) => {
+        val k8sConf: KubernetesExecutorConf = invocation.getArgument(0)
+        KubernetesExecutorSpec(
+          executorPodWithId(k8sConf.executorId.toInt, k8sConf.resourceProfileId),
+          Seq(service1, service2, service3, service4))
+      })
+
+    assert(service1.getMetadata.getOwnerReferences.isEmpty)
+    assert(service2.getMetadata.getOwnerReferences.isEmpty)
+    assert(service3.getMetadata.getOwnerReferences.isEmpty)
+    assert(service4.getMetadata.getOwnerReferences.isEmpty)
+
+    val startTime = Instant.now.toEpochMilli
+    waitForExecutorPodsClock.setTime(startTime)
+
+    // Scale up to one executor
+    podsAllocatorUnderTest.setTotalExpectedExecutors(
+      Map(defaultProfile -> 1))
+    assert(podsAllocatorUnderTest.invokePrivate(numOutstandingPods).get() == 1)
+    verify(podsWithNamespace).resource(podWithAttachedContainerForId(1))
+    verify(podResource).create()
+
+    // ownership references of services updated
+    // executor owns service1 (default)
+    assert(service1.getMetadata.getOwnerReferences.size() === 1)
+    assert(service1.getMetadata.getOwnerReferences.get(0).getName === "executor-name")
+    // executor owns service2 (through annotation)
+    assert(service2.getMetadata.getOwnerReferences.size() === 1)
+    assert(service2.getMetadata.getOwnerReferences.get(0).getName === "executor-name")
+    // driver owns service3 (through annotation)
+    assert(service3.getMetadata.getOwnerReferences.size() === 1)
+    assert(service3.getMetadata.getOwnerReferences.get(0).getName === "driver")
+    // nothing owns service 4
+    assert(service4.getMetadata.getOwnerReferences.isEmpty)
+  }
+
+  test("SPARK-55587: executor feature steps resources deleted on failure") {
+    val service = new ServiceBuilder()
+      .withNewMetadata()
+      .withName("service")
+      .withAnnotations(
+        Map(OWNER_REFERENCE_ANNOTATION -> "none").asJava
+      )
+      .endMetadata()
+      .build()
+
+    when(executorBuilder.buildFromFeatures(any(classOf[KubernetesExecutorConf]), meq(secMgr),
+      // have the feature step define a kubernetes service (resource)
+      meq(kubernetesClient), any(classOf[ResourceProfile])))
+      .thenAnswer((invocation: InvocationOnMock) => {
+        val k8sConf: KubernetesExecutorConf = invocation.getArgument(0)
+        KubernetesExecutorSpec(
+          executorPodWithId(k8sConf.executorId.toInt, k8sConf.resourceProfileId),
+          Seq(service))
+      })
+
+    // force an exception on resourceList.serverSideApply
+    when(resourceList.serverSideApply()).thenAnswer(
+      _ => throw new RuntimeException("test exception")
+    )
+
+    val startTime = Instant.now.toEpochMilli
+    waitForExecutorPodsClock.setTime(startTime)
+
+    // Scale up to one executor, this should fail
+    intercept[RuntimeException] {
+      podsAllocatorUnderTest.setTotalExpectedExecutors(
+        Map(defaultProfile -> 1))
+    }
+    verify(podsWithNamespace).resource(podWithAttachedContainerForId(1))
+
+    // resources should have been deleted on failure
+    verify(resourceList, times(1)).delete()
+  }
+
+  test("SPARK-52505: executor feature steps service cooldown period") {
+    val executorMetadata = mock[ObjectMeta]
+    when(executorMetadata.getName).thenReturn("executor-name")
+    when(executorMetadata.getUid).thenReturn("executor-uid")
+
+    val executorPod = mock[Pod]
+    when(podResource.create()).thenReturn(executorPod)
+    when(executorPod.getMetadata).thenReturn(executorMetadata)
+    when(executorPod.getApiVersion).thenReturn("executor-version")
+    when(executorPod.getKind).thenReturn("executor-kind")
+
+    val appId = TEST_SPARK_APP_ID
+    val appIdLabel = SPARK_APP_ID_LABEL
+    val execIdLabel = SPARK_EXECUTOR_ID_LABEL
+    val stateLabel = SPARK_EXECUTOR_SERVICE_STATE_LABEL
+    val aliveState = SPARK_EXECUTOR_SERVICE_ALIVE_STATE
+    val cooldownState = SPARK_EXECUTOR_SERVICE_COOLDOWN_STATE
+
+    val service = new ServiceBuilder()
+      .withNewMetadata()
+      .withName("service")
+      .withLabels(
+        Map(
+          appIdLabel -> appId,
+          execIdLabel -> "1",
+          stateLabel -> aliveState
+        ).asJava
+      )
+      .withAnnotations(
+        Map(COOLDOWN_PERIOD_ANNOTATION -> "2").asJava
+      )
+      .endMetadata()
+      .build()
+    val serviceMock = spy(service)
+
+    val serviceResource = mock[ServiceResource[Service]]
+    when(serviceResource.get()).thenReturn(serviceMock)
+    val serviceList = mock[MixedOperation[Service, ServiceList, ServiceResource[Service]]]
+    when(serviceList.resources()).thenAnswer(_ => Stream.of(serviceResource))
+    val emptyServiceList = mock[MixedOperation[Service, ServiceList, ServiceResource[Service]]]
+    when(emptyServiceList.resources()).thenAnswer(_ => Stream.empty[ServiceResource[Service]])
+
+    when(serviceList.inNamespace("default")).thenReturn(serviceList)
+    when(serviceList.withLabel(appIdLabel, appId)).thenReturn(serviceList)
+    when(serviceList.withLabel(stateLabel)).thenReturn(serviceList)
+    when(serviceList.withLabel(stateLabel, aliveState)).thenReturn(emptyServiceList)
+    when(serviceList.withLabel(stateLabel, cooldownState)).thenReturn(emptyServiceList)
+    val argumentCaptor = ArgumentCaptor.forClass(classOf[Array[String]])
+    when(serviceList.withLabelNotIn(meq(execIdLabel), argumentCaptor.capture(): _*))
+      .thenReturn(emptyServiceList)
+
+    when(emptyServiceList.withLabel(stateLabel)).thenReturn(emptyServiceList)
+    when(emptyServiceList.withLabel(meq(stateLabel), anyString())).thenReturn(emptyServiceList)
+    when(emptyServiceList.withLabelNotIn(meq(execIdLabel), argumentCaptor.capture(): _*))
+      .thenReturn(emptyServiceList)
+
+    when(kubernetesClient.services()).thenReturn(serviceList)
+
+    when(executorBuilder.buildFromFeatures(any(classOf[KubernetesExecutorConf]), meq(secMgr),
+      // have the feature step define a kubernetes service (resource)
+      meq(kubernetesClient), any(classOf[ResourceProfile])))
+      .thenAnswer((invocation: InvocationOnMock) => {
+        val k8sConf: KubernetesExecutorConf = invocation.getArgument(0)
+        KubernetesExecutorSpec(
+          executorPodWithId(k8sConf.executorId.toInt, k8sConf.resourceProfileId),
+          Seq(service))
+      })
+
+    val startTime = Instant.now.toEpochMilli
+    waitForExecutorPodsClock.setTime(startTime)
+
+    // Scale up to one executor
+    podsAllocatorUnderTest.setTotalExpectedExecutors(
+      Map(defaultProfile -> 1))
+    assert(podsAllocatorUnderTest.invokePrivate(numOutstandingPods).get() == 1)
+    verify(podsWithNamespace).resource(podWithAttachedContainerForId(1))
+    verify(podResource).create()
+    verify(resourceList, times(1)).serverSideApply()
+
+    // service created and alive
+    when(serviceList.withLabel(stateLabel, aliveState)).thenReturn(serviceList)
+    when(serviceList.withLabelNotIn(meq(execIdLabel), argumentCaptor.capture(): _*))
+      .thenAnswer(a => {
+        if (a.getArguments.slice(1, Int.MaxValue).contains("1")) {
+          emptyServiceList
+        } else {
+          serviceList
+        }
+      })
+
+    // make pods allocator see an empty snapshot
+    waitForExecutorPodsClock.setTime(startTime + 10*1000)
+    snapshotsStore.removeDeletedExecutors()
+    snapshotsStore.notifySubscribers()
+    verify(serviceResource, never).get()
+    verify(serviceResource, never).patch()
+    verify(serviceResource, never).delete()
+
+    // the executor is coming up
+    waitForExecutorPodsClock.setTime(startTime + 20*1000)
+    snapshotsStore.updatePod(pendingExecutor(1))
+    snapshotsStore.notifySubscribers()
+    verify(serviceResource, never).get()
+    verify(serviceResource, never).patch()
+    verify(serviceResource, never).delete()
+
+    // ... and running
+    waitForExecutorPodsClock.setTime(startTime + 30*1000)
+    snapshotsStore.updatePod(runningExecutor(1))
+    snapshotsStore.notifySubscribers()
+    verify(serviceResource, never).get()
+    verify(serviceResource, never).patch()
+    verify(serviceResource, never).delete()
+
+    // the executor gets unscheduled
+    waitForExecutorPodsClock.setTime(startTime + 40*1000)
+    podsAllocatorUnderTest.setTotalExpectedExecutors(
+      Map(defaultProfile -> 0))
+    snapshotsStore.notifySubscribers()
+    verify(serviceResource, never).get()
+    verify(serviceResource, never).patch()
+    verify(serviceResource, never).delete()
+
+    // the executor disappears, does not trigger anything
+    waitForExecutorPodsClock.setTime(startTime + 50*1000)
+    snapshotsStore.updatePod(deletedExecutor(1))
+    snapshotsStore.notifySubscribers()
+    verify(serviceResource, never).get()
+    verify(serviceResource, never).patch()
+    verify(serviceResource, never).delete()
+
+    // the executor disappears, this triggers scheduling service for deletion
+    waitForExecutorPodsClock.setTime(startTime + 60*1000)
+    snapshotsStore.removeDeletedExecutors()
+    snapshotsStore.notifySubscribers()
+    verify(serviceResource, times(1)).get()
+
+    val contextCapture = ArgumentCaptor.forClass(classOf[PatchContext])
+    val serviceCapture = ArgumentCaptor.forClass(classOf[Service])
+    verify(serviceResource, times(1)).patch(contextCapture.capture(), serviceCapture.capture())
+    assert(contextCapture.getValue.getPatchType === PatchType.STRATEGIC_MERGE)
+    val metadata = serviceCapture.getValue.getMetadata
+    val expectedCooldownLabels = Map(stateLabel -> cooldownState)
+    assert(metadata.getLabels.asScala === expectedCooldownLabels)
+    val expectedDeadline = Instant.ofEpochMilli(waitForExecutorPodsClock.getTimeMillis() + 2000)
+      .atZone(ZoneOffset.UTC)
+    val expectedCooldownAnnotation = Map(COOLDOWN_DEADLINE_ANNOTATION -> expectedDeadline.toString)
+    assert(metadata.getAnnotations.asScala === expectedCooldownAnnotation)
+
+    verify(serviceResource, never).delete()
+    Mockito.clearInvocations(serviceResource)
+
+    // apply patch to service
+    val labels = metadata.getLabels.asScala ++ expectedCooldownLabels
+    val annotations = metadata.getAnnotations.asScala ++ expectedCooldownAnnotation
+    service.getMetadata.setLabels(labels.asJava)
+    service.getMetadata.setAnnotations(annotations.asJava)
+    // service in cooldown state
+    when(serviceList.withLabel(stateLabel, aliveState)).thenReturn(emptyServiceList)
+    when(serviceList.withLabel(stateLabel, cooldownState)).thenReturn(serviceList)
+
+    // one second passes by, cooldown period is two seconds
+    waitForExecutorPodsClock.setTime(startTime + 61*1000)
+    snapshotsStore.notifySubscribers()
+    verify(serviceResource, times(1)).get()
+    verify(serviceResource, never).patch()
+    verify(serviceResource, never).delete()
+    Mockito.clearInvocations(serviceResource)
+
+    // two seconds passed by, service is being deleted
+    waitForExecutorPodsClock.setTime(startTime + 62*1000)
+    snapshotsStore.notifySubscribers()
+    verify(serviceResource, times(1)).get()
+    verify(serviceResource, never).patch()
+    verify(serviceResource, times(1)).delete()
+  }
+
+  test("SPARK-52505: stopping deletes services with state label") {
+    val serviceResource = mock[ServiceResource[Service]]
+    val serviceList = mock[MixedOperation[Service, ServiceList, ServiceResource[Service]]]
+    when(serviceList.resources()).thenAnswer(_ => Stream.of(serviceResource))
+    when(serviceList.inNamespace("default")).thenReturn(serviceList)
+    when(serviceList.withLabel(SPARK_APP_ID_LABEL, TEST_SPARK_APP_ID)).thenReturn(serviceList)
+    when(serviceList.withLabel(SPARK_EXECUTOR_SERVICE_STATE_LABEL)).thenReturn(serviceList)
+    when(kubernetesClient.services()).thenReturn(serviceList)
+    podsAllocatorUnderTest.stop(TEST_SPARK_APP_ID)
+    verify[Deletable](serviceList, times(1)).delete()
+  }
+
   test("SPARK-33262: pod allocator does not stall with pending pods") {
     when(podsWithNamespace
       .withLabel(SPARK_APP_ID_LABEL, TEST_SPARK_APP_ID))
@@ -1019,6 +1379,31 @@ class ExecutorPodsAllocatorSuite extends SparkFunSuite with BeforeAndAfter {
     }
     assert(podsAllocatorUnderTest.invokePrivate(counter).get() === 0)
     assert(podsAllocatorUnderTest.invokePrivate(numOutstandingPods).get() == 0)
+  }
+
+  test("SPARK-55496: replacePVCsIfNeeded should re-use disks with larger storage") {
+    val podToModify = podWithAttachedContainerForIdAndVolume(1)
+    val resourcesFromSpec: Seq[HasMetadata] = Seq(persistentVolumeClaim("pvc-0", "gp3", "200Gi"))
+    val existingPVCName = "pvc-existing"
+    val existingPVCs = mutable
+      .Buffer[PersistentVolumeClaim](persistentVolumeClaim(existingPVCName, "gp3", "400Gi"))
+
+    val replacePVCsIfNeeded =
+      PrivateMethod[Seq[HasMetadata]](Symbol("replacePVCsIfNeeded"))
+    val newResources = podsAllocatorUnderTest invokePrivate replacePVCsIfNeeded(
+      podToModify,
+      resourcesFromSpec,
+      existingPVCs
+    )
+
+    val podVolumes = podToModify.getSpec.getVolumes;
+    assert(existingPVCs.isEmpty)
+    assert(newResources.isEmpty)
+    assert(podVolumes.size() == 1)
+
+    val modifiedVolume = podVolumes.asScala
+      .find(v => v.getPersistentVolumeClaim.getClaimName.equals(existingPVCName))
+    assert(modifiedVolume.nonEmpty)
   }
 
   private def executorPodAnswer(): Answer[KubernetesExecutorSpec] =

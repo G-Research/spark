@@ -238,6 +238,30 @@ private[spark] object Config extends Logging {
       .checkValue(_ >= 0, "The minimum number of tasks should be non-negative.")
       .createWithDefault(0)
 
+  val EXECUTOR_RESIZE_INTERVAL =
+    ConfigBuilder("spark.kubernetes.executor.resizeInterval")
+      .doc("Interval between executor resize operations. To disable, set 0 (default)")
+      .version("4.2.0")
+      .timeConf(TimeUnit.SECONDS)
+      .checkValue(_ >= 0, "Interval should be non-negative")
+      .createWithDefault(0)
+
+  val EXECUTOR_RESIZE_THRESHOLD =
+    ConfigBuilder("spark.kubernetes.executor.resizeThreshold")
+      .doc("The threshold to resize.")
+      .version("4.2.0")
+      .doubleConf
+      .checkValue(v => 0 < v && v < 1, "The threshold should be in (0, 1)")
+      .createWithDefault(0.9)
+
+  val EXECUTOR_RESIZE_FACTOR =
+    ConfigBuilder("spark.kubernetes.executor.resizeFactor")
+      .doc("The factor to resize.")
+      .version("4.2.0")
+      .doubleConf
+      .checkValue(v => 0 < v && v <= 1, "The factor should be in (0, 1]")
+      .createWithDefault(0.1)
+
   val KUBERNETES_AUTH_DRIVER_CONF_PREFIX = "spark.kubernetes.authenticate.driver"
   val KUBERNETES_AUTH_EXECUTOR_CONF_PREFIX = "spark.kubernetes.authenticate.executor"
   val KUBERNETES_AUTH_DRIVER_MOUNTED_CONF_PREFIX = "spark.kubernetes.authenticate.driver.mounted"
@@ -442,6 +466,35 @@ private[spark] object Config extends Logging {
       .toSequence
       .createWithDefault(Nil)
 
+  val KUBERNETES_EXECUTOR_SERVICE_COOL_DOWN_PERIOD_KEY =
+    "spark.kubernetes.executor.service.coolDownPeriod"
+  val KUBERNETES_EXECUTOR_SERVICE_ENABLED =
+    ConfigBuilder("spark.kubernetes.executor.service.enabled")
+      .doc("If true, a Kubernetes service is created for the executor. " +
+        "An executor is usually connected to via the pod IP. Connecting to a decommissioned" +
+        "executor fails after a 'connection timeout', which is set via NETWORK_TIMEOUT and " +
+        "defaults to 2 minutes. Connecting to the executor via a Kubernetes service instantly " +
+        "fails with 'connection refused' error. " +
+        "For this to work, the executor kubernetes service outlives its executor pod by at least " +
+        KUBERNETES_EXECUTOR_SERVICE_COOL_DOWN_PERIOD_KEY + " seconds. " +
+        "This kubernetes service provides access to the executor's " +
+        "block manager, so BLOCK_MANAGER_PORT has to be given a value greater than zero.")
+      .version("4.2.0")
+      .booleanConf
+      .createWithDefault(false)
+
+  val KUBERNETES_EXECUTOR_SERVICE_COOL_DOWN_PERIOD =
+    ConfigBuilder(KUBERNETES_EXECUTOR_SERVICE_COOL_DOWN_PERIOD_KEY)
+      .doc(s"The number of seconds the executor kubernetes service enabled via " +
+        KUBERNETES_EXECUTOR_SERVICE_ENABLED.key + " lives beyond the lifetime of the " +
+        "corresponding executor pod. The service has to live longer than the executor, " +
+        "because connecting to a non-existing kubernetes service fails after a 'connection " +
+        "timeout', which defeats its very purpose. " +
+        s"See ${KUBERNETES_EXECUTOR_SERVICE_ENABLED.key} for more information.")
+      .version("4.2.0")
+      .intConf
+      .createWithDefault(300)
+
   val KUBERNETES_EXECUTOR_DECOMMISSION_LABEL =
     ConfigBuilder("spark.kubernetes.executor.decommissionLabel")
       .doc("Label to apply to a pod which is being decommissioned." +
@@ -475,8 +528,8 @@ private[spark] object Config extends Logging {
       .doc("Value to set for the controller.kubernetes.io/pod-deletion-cost" +
         " annotation when Spark asks a deployment-based allocator to remove executor pods. This " +
         "helps Kubernetes pick the same pods Spark selected when the deployment scales down." +
-        s" This should only be enabled when both $KUBERNETES_ALLOCATION_PODS_ALLOCATOR is set to " +
-        s"deployment, and $DYN_ALLOCATION_ENABLED is enabled.")
+        s" This should only be enabled when both ${KUBERNETES_ALLOCATION_PODS_ALLOCATOR.key} is " +
+        s"set to deployment, and ${DYN_ALLOCATION_ENABLED.key} is enabled.")
       .version("4.2.0")
       .intConf
       .createOptional

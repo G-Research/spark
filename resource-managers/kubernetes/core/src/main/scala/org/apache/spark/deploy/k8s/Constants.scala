@@ -37,6 +37,9 @@ object Constants {
   val SPARK_POD_DRIVER_ROLE = "driver"
   val SPARK_POD_EXECUTOR_ROLE = "executor"
   val SPARK_EXECUTOR_INACTIVE_LABEL = "spark-exec-inactive"
+  val SPARK_EXECUTOR_SERVICE_STATE_LABEL = "spark-exec-service-state"
+  val SPARK_EXECUTOR_SERVICE_ALIVE_STATE = "alive"
+  val SPARK_EXECUTOR_SERVICE_COOLDOWN_STATE = "cooldown"
 
   // Credentials secrets
   val DRIVER_CREDENTIALS_SECRETS_BASE_DIR =
@@ -108,6 +111,12 @@ object Constants {
   val NON_JVM_MEMORY_OVERHEAD_FACTOR = 0.4d
   val CONNECT_GRPC_BINDING_PORT = "spark.connect.grpc.binding.port"
   val EXIT_EXCEPTION_ANNOTATION = "spark.exit-exception"
+  val POD_DELETION_COST = "controller.kubernetes.io/pod-deletion-cost"
+  val OWNER_REFERENCE_ANNOTATION = "spark.owner-reference"
+  val OWNER_REFERENCE_ANNOTATION_DRIVER_VALUE = "driver"
+  val OWNER_REFERENCE_ANNOTATION_EXECUTOR_VALUE = "executor"
+  val COOLDOWN_PERIOD_ANNOTATION = "spark.cooldown-period"
+  val COOLDOWN_DEADLINE_ANNOTATION = "spark.cooldown-deadline"
 
   // Hadoop Configuration
   val HADOOP_CONF_VOLUME = "hadoop-properties"

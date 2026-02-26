@@ -1664,7 +1664,7 @@ class RDD(Generic[T_co]):
             # a generator, so it could return an iterator that we need to
             # go through. We check the common case first, then deal with
             # the undocumented behavior.
-            r = f(it)
+            r = f(it)  # type: ignore[func-returns-value]
             if r is None:
                 return iter([])
             try:
@@ -5389,7 +5389,7 @@ def _test() -> None:
 
         if Version(np.__version__) >= Version("2"):
             # `legacy="1.25"` only available in `nump>=2`
-            np.set_printoptions(legacy="1.25")  # type: ignore[arg-type]
+            np.set_printoptions(legacy="1.25")  # type: ignore[arg-type, unused-ignore]
     except (ModuleNotFoundError, TypeError):
         pass
 
