@@ -1448,6 +1448,14 @@ package object config {
       .intConf
       .createWithDefault(3)
 
+  private[spark] val SHUFFLE_NETTY_CONNECT_MAX_THREADS =
+    ConfigBuilder("spark.shuffle.netty.connect.maxThreads")
+      .doc("The number of threads used to concurrently create Netty connections.")
+      .version("4.2.0")
+      .internal()
+      .intConf
+      .createWithDefault(10)
+
   private[spark] val SHUFFLE_MAX_ATTEMPTS_ON_NETTY_OOM =
     ConfigBuilder("spark.shuffle.maxAttemptsOnNettyOOM")
       .doc("The max attempts of a shuffle block would retry on Netty OOM issue before throwing " +

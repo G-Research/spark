@@ -19,9 +19,11 @@ package org.apache.spark.network.netty
 
 import java.io.IOException
 import java.nio.ByteBuffer
+import java.time.Instant
 import java.util.{HashMap => JHashMap, Map => JMap}
+import java.util.concurrent.ThreadPoolExecutor
 
-import scala.concurrent.{Future, Promise}
+import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future, Promise}
 import scala.jdk.CollectionConverters._
 import scala.reflect.ClassTag
 import scala.util.{Success, Try}
@@ -43,7 +45,7 @@ import org.apache.spark.rpc.RpcEndpointRef
 import org.apache.spark.serializer.SerializerManager
 import org.apache.spark.storage.{BlockId, StorageLevel}
 import org.apache.spark.storage.BlockManagerMessages.IsExecutorAlive
-import org.apache.spark.util.Utils
+import org.apache.spark.util.{ThreadUtils, Utils}
 
 /**
  * A BlockTransferService that uses Netty to fetch a set of blocks at time.
@@ -65,6 +67,11 @@ private[spark] class NettyBlockTransferService(
 
   private[this] var transportContext: TransportContext = _
   private[this] var server: TransportServer = _
+  private[this] val connectThreadPoolSize: Int = conf.get(config.SHUFFLE_NETTY_CONNECT_MAX_THREADS)
+  private[this] val connectThreadPool: ThreadPoolExecutor =
+    ThreadUtils.newDaemonFixedThreadPool(connectThreadPoolSize, "netty-client-connect")
+  private[this] val connectContext: ExecutionContextExecutor =
+    ExecutionContext.fromExecutor(connectThreadPool)
 
   override def init(blockDataManager: BlockDataManager): Unit = {
     val rpcHandler = new NettyBlockRpcServer(conf.getAppId, serializer, blockDataManager)
@@ -126,19 +133,24 @@ private[spark] class NettyBlockTransferService(
     if (logger.isTraceEnabled) {
       logger.trace(s"Fetch blocks from $host:$port (executor id $execId)")
     }
-    try {
+    Future {
       val maxRetries = transportConf.maxIORetries()
       val blockFetchStarter = new RetryingBlockTransferor.BlockTransferStarter {
         override def createAndStart(blockIds: Array[String],
             listener: BlockTransferListener): Unit = {
           assert(listener.isInstanceOf[BlockFetchingListener],
             s"Expecting a BlockFetchingListener, but got ${listener.getClass}")
+          val start = Instant.now().toEpochMilli
           try {
             val client = clientFactory.createClient(host, port, maxRetries > 0)
+            val end = Instant.now().toEpochMilli
+            logInfo(s"Created connection in ${end - start}ms")
             new OneForOneBlockFetcher(client, appId, execId, blockIds,
               listener.asInstanceOf[BlockFetchingListener], transportConf, tempFileManager).start()
           } catch {
             case e: IOException =>
+              val end = Instant.now().toEpochMilli
+              logInfo(s"Creating connection failed after ${end - start}ms", e)
               Try {
                 driverEndPointRef.askSync[Boolean](IsExecutorAlive(execId))
               } match {
@@ -158,11 +170,11 @@ private[spark] class NettyBlockTransferService(
       } else {
         blockFetchStarter.createAndStart(blockIds, listener)
       }
-    } catch {
-      case e: Exception =>
+    }(connectContext).recover {
+      case e: Throwable =>
         logger.error("Exception while beginning fetchBlocks", e)
         blockIds.foreach(listener.onBlockFetchFailure(_, e))
-    }
+    }(connectContext)
   }
 
   override def port: Int = server.getPort
@@ -218,6 +230,7 @@ private[spark] class NettyBlockTransferService(
   }
 
   override def close(): Unit = {
+    connectThreadPool.shutdownNow()
     if (server != null) {
       server.close()
     }
