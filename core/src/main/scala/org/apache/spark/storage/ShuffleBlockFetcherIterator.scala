@@ -282,12 +282,15 @@ final class ShuffleBlockFetcherIterator(
     fallbackStorageReadPool.shutdownNow()
   }
 
-  private[this] def createFallbackStorageRequest(blockId: BlockId, mapIndex: Int): Unit = {
+  private[this] def createFallbackStorageRequest(
+      blockId: BlockId,
+      mapIndex: Int,
+      failure: Option[FailureFetchResult] = None): Unit = {
     Future {
       if (!isZombie) {
         try {
           val block = blockManager.getFallbackStorageBlockData(blockId)
-          val request = FallbackStorageRequest(blockId, mapIndex, block)
+          val request = FallbackStorageRequest(blockId, mapIndex, block, failure)
           results.put(PreparedFallbackStorageRequestResult(request))
         } catch {
           case e: Throwable =>
@@ -1058,31 +1061,37 @@ final class ShuffleBlockFetcherIterator(
             }
           }
 
-        case FailureFetchResult(blockId, mapIndex, address, e, isNetworkReqDone) =>
-          var error = e
-          var errorMsg: String = null
-          if (SparkEnv.get.conf.get(config.STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH).isDefined) {
-            try {
-              val buf = FallbackStorage.read(SparkEnv.get.conf, blockId)
-              results.put(SuccessFetchResult(blockId, mapIndex, address, buf.size(), buf,
-                // the original fetch request that we recovered has to be accounted for
-                isNetworkReqDone = isNetworkReqDone))
-              result = null
-              error = null
-            } catch {
-              case t: Throwable =>
-                logInfo(s"Failed to read block from fallback storage: $blockId", t)
-            }
-          }
-          if (error != null) {
-            if (error.isInstanceOf[OutOfDirectMemoryError]) {
+        case ffr: FailureFetchResult =>
+          val FailureFetchResult(blockId, mapIndex, address, e, _) = ffr
+          if (SparkEnv.get.conf.get(config.STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH).isDefined &&
+            address != FallbackStorage.FALLBACK_BLOCK_MANAGER_ID) {
+            createFallbackStorageRequest(blockId, mapIndex, Some(ffr))
+            result = null
+          } else {
+            var errorMsg: String = null
+            if (e.isInstanceOf[OutOfDirectMemoryError]) {
               val logMessage = log"Block ${MDC(BLOCK_ID, blockId)} fetch failed after " +
                 log"${MDC(MAX_ATTEMPTS, maxAttemptsOnNettyOOM)} retries due to Netty OOM"
               logError(logMessage)
               errorMsg = logMessage.message
             }
-            throwFetchFailedException(blockId, mapIndex, address, error, Some(errorMsg))
+            throwFetchFailedException(blockId, mapIndex, address, e, Some(errorMsg))
           }
+
+        case FallbackStorageFailureFetchResult(blockId, mapIndex, error, failure) =>
+          var errorMsg: String = null
+          if (failure.exists(_.e.isInstanceOf[OutOfDirectMemoryError])) {
+            val logMessage = log"Block ${MDC(BLOCK_ID, blockId)} fetch failed after " +
+              log"${MDC(MAX_ATTEMPTS, maxAttemptsOnNettyOOM)} retries due to Netty OOM"
+            logError(logMessage)
+            errorMsg = logMessage.message
+          }
+          throwFetchFailedException(
+            blockId,
+            mapIndex,
+            failure.map(_.address).getOrElse(FallbackStorage.FALLBACK_BLOCK_MANAGER_ID),
+            failure.map(_.e).getOrElse(error),
+            Some(errorMsg))
 
         case DeferFetchRequestResult(request) =>
           val address = request.address
@@ -1365,8 +1374,8 @@ final class ShuffleBlockFetcherIterator(
                 if (!isZombie) {
                   logError(log"Failed to read block ${MDC(BLOCK_ID, request.blockId)} " +
                     log"from fallback storage", e)
-                  val result = FailureFetchResult(
-                    request.blockId, request.mapIndex, FallbackStorage.FALLBACK_BLOCK_MANAGER_ID, e)
+                  val result = FallbackStorageFailureFetchResult(
+                    request.blockId, request.mapIndex, e, request.failure)
                   results.putFirst(result)
                 }
               }
@@ -1729,7 +1738,8 @@ object ShuffleBlockFetcherIterator {
   case class FallbackStorageRequest(
       blockId: BlockId,
       mapIndex: Int,
-      block: ManagedBuffer) extends Request {
+      block: ManagedBuffer,
+      failure: Option[FailureFetchResult]) extends Request {
     val size: Long = block.size()
   }
 
@@ -1772,6 +1782,21 @@ object ShuffleBlockFetcherIterator {
       address: BlockManagerId,
       e: Throwable,
       isNetworkReqDone: Boolean = false)
+    extends FetchResult
+
+  /**
+   * Result of a fetch from the fallback storage unsuccessfully.
+   * @param blockId block id
+   * @param mapIndex the mapIndex for this block, which indicate the index in the map stage
+   * @param e the failure exception
+   * @param failure an optional FailureFetchResult that was attempted
+   *                to be recovered from fallback storage
+   */
+  private[storage] case class FallbackStorageFailureFetchResult(
+      blockId: BlockId,
+      mapIndex: Int,
+      e: Throwable,
+      failure: Option[FailureFetchResult])
     extends FetchResult
 
   /**
