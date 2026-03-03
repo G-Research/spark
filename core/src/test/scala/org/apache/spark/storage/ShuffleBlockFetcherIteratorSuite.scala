@@ -203,8 +203,7 @@ class ShuffleBlockFetcherIteratorSuite extends SparkFunSuite with Eventually {
       checksumEnabled: Boolean = true,
       checksumAlgorithm: String = "ADLER32",
       shuffleMetrics: Option[ShuffleReadMetricsReporter] = None,
-      doBatchFetch: Boolean = false,
-      fallbackStorage: Option[FallbackStorage] = None): ShuffleBlockFetcherIterator = {
+      doBatchFetch: Boolean = false): ShuffleBlockFetcherIterator = {
     val tContext = taskContext.getOrElse(TaskContext.empty())
     new ShuffleBlockFetcherIterator(
       tContext,
@@ -231,8 +230,7 @@ class ShuffleBlockFetcherIteratorSuite extends SparkFunSuite with Eventually {
       checksumEnabled,
       checksumAlgorithm,
       shuffleMetrics.getOrElse(tContext.taskMetrics().createTempShuffleReadMetrics()),
-      doBatchFetch,
-      fallbackStorage)
+      doBatchFetch)
   }
   // scalastyle:on argcount
 
@@ -1242,8 +1240,7 @@ class ShuffleBlockFetcherIteratorSuite extends SparkFunSuite with Eventually {
 
     {
       when(fallbackStorage.read(ShuffleBlockId(0, 0, 1))).thenReturn(new TestManagedBuffer(127))
-      val iterator = createShuffleBlockIteratorWithDefaults(blocksByAddress = blocksByAddress,
-        fallbackStorage = Some(fallbackStorage))
+      val iterator = createShuffleBlockIteratorWithDefaults(blocksByAddress = blocksByAddress)
       val e = intercept[FetchFailedException] {
         iterator.next()
       }
@@ -1255,8 +1252,7 @@ class ShuffleBlockFetcherIteratorSuite extends SparkFunSuite with Eventually {
     // iterator with FallbackStorage that stores the block can find it
     {
       when(fallbackStorage.read(ShuffleBlockId(0, 0, 0))).thenReturn(new TestManagedBuffer(127))
-      val iterator = createShuffleBlockIteratorWithDefaults(blocksByAddress = blocksByAddress,
-        fallbackStorage = Some(fallbackStorage))
+      val iterator = createShuffleBlockIteratorWithDefaults(blocksByAddress = blocksByAddress)
       assert(iterator.hasNext)
       val (id, _) = iterator.next()
       assert(id === ShuffleBlockId(0, 0, 0))

@@ -33,10 +33,10 @@ import scala.util.{Failure, Success}
 import io.netty.util.internal.OutOfDirectMemoryError
 import org.roaringbitmap.RoaringBitmap
 
-import org.apache.spark.{MapOutputTracker, SparkException, TaskContext}
+import org.apache.spark.{MapOutputTracker, SparkEnv, SparkException, TaskContext}
 import org.apache.spark.MapOutputTracker.SHUFFLE_PUSH_MAP_ID
 import org.apache.spark.errors.SparkCoreErrors
-import org.apache.spark.internal.Logging
+import org.apache.spark.internal.{config, Logging}
 import org.apache.spark.internal.LogKeys._
 import org.apache.spark.network.buffer.{FileSegmentManagedBuffer, ManagedBuffer, NioManagedBuffer}
 import org.apache.spark.network.shuffle._
@@ -104,7 +104,6 @@ final class ShuffleBlockFetcherIterator(
     checksumAlgorithm: String,
     shuffleMetrics: ShuffleReadMetricsReporter,
     doBatchFetch: Boolean,
-    fallbackStorage: Option[FallbackStorage],
   clock: Clock = new SystemClock())
   extends Iterator[(BlockId, InputStream)] with DownloadFileManager with Logging {
 
@@ -1062,9 +1061,9 @@ final class ShuffleBlockFetcherIterator(
         case FailureFetchResult(blockId, mapIndex, address, e, isNetworkReqDone) =>
           var error = e
           var errorMsg: String = null
-          if (fallbackStorage.isDefined) {
+          if (SparkEnv.get.conf.get(config.STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH).isDefined) {
             try {
-              val buf = fallbackStorage.get.read(blockId)
+              val buf = FallbackStorage.read(SparkEnv.get.conf, blockId)
               results.put(SuccessFetchResult(blockId, mapIndex, address, buf.size(), buf,
                 // the original fetch request that we recovered has to be accounted for
                 isNetworkReqDone = isNetworkReqDone))
