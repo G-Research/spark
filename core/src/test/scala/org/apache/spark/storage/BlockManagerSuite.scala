@@ -147,8 +147,8 @@ class BlockManagerSuite extends SparkFunSuite with Matchers with PrivateMethodTe
     } else {
       None
     }
-    val blockManager = new BlockManager(name, rpcEnv, master, serializerManager, bmConf,
-      memManager, mapOutputTracker, shuffleManager, transfer, bmSecurityMgr, externalShuffleClient)
+    val blockManager = new BlockManager(name, rpcEnv, master, serializerManager, bmConf, memManager,
+      mapOutputTracker, shuffleManager, transfer, bmSecurityMgr, externalShuffleClient, None)
     memManager.setMemoryStore(blockManager.memoryStore)
     allStores += blockManager
     blockManager.initialize("app-id")
@@ -1377,7 +1377,7 @@ class BlockManagerSuite extends SparkFunSuite with Matchers with PrivateMethodTe
     val memoryManager = UnifiedMemoryManager(conf, numCores = 1)
     val store = new BlockManager(SparkContext.DRIVER_IDENTIFIER, rpcEnv, master,
       serializerManager, conf, memoryManager, mapOutputTracker,
-      shuffleManager, transfer, securityMgr, None)
+      shuffleManager, transfer, securityMgr, None, None)
     allStores += store
     store.initialize("app-id")
 
@@ -1426,7 +1426,7 @@ class BlockManagerSuite extends SparkFunSuite with Matchers with PrivateMethodTe
       val memoryManager = UnifiedMemoryManager(conf, numCores = 1)
       val blockManager = new BlockManager(SparkContext.DRIVER_IDENTIFIER, rpcEnv, master,
         serializerManager, conf, memoryManager, mapOutputTracker,
-        shuffleManager, transfer, securityMgr, None)
+        shuffleManager, transfer, securityMgr, None, None)
       try {
         blockManager.initialize("app-id")
         testPutBlockDataAsStream(blockManager, storageLevel)
@@ -2304,7 +2304,7 @@ class BlockManagerSuite extends SparkFunSuite with Matchers with PrivateMethodTe
     val memoryManager = UnifiedMemoryManager(conf, numCores = 1)
     val store = new BlockManager(SparkContext.DRIVER_IDENTIFIER, rpcEnv, master,
       serializerManager, conf, memoryManager, mapOutputTracker,
-      shuffleManager, transfer, securityMgr, None)
+      shuffleManager, transfer, securityMgr, None, None)
     allStores += store
     store.initialize("app-id")
     store.putSingle("my-block-id", new Array[User](300), StorageLevel.MEMORY_AND_DISK)
@@ -2328,7 +2328,7 @@ class BlockManagerSuite extends SparkFunSuite with Matchers with PrivateMethodTe
     val memoryManager = UnifiedMemoryManager(conf, numCores = 1)
     val store = new BlockManager(SparkContext.DRIVER_IDENTIFIER, rpcEnv, master,
       serializerManager, conf, memoryManager, mapOutputTracker,
-      shuffleManager, transfer, securityMgr, None)
+      shuffleManager, transfer, securityMgr, None, None)
     allStores += store
     store.initialize("app-id")
 

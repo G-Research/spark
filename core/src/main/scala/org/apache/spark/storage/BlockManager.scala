@@ -190,7 +190,8 @@ private[spark] class BlockManager(
     private val _shuffleManager: ShuffleManager,
     val blockTransferService: BlockTransferService,
     securityManager: SecurityManager,
-    externalBlockStoreClient: Option[ExternalBlockStoreClient])
+    externalBlockStoreClient: Option[ExternalBlockStoreClient],
+    val fallbackStorage: Option[FallbackStorage])
   extends BlockDataManager with BlockEvictionHandler with Logging {
 
   // We initialize the ShuffleManager later in SparkContext and Executor, to allow
@@ -779,11 +780,11 @@ private[spark] class BlockManager(
    * or cannot be read successfully.
    */
   override def getFallbackStorageBlockData(blockId: BlockId): ManagedBuffer = {
-    require(conf.get(config.STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH).isDefined)
+    require(fallbackStorage.isDefined)
 
     if (blockId.isShuffle) {
       logDebug(s"Getting fallback storage block ${blockId}")
-      FallbackStorage.read(conf, blockId)
+      fallbackStorage.get.read(blockId)
     } else {
       // If this block manager receives a request for a block that it doesn't have then it's
       // likely that the master has outdated block statuses for this block. Therefore, we send

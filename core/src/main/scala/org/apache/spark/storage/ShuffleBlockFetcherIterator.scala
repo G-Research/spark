@@ -33,10 +33,10 @@ import scala.util.{Failure, Success}
 import io.netty.util.internal.OutOfDirectMemoryError
 import org.roaringbitmap.RoaringBitmap
 
-import org.apache.spark.{MapOutputTracker, SparkEnv, SparkException, TaskContext}
+import org.apache.spark.{MapOutputTracker, SparkException, TaskContext}
 import org.apache.spark.MapOutputTracker.SHUFFLE_PUSH_MAP_ID
 import org.apache.spark.errors.SparkCoreErrors
-import org.apache.spark.internal.{config, Logging}
+import org.apache.spark.internal.Logging
 import org.apache.spark.internal.LogKeys._
 import org.apache.spark.network.buffer.{FileSegmentManagedBuffer, ManagedBuffer, NioManagedBuffer}
 import org.apache.spark.network.shuffle._
@@ -1063,7 +1063,7 @@ final class ShuffleBlockFetcherIterator(
 
         case ffr: FailureFetchResult =>
           val FailureFetchResult(blockId, mapIndex, address, e, _) = ffr
-          if (SparkEnv.get.conf.get(config.STORAGE_DECOMMISSION_FALLBACK_STORAGE_PATH).isDefined &&
+          if (blockManager.fallbackStorage.isDefined &&
             address != FallbackStorage.FALLBACK_BLOCK_MANAGER_ID) {
             createFallbackStorageRequest(blockId, mapIndex, Some(ffr))
             result = null

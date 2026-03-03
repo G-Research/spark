@@ -479,7 +479,8 @@ object SparkEnv extends Logging {
       _shuffleManager = null,
       blockTransferService,
       securityManager,
-      externalShuffleClient)
+      externalShuffleClient,
+      FallbackStorage.getFallbackStorage(conf))
 
     val metricsSystem = if (isDriver) {
       // Don't start metrics system right now for Driver.

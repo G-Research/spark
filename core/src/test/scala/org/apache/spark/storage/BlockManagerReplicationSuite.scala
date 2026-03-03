@@ -83,7 +83,7 @@ trait BlockManagerReplicationBehavior extends SparkFunSuite
       conf, securityMgr, serializerManager, "localhost", "localhost", 0, 1)
     val memManager = memoryManager.getOrElse(UnifiedMemoryManager(conf, numCores = 1))
     val store = new BlockManager(name, rpcEnv, master, serializerManager, conf,
-      memManager, mapOutputTracker, shuffleManager, transfer, securityMgr, None)
+      memManager, mapOutputTracker, shuffleManager, transfer, securityMgr, None, None)
     memManager.setMemoryStore(store.memoryStore)
     store.initialize("app-id")
     allStores += store
@@ -245,7 +245,7 @@ trait BlockManagerReplicationBehavior extends SparkFunSuite
     val memManager = UnifiedMemoryManager(conf, numCores = 1)
     val serializerManager = new SerializerManager(serializer, conf)
     val failableStore = new BlockManager("failable-store", rpcEnv, master, serializerManager, conf,
-      memManager, mapOutputTracker, shuffleManager, failableTransfer, securityMgr, None)
+      memManager, mapOutputTracker, shuffleManager, failableTransfer, securityMgr, None, None)
     memManager.setMemoryStore(failableStore.memoryStore)
     failableStore.initialize("app-id")
     allStores += failableStore // so that this gets stopped after test

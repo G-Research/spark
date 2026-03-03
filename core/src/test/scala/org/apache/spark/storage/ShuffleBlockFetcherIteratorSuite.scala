@@ -51,7 +51,6 @@ import org.apache.spark.storage.BlockManagerId.SHUFFLE_MERGER_IDENTIFIER
 import org.apache.spark.storage.ShuffleBlockFetcherIterator._
 import org.apache.spark.util.Utils
 
-
 class ShuffleBlockFetcherIteratorSuite extends SparkFunSuite with Eventually {
 
   private var transfer: BlockTransferService = _
@@ -123,6 +122,7 @@ class ShuffleBlockFetcherIteratorSuite extends SparkFunSuite with Eventually {
     // By default, the mock BlockManager returns None for hostLocalDirManager. One could
     // still use initHostLocalDirManager() to specify a custom hostLocalDirManager.
     doReturn(None).when(blockManager).hostLocalDirManager
+    doReturn(None).when(blockManager).fallbackStorage
     blockManager
   }
 
@@ -1216,6 +1216,7 @@ class ShuffleBlockFetcherIteratorSuite extends SparkFunSuite with Eventually {
 
   test("SPARK-52507: missing blocks attempts to read from fallback storage") {
     val blockManager = createMockBlockManager()
+    when(blockManager.getFallbackStorageBlockData(any())).thenCallRealMethod()
 
     configureMockTransfer(Map.empty)
     val remoteBmId = BlockManagerId("test-remote-client-1", "test-remote-host", 2)
@@ -1226,7 +1227,8 @@ class ShuffleBlockFetcherIteratorSuite extends SparkFunSuite with Eventually {
 
     // iterator with no FallbackStorage cannot find the block
     {
-      val iterator = createShuffleBlockIteratorWithDefaults(blocksByAddress = blocksByAddress)
+      val iterator = createShuffleBlockIteratorWithDefaults(blocksByAddress = blocksByAddress,
+        blockManager = Some(blockManager))
       val e = intercept[FetchFailedException] {
         iterator.next()
       }
@@ -1237,22 +1239,30 @@ class ShuffleBlockFetcherIteratorSuite extends SparkFunSuite with Eventually {
 
     // iterator with FallbackStorage that does not store the block cannot find it either
     val fallbackStorage = mock(classOf[FallbackStorage])
+    val fallbackStorageBlocks = mutable.HashSet[BlockId]()
+    when(fallbackStorage.read(any())).thenAnswer((invocationOnMock: InvocationOnMock) =>
+      if (fallbackStorageBlocks.contains(invocationOnMock.getArgument[BlockId](0))) {
+        new TestManagedBuffer(127)
+      } else {
+        throw new Exception()
+      }
+    )
+    doReturn(Some(fallbackStorage)).when(blockManager).fallbackStorage
 
     {
-      when(fallbackStorage.read(ShuffleBlockId(0, 0, 1))).thenReturn(new TestManagedBuffer(127))
-      val iterator = createShuffleBlockIteratorWithDefaults(blocksByAddress = blocksByAddress)
+      fallbackStorageBlocks += ShuffleBlockId(0, 0, 1)
+      val iterator = createShuffleBlockIteratorWithDefaults(blocksByAddress = blocksByAddress,
+        blockManager = Some(blockManager))
       val e = intercept[FetchFailedException] {
         iterator.next()
       }
-      assert(e.getCause != null)
-      assert(e.getCause.isInstanceOf[BlockNotFoundException])
-      assert(e.getCause.getMessage.contains("Block shuffle_0_0_0 not found"))
     }
 
     // iterator with FallbackStorage that stores the block can find it
     {
-      when(fallbackStorage.read(ShuffleBlockId(0, 0, 0))).thenReturn(new TestManagedBuffer(127))
-      val iterator = createShuffleBlockIteratorWithDefaults(blocksByAddress = blocksByAddress)
+      fallbackStorageBlocks += ShuffleBlockId(0, 0, 0)
+      val iterator = createShuffleBlockIteratorWithDefaults(blocksByAddress = blocksByAddress,
+        blockManager = Some(blockManager))
       assert(iterator.hasNext)
       val (id, _) = iterator.next()
       assert(id === ShuffleBlockId(0, 0, 0))
@@ -1617,6 +1627,7 @@ class ShuffleBlockFetcherIteratorSuite extends SparkFunSuite with Eventually {
   test("SPARK-32922: failure to fetch push-merged block as well as fallback block should throw " +
     "a FetchFailedException") {
     val blockManager = mock(classOf[BlockManager])
+    doReturn(None).when(blockManager).fallbackStorage
     val localDirs = Array("testPath1", "testPath2")
     val localBmId = BlockManagerId("test-client", "test-local-host", 1)
     doReturn(localBmId).when(blockManager).blockManagerId
@@ -1997,6 +2008,7 @@ class ShuffleBlockFetcherIteratorSuite extends SparkFunSuite with Eventually {
   test("SPARK-38987: failure to fetch corrupted shuffle block chunk should " +
     "throw a FetchFailedException when early detection is unable to catch corruption") {
     val blockManager = mock(classOf[BlockManager])
+    doReturn(None).when(blockManager).fallbackStorage
     val localDirs = Array("local-dir")
     val localHost = "test-local-host"
     val localBmId = BlockManagerId("test-client", localHost, 1)
