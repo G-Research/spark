@@ -289,7 +289,7 @@ final class ShuffleBlockFetcherIterator(
     Future {
       if (!isZombie) {
         try {
-          val block = blockManager.getFallbackStorageBlockData(blockId)
+          val block = blockManager.getFallbackStorageBlockData(blockId, failure.isEmpty)
           val request = FallbackStorageRequest(blockId, mapIndex, block, failure)
           results.put(PreparedFallbackStorageRequestResult(request))
         } catch {

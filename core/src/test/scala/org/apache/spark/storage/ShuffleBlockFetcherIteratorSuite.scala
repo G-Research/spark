@@ -348,7 +348,7 @@ class ShuffleBlockFetcherIteratorSuite extends SparkFunSuite with Eventually {
       ShuffleBlockId(0, 9, 0) -> createMockManagedBuffer(),
       ShuffleBlockId(0, 10, 0) -> createMockManagedBuffer())
     fallbackBlocks.foreach { case (blockId, buf) =>
-      doReturn(buf).when(blockManager).getFallbackStorageBlockData(meq(blockId))
+      doReturn(buf).when(blockManager).getFallbackStorageBlockData(meq(blockId), any())
     }
 
     val iterator = createShuffleBlockIteratorWithDefaults(
@@ -369,7 +369,7 @@ class ShuffleBlockFetcherIteratorSuite extends SparkFunSuite with Eventually {
     eventually(timeout(1.seconds), interval(10.millis)) {
       assert(iterator.fallbackStorageReadPool.getCompletedTaskCount >= 2)
     }
-    verify(blockManager, times(2)).getFallbackStorageBlockData(any())
+    verify(blockManager, times(2)).getFallbackStorageBlockData(any(), any())
     // SPARK-55469: but buffer data have never been materialized
     fallbackBlocks.values.foreach { mockBuf =>
       verify(mockBuf, never()).nioByteBuffer()
@@ -518,7 +518,7 @@ class ShuffleBlockFetcherIteratorSuite extends SparkFunSuite with Eventually {
     val mergedFallbackBlocks = Map[BlockId, ManagedBuffer](
       ShuffleBlockBatchId(0, 1, 0, 2) -> createMockManagedBuffer())
     mergedFallbackBlocks.foreach { case (blockId, buf) =>
-      doReturn(buf).when(blockManager).getFallbackStorageBlockData(meq(blockId))
+      doReturn(buf).when(blockManager).getFallbackStorageBlockData(meq(blockId), any())
     }
 
     // Make sure remote blocks would return the merged block
@@ -568,7 +568,7 @@ class ShuffleBlockFetcherIteratorSuite extends SparkFunSuite with Eventually {
     eventually(timeout(1.seconds), interval(10.millis)) {
       assert(iterator.fallbackStorageReadPool.getCompletedTaskCount >= 1)
     }
-    verify(blockManager, times(1)).getFallbackStorageBlockData(any())
+    verify(blockManager, times(1)).getFallbackStorageBlockData(any(), any())
     // SPARK-55469: but buffer data have never been materialized
     mergedFallbackBlocks.values.foreach { mockBuf =>
       verify(mockBuf, never()).nioByteBuffer()
@@ -1216,7 +1216,7 @@ class ShuffleBlockFetcherIteratorSuite extends SparkFunSuite with Eventually {
 
   test("SPARK-52507: missing blocks attempts to read from fallback storage") {
     val blockManager = createMockBlockManager()
-    when(blockManager.getFallbackStorageBlockData(any())).thenCallRealMethod()
+    when(blockManager.getFallbackStorageBlockData(any(), any())).thenCallRealMethod()
 
     configureMockTransfer(Map.empty)
     val remoteBmId = BlockManagerId("test-remote-client-1", "test-remote-host", 2)

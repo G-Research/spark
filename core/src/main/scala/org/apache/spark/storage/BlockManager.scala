@@ -779,17 +779,20 @@ private[spark] class BlockManager(
    * Interface to get fallback storage block data. Throws an exception if the block cannot be found
    * or cannot be read successfully.
    */
-  override def getFallbackStorageBlockData(blockId: BlockId): ManagedBuffer = {
+  override def getFallbackStorageBlockData(
+      blockId: BlockId, reportMissingBlock: Boolean): ManagedBuffer = {
     require(fallbackStorage.isDefined)
 
     if (blockId.isShuffle) {
       logDebug(s"Getting fallback storage block ${blockId}")
       fallbackStorage.get.read(blockId)
     } else {
-      // If this block manager receives a request for a block that it doesn't have then it's
-      // likely that the master has outdated block statuses for this block. Therefore, we send
-      // an RPC so that this block is marked as being unavailable from this block manager.
-      reportBlockStatus(blockId, BlockStatus.empty)
+      if (reportMissingBlock) {
+        // If this block manager receives a request for a block that it doesn't have then it's
+        // likely that the master has outdated block statuses for this block. Therefore, we send
+        // an RPC so that this block is marked as being unavailable from this block manager.
+        reportBlockStatus(blockId, BlockStatus.empty)
+      }
       throw SparkCoreErrors.blockNotFoundError(blockId)
     }
   }
