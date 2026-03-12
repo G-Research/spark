@@ -420,7 +420,7 @@ final class ShuffleBlockFetcherIterator(
                 results.putFirst(FailureFetchResult(block, infoMap(blockId)._2, address, e,
                   // we might want to recover from this fetch failure using fallback storage
                   // so we need to be able to decrement reqsInFlight and bytesInFlight correctly
-                  isNetworkReqDone = remainingBlocks.isEmpty))
+                  isRemoteBlock = true, isLastBlockOfFetchRequest = remainingBlocks.isEmpty))
               }
           }
         }
@@ -1062,7 +1062,7 @@ final class ShuffleBlockFetcherIterator(
           }
 
         case ffr: FailureFetchResult =>
-          val FailureFetchResult(blockId, mapIndex, address, e, _) = ffr
+          val FailureFetchResult(blockId, mapIndex, address, e, _, _) = ffr
           if (blockManager.fallbackStorage.isDefined &&
             address != FallbackStorage.FALLBACK_BLOCK_MANAGER_ID) {
             createFallbackStorageRequest(blockId, mapIndex, Some(ffr))
@@ -1105,6 +1105,17 @@ final class ShuffleBlockFetcherIterator(
           result = null
 
         case PreparedFallbackStorageRequestResult(request) =>
+          if (request.failure.exists(_.isRemoteBlock)) {
+            // we are recovering from a remote block fetch failure
+            // we need to decrement the bytes in flight, otherwise
+            // our request might not get executed
+            bytesInFlight -= request.size
+            if (request.failure.exists(_.isLastBlockOfFetchRequest)) {
+              // we also need to decrement the requests in flight
+              reqsInFlight -= 1
+            }
+          }
+
           fallbackStorageRequests.enqueue(request)
           result = null
 
@@ -1781,7 +1792,8 @@ object ShuffleBlockFetcherIterator {
       mapIndex: Int,
       address: BlockManagerId,
       e: Throwable,
-      isNetworkReqDone: Boolean = false)
+      isRemoteBlock: Boolean = false,
+      isLastBlockOfFetchRequest: Boolean = false)
     extends FetchResult
 
   /**
