@@ -351,13 +351,16 @@ final class ShuffleBlockFetcherIterator(
 
             case _ =>
               val block = BlockId(blockId)
+              remainingBlocks -= blockId
               if (block.isShuffleChunk) {
-                remainingBlocks -= blockId
                 updateMergedReqsDuration(wasReqForMergedChunks = true)
                 results.put(FallbackOnPushMergedFailureResult(
                   block, address, infoMap(blockId)._1, remainingBlocks.isEmpty))
               } else {
-                results.put(FailureFetchResult(block, infoMap(blockId)._2, address, e))
+                results.put(FailureFetchResult(block, infoMap(blockId)._2, address, e,
+                  // we might want to recover from this fetch failure using fallback storage
+                  // so we need to be able to decrement reqsInFlight and bytesInFlight correctly
+                  isNetworkReqDone = remainingBlocks.isEmpty))
               }
           }
         }
@@ -962,14 +965,15 @@ final class ShuffleBlockFetcherIterator(
             }
           }
 
-        case FailureFetchResult(blockId, mapIndex, address, e) =>
+        case FailureFetchResult(blockId, mapIndex, address, e, isNetworkReqDone) =>
           var error = e
           var errorMsg: String = null
           if (fallbackStorage.isDefined) {
             try {
               val buf = fallbackStorage.get.read(blockId)
               results.put(SuccessFetchResult(blockId, mapIndex, address, buf.size(), buf,
-                isNetworkReqDone = false))
+                // the original fetch request that we recovered has to be accounted for
+                isNetworkReqDone = isNetworkReqDone))
               result = null
               error = null
             } catch {
@@ -1597,8 +1601,9 @@ object ShuffleBlockFetcherIterator {
       blockId: BlockId,
       mapIndex: Int,
       address: BlockManagerId,
-      e: Throwable)
-    extends FetchResult
+      e: Throwable,
+      isNetworkReqDone: Boolean = false)
+  extends FetchResult
 
   /**
    * Result of a fetch request that should be deferred for some reasons, e.g., Netty OOM
