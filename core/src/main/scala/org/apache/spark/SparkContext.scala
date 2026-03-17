@@ -618,7 +618,8 @@ class SparkContext(config: SparkConf) extends Logging {
     }
     _ui.foreach(_.setAppId(_applicationId))
     _env.blockManager.initialize(_applicationId)
-    FallbackStorage.registerBlockManagerIfNeeded(_env.blockManager.master, _conf)
+    FallbackStorage.registerBlockManagerIfNeeded(
+      _env.blockManager.master, _conf, _hadoopConfiguration)
 
     // The metrics system for Driver need to be set spark.app.id to app ID.
     // So it should start after we get app ID from the task scheduler and set spark.app.id.
@@ -2274,6 +2275,9 @@ class SparkContext(config: SparkConf) extends Logging {
       _plugins.foreach(_.shutdown())
     }
     Utils.tryLogNonFatalError {
+      // not calling cleanUpAsync here as we want cleanup to complete before exiting
+      // this returns immediately if STORAGE_DECOMMISSION_FALLBACK_STORAGE_CLEANUP_WAIT_ON_SHUTDOWN
+      // is false
       FallbackStorage.cleanUp(_conf, _hadoopConfiguration)
     }
     Utils.tryLogNonFatalError {

@@ -888,7 +888,7 @@ def _make_typevar(name, bound, constraints, covariant, contravariant,
     if class_tracker_id is not None:
         return _lookup_class_or_track(class_tracker_id, tv)
     else:  # pragma: nocover
-        # Only for Python 3.5.3 compat.
+        # Only for Python 3.5.3-gr-5 compat.
         return tv
 
 
