@@ -655,6 +655,16 @@ package object config {
       .booleanConf
       .createWithDefault(false)
 
+  private[spark] val STORAGE_DECOMMISSION_FALLBACK_STORAGE_ALWAYS_READ =
+    ConfigBuilder("spark.storage.decommission.fallbackStorage.alwaysRead")
+      .doc("If true, Spark reads shuffle data only from fallback storage. " +
+        s"This requires ${STORAGE_DECOMMISSION_FALLBACK_STORAGE_PROACTIVE_RELIABLE.key} " +
+        s"to be true. This is useful to avoid disruption due to executor decommission " +
+        s"or executor failures, or to benchmark reading from the fallback storage.")
+      .version("4.2.0")
+      .booleanConf
+      .createWithDefault(false)
+
   private[spark] val STORAGE_DECOMMISSION_SHUFFLE_MAX_DISK_SIZE =
     ConfigBuilder("spark.storage.decommission.shuffleBlocks.maxDiskSize")
       .doc("Maximum disk space to use to store shuffle blocks before rejecting remote " +
