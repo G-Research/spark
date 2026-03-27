@@ -98,6 +98,11 @@ private[spark] class ShuffleWriteProcessor extends Serializable with Logging {
             fallbackStorage.foreach(
               _.copy(shuffleBlockInfo, blockManager, isAsyncCopy = false, reportBlockStatus = false)
             )
+
+            // point map status directly to the fallback storage if always-read is enabled
+            if (FallbackStorage.isAlwaysRead(SparkEnv.get.conf)) {
+              mapStatus.foreach(_.updateLocation(FallbackStorage.FALLBACK_BLOCK_MANAGER_ID))
+            }
           } else {
             // we ignore exceptions that occur asynchronously, this is best-effort replication
             // we do not want to defer the task in any way
