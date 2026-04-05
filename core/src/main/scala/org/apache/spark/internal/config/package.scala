@@ -850,6 +850,12 @@ package object config {
         "The max direct result size is 2GB")
       .createWithDefault(1L << 20)
 
+  private[spark] val TASK_SEND_INDIRECT_RESULTS_TO_DRIVER =
+    ConfigBuilder("spark.task.sendIndirectResultsToDriver")
+      .version("4.2.0")
+      .booleanConf
+      .createWithDefault(false)
+
   private[spark] val TASK_MAX_FAILURES =
     ConfigBuilder("spark.task.maxFailures")
       .version("0.8.0")

@@ -153,6 +153,11 @@ class BlockManagerMaster(
     driverEndpoint.askSync[Seq[BlockManagerId]](GetPeers(blockManagerId))
   }
 
+  /** Get id of driver from the driver */
+  def getDriver: BlockManagerId = {
+    driverEndpoint.askSync[BlockManagerId](GetDriver())
+  }
+
   /**
    * Get a list of unique shuffle service locations where an executor is successfully
    * registered in the past for block push/merge with push based shuffle.

@@ -488,6 +488,16 @@ class BlockManagerSuite extends SparkFunSuite with Matchers with PrivateMethodTe
     assert(master.getLocations("a2").size === 2, "master did not report 2 locations for a2")
   }
 
+  test("get driver block manager id") {
+    val bmId = BlockManagerId(SparkContext.DRIVER_IDENTIFIER, "localhost", 1000, None)
+    master.registerBlockManager(bmId, Array.empty, 2000, 0, null)
+    val driver = master.getDriver
+    assert(driver.isDriver === true)
+    assert(driver.executorId === SparkContext.DRIVER_IDENTIFIER)
+    assert(driver.host === "localhost")
+    assert(driver.port === 1000)
+  }
+
   test("removing block") {
     val store = makeBlockManager(20000)
     val a1 = new Array[Byte](4000)

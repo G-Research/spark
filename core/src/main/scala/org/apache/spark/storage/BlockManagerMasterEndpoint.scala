@@ -162,6 +162,9 @@ class BlockManagerMasterEndpoint(
     case GetPeers(blockManagerId) =>
       context.reply(getPeers(blockManagerId))
 
+    case GetDriver() =>
+      context.reply(getDriver)
+
     case GetExecutorEndpointRef(executorId) =>
       context.reply(getExecutorEndpointRef(executorId))
 
@@ -892,6 +895,11 @@ class BlockManagerMasterEndpoint(
     } else {
       Seq.empty
     }
+  }
+
+  /** Get the driver block manager */
+  private def getDriver: BlockManagerId = {
+    blockManagerInfo.keySet.find(_.isDriver).get
   }
 
   private def getShufflePushMergerLocations(

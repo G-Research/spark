@@ -44,6 +44,7 @@ import org.scalatestplus.mockito.MockitoSugar
 import org.apache.spark._
 import org.apache.spark.TaskState.TaskState
 import org.apache.spark.broadcast.Broadcast
+import org.apache.spark.internal.config
 import org.apache.spark.internal.config._
 import org.apache.spark.internal.config.UI._
 import org.apache.spark.memory.{SparkOutOfMemoryError, TestMemoryManager}
@@ -51,10 +52,10 @@ import org.apache.spark.metrics.MetricsSystem
 import org.apache.spark.rdd.RDD
 import org.apache.spark.resource.ResourceInformation
 import org.apache.spark.rpc.{RpcEndpointRef, RpcEnv, RpcTimeout}
-import org.apache.spark.scheduler.{DirectTaskResult, FakeTask, ResultTask, Task, TaskDescription}
-import org.apache.spark.serializer.{JavaSerializer, SerializerInstance, SerializerManager}
+import org.apache.spark.scheduler.{DirectTaskResult, FakeTask, IndirectTaskResult, ResultTask, Task, TaskDescription}
+import org.apache.spark.serializer.{JavaSerializer, SerializerHelper, SerializerInstance, SerializerManager}
 import org.apache.spark.shuffle.FetchFailedException
-import org.apache.spark.storage.{BlockManager, BlockManagerId}
+import org.apache.spark.storage.{BlockManager, BlockManagerId, TaskResultBlockId}
 import org.apache.spark.util.{LongAccumulator, SparkUncaughtExceptionHandler, ThreadUtils, UninterruptibleThread}
 
 class ExecutorSuite extends SparkFunSuite
@@ -421,6 +422,78 @@ class ExecutorSuite extends SparkFunSuite
     val result = serializer.deserialize[DirectTaskResult[Int]](resultData)
     val taskMetrics = new ExecutorMetrics(result.metricPeaks)
     assert(taskMetrics.getMetricValue("JVMHeapMemory") > 0)
+  }
+
+  test("Send direct task results") {
+    doTestTaskResults(direct = true)
+  }
+
+  test("Send indirect task results via executor block manager") {
+    doTestTaskResults(direct = false, viaBlockManager = Some("executor"))
+  }
+
+  test("Send indirect task results via driver block manager") {
+    doTestTaskResults(direct = false, viaBlockManager = Some("driver"))
+  }
+
+  def doTestTaskResults(direct: Boolean, viaBlockManager: Option[String] = None): Unit = {
+    // Run a successful, retrieve result directly or indirectly
+    // Indirectly via executor or driver block manager
+    val conf = new SparkConf().setMaster("local").setAppName("executor suite test")
+
+    // direct vs. indirect results are controlled via this threshold
+    if (!direct) {
+      conf.set(config.TASK_MAX_DIRECT_RESULT_SIZE, 100L)
+    }
+    // indirect via executor or driver block manager is controlled here
+    conf.set(config.TASK_SEND_INDIRECT_RESULTS_TO_DRIVER, viaBlockManager.contains("driver"))
+
+    sc = new SparkContext(conf)
+    val serializer = SparkEnv.get.closureSerializer.newInstance()
+    val serializedTask = serializer.serialize(new FakeTask(0, 0))
+    val taskDescription = createFakeTaskDescription(serializedTask)
+
+    val mockBackend = mock[ExecutorBackend]
+    withExecutor("id", "localhost", SparkEnv.get) { executor =>
+      executor.launchTask(mockBackend, taskDescription)
+      eventually(timeout(5.seconds), interval(10.milliseconds)) {
+        assert(executor.numRunningTasks === 0)
+      }
+    }
+
+    // capture task result
+    val orderedMock = inOrder(mockBackend)
+    val statusCaptor = ArgumentCaptor.forClass(classOf[ByteBuffer])
+    orderedMock.verify(mockBackend)
+      .statusUpdate(meq(0L), meq(TaskState.RUNNING), statusCaptor.capture())
+    orderedMock.verify(mockBackend)
+      .statusUpdate(meq(0L), meq(TaskState.FINISHED), statusCaptor.capture())
+    val resultData = statusCaptor.getAllValues.get(1)
+
+    def assertDirectTaskResult(bytes: ByteBuffer): Unit = {
+      val result = serializer.deserialize[DirectTaskResult[Int]](bytes)
+      val value = SerializerHelper.deserializeFromChunkedBuffer[Int](
+        serializer, result.valueByteBuffer)
+      assert(value === 0)
+    }
+
+    // assert task result
+    if (direct) {
+      assertDirectTaskResult(resultData)
+    } else {
+      val result = serializer.deserialize[IndirectTaskResult[Int]](resultData)
+      assert(result.blockId === TaskResultBlockId(0))
+      val locations = sc.env.blockManager.master.getLocations(result.blockId)
+      assert(locations.size === 1)
+
+      val remoteBytes = sc.env.blockManager.getRemoteBytes(result.blockId)
+      assert(remoteBytes.isDefined)
+      assertDirectTaskResult(remoteBytes.get.toByteBuffer)
+
+      val localBytes = sc.env.blockManager.getLocalBytes(result.blockId)
+      assert(localBytes.isDefined)
+      assertDirectTaskResult(localBytes.get.toByteBuffer())
+    }
   }
 
   test("Send task executor metrics in TaskKilled") {

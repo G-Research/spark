@@ -46,12 +46,13 @@ import org.apache.spark.internal.config._
 import org.apache.spark.internal.plugin.PluginContainer
 import org.apache.spark.memory.{SparkOutOfMemoryError, TaskMemoryManager}
 import org.apache.spark.metrics.source.JVMCPUSource
+import org.apache.spark.network.buffer.NioManagedBuffer
 import org.apache.spark.resource.ResourceInformation
 import org.apache.spark.rpc.RpcTimeout
 import org.apache.spark.scheduler._
 import org.apache.spark.serializer.SerializerHelper
 import org.apache.spark.shuffle.{FetchFailedException, ShuffleBlockPusher}
-import org.apache.spark.storage.{StorageLevel, TaskResultBlockId}
+import org.apache.spark.storage.{BlockManagerId, StorageLevel, TaskResultBlockId}
 import org.apache.spark.util._
 
 private[spark] class IsolatedSessionState(
@@ -228,6 +229,9 @@ private[spark] class Executor(
     conf.get(TASK_MAX_DIRECT_RESULT_SIZE),
     RpcUtils.maxMessageSizeBytes(conf))
 
+  // Send indirect task results to the block manager of the driver if true
+  private val sendIndirectResultsToDriver = conf.get(TASK_SEND_INDIRECT_RESULTS_TO_DRIVER)
+
   private val maxResultSize = conf.get(MAX_RESULT_SIZE)
 
   // Maintains the list of running tasks.
@@ -315,6 +319,8 @@ private[spark] class Executor(
   heartbeater.start()
 
   private val appStartTime = conf.getLong("spark.app.startTime", 0)
+
+  private lazy val driver: BlockManagerId = env.blockManager.master.getDriver
 
   // To allow users to distribute plugins and their required files
   // specified by --jars, --files and --archives on application submission, those
@@ -719,11 +725,25 @@ private[spark] class Executor(
             ser.serialize(new IndirectTaskResult[Any](TaskResultBlockId(taskId), resultSize))
           } else if (resultSize > maxDirectResultSize) {
             val blockId = TaskResultBlockId(taskId)
-            env.blockManager.putBytes(
-              blockId,
-              serializedDirectResult,
-              StorageLevel.MEMORY_AND_DISK_SER)
-            logInfo(s"Finished $taskName. $resultSize bytes result sent via BlockManager)")
+
+            if (sendIndirectResultsToDriver) {
+              env.blockManager.blockTransferService.uploadBlockSync(
+                driver.host,
+                driver.port,
+                driver.executorId,
+                blockId,
+                new NioManagedBuffer(serializedDirectResult.toByteBuffer),
+                StorageLevel.MEMORY_AND_DISK_SER,
+                null)
+              logInfo(s"Finished $taskName. $resultSize bytes result sent to driver BlockManager)")
+            } else {
+              env.blockManager.putBytes(
+                blockId,
+                serializedDirectResult,
+                StorageLevel.MEMORY_AND_DISK_SER)
+              logInfo(s"Finished $taskName. $resultSize bytes result sent via BlockManager)")
+            }
+
             ser.serialize(new IndirectTaskResult[Any](blockId, resultSize))
           } else {
             logInfo(s"Finished $taskName. $resultSize bytes result sent to driver")

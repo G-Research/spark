@@ -35,7 +35,7 @@ import org.scalatest.concurrent.Eventually._
 import org.apache.spark._
 import org.apache.spark.TaskState.TaskState
 import org.apache.spark.TestUtils.JavaSourceFromString
-import org.apache.spark.internal.config.MAX_RESULT_SIZE
+import org.apache.spark.internal.config.{MAX_RESULT_SIZE, TASK_MAX_DIRECT_RESULT_SIZE, TASK_SEND_INDIRECT_RESULTS_TO_DRIVER}
 import org.apache.spark.internal.config.Network.RPC_MESSAGE_MAX_SIZE
 import org.apache.spark.storage.TaskResultBlockId
 import org.apache.spark.util.{MutableURLClassLoader, RpcUtils, ThreadUtils, Utils}
@@ -140,6 +140,22 @@ class TaskResultGetterSuite extends SparkFunSuite with BeforeAndAfter with Local
     val RESULT_BLOCK_ID = TaskResultBlockId(0)
     assert(sc.env.blockManager.master.getLocations(RESULT_BLOCK_ID).size === 0,
       "Expect result to be removed from the block manager.")
+  }
+
+  test("handling results larger than max direct result size (via executor block manager)") {
+    val sparkConf = conf.set(TASK_MAX_DIRECT_RESULT_SIZE, 1L)
+    sc = new SparkContext("local", "test", sparkConf)
+    val result = sc.parallelize(Seq(1), 1).map(x => 2 * x).reduce((x, y) => x)
+    assert(result === 2)
+  }
+
+  test("handling results larger than max direct result size (via driver block manager)") {
+    val sparkConf = conf
+    sparkConf.set(TASK_MAX_DIRECT_RESULT_SIZE, 1L)
+    sparkConf.set(TASK_SEND_INDIRECT_RESULTS_TO_DRIVER, true)
+    sc = new SparkContext("local", "test", sparkConf)
+    val result = sc.parallelize(Seq(1), 1).map(x => 2 * x).reduce((x, y) => x)
+    assert(result === 2)
   }
 
   test("handling total size of results larger than maxResultSize") {
