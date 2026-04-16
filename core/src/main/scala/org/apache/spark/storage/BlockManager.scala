@@ -1230,8 +1230,8 @@ private[spark] class BlockManager(
     }
     var runningFailureCount = 0
     var totalFailureCount = 0
-    val locations = sortLocations(locationsAndStatus.locations)
-    val maxFetchFailures = locations.size
+    var locations = sortLocations(locationsAndStatus.locations)
+    var maxFetchFailures = locations.size
     var locationIterator = locations.iterator
     while (locationIterator.hasNext) {
       val loc = locationIterator.next()
@@ -1251,8 +1251,8 @@ private[spark] class BlockManager(
 
           if (totalFailureCount >= maxFetchFailures) {
             // Give up trying anymore locations. Either we've tried all of the original locations,
-            // or we've refreshed the list of locations from the master, and have still
-            // hit failures after trying locations from the refreshed list.
+            // or we've refreshed the list of locations from the master, and have tried all of the
+            // refreshed locations.
             logWarning(log"Failed to fetch remote block ${MDC(BLOCK_ID, blockId)} " +
               log"from [${MDC(BLOCK_MANAGER_IDS, locations.mkString(", "))}] " +
               log"after ${MDC(NUM_FAILURES, totalFailureCount)} fetch failures. " +
@@ -1269,9 +1269,13 @@ private[spark] class BlockManager(
           // take a significant amount of time. To get rid of these stale entries
           // we refresh the block locations after a certain number of fetch failures
           if (runningFailureCount >= maxFailuresBeforeLocationRefresh) {
-            locationIterator = sortLocations(master.getLocations(blockId)).iterator
-            logDebug(s"Refreshed locations from the driver " +
-              s"after ${runningFailureCount} fetch failures.")
+            logDebug(s"Refreshing locations from the driver " +
+              s"after ${runningFailureCount} fetch failures for locations " +
+              log"[${MDC(BLOCK_MANAGER_IDS, locations.mkString(", "))}]. " +
+              log"Most recent failure cause:", e)
+            locations = sortLocations(master.getLocations(blockId))
+            maxFetchFailures += locations.size
+            locationIterator = locations.iterator
             runningFailureCount = 0
           }
 
