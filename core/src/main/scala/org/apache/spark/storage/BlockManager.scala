@@ -1228,11 +1228,10 @@ private[spark] class BlockManager(
     } else {
       null
     }
-    var runningFailureCount = 0
-    var totalFailureCount = 0
     var locations = sortLocations(locationsAndStatus.locations)
-    var maxFetchFailures = locations.size
     var locationIterator = locations.iterator
+    val failedLocations = mutable.Set.empty[BlockManagerId]
+    var lastException: Throwable = null
     while (locationIterator.hasNext) {
       val loc = locationIterator.next()
       logDebug(s"Getting remote block $blockId from $loc")
@@ -1246,37 +1245,25 @@ private[spark] class BlockManager(
         buf
       } catch {
         case NonFatal(e) =>
-          runningFailureCount += 1
-          totalFailureCount += 1
-
-          if (totalFailureCount >= maxFetchFailures) {
-            // Give up trying anymore locations. Either we've tried all of the original locations,
-            // or we've refreshed the list of locations from the master, and have tried all of the
-            // refreshed locations.
-            logWarning(log"Failed to fetch remote block ${MDC(BLOCK_ID, blockId)} " +
-              log"from [${MDC(BLOCK_MANAGER_IDS, locations.mkString(", "))}] " +
-              log"after ${MDC(NUM_FAILURES, totalFailureCount)} fetch failures. " +
-              log"Most recent failure cause:", e)
-            return None
-          }
+          failedLocations += loc
+          lastException = e
 
           logWarning(log"Failed to fetch remote block ${MDC(BLOCK_ID, blockId)} " +
             log"from ${MDC(BLOCK_MANAGER_ID, loc)} " +
-            log"(failed attempt ${MDC(NUM_FAILURES, runningFailureCount)}", e)
+            log"(failed attempt ${MDC(NUM_FAILURES, failedLocations.size)}", e)
 
           // If there is a large number of executors then locations list can contain a
           // large number of stale entries causing a large number of retries that may
           // take a significant amount of time. To get rid of these stale entries
           // we refresh the block locations after a certain number of fetch failures
-          if (runningFailureCount >= maxFailuresBeforeLocationRefresh) {
+          if (failedLocations.size % maxFailuresBeforeLocationRefresh == 0) {
             logDebug(s"Refreshing locations from the driver " +
-              s"after ${runningFailureCount} fetch failures for locations " +
+              s"after ${maxFailuresBeforeLocationRefresh} fetch failures for locations " +
               log"[${MDC(BLOCK_MANAGER_IDS, locations.mkString(", "))}]. " +
               log"Most recent failure cause:", e)
-            locations = sortLocations(master.getLocations(blockId))
-            maxFetchFailures += locations.size
+            locations = sortLocations(
+              master.getLocations(blockId).filterNot(failedLocations.contains))
             locationIterator = locations.iterator
-            runningFailureCount = 0
           }
 
           // This location failed, so we retry fetch from a different one by returning null here
@@ -1295,6 +1282,13 @@ private[spark] class BlockManager(
       logDebug(s"The value of block $blockId is null")
     }
     logDebug(s"Block $blockId not found")
+
+    if (lastException != null) {
+      logWarning(log"Failed to fetch remote block ${MDC(BLOCK_ID, blockId)} " +
+        log"from ${MDC(NUM_LOCATIONS, failedLocations.size)} locations " +
+        log"[${MDC(BLOCK_MANAGER_IDS, failedLocations.mkString(", "))}]. " +
+        log"Most recent failure cause:", lastException)
+    }
     None
   }
 
