@@ -2032,7 +2032,7 @@ object functions {
    * sketch.
    *
    * @group agg_funcs
-   * @since 4.1.0
+   * @since 4.1.2
    */
   def kll_merge_agg_bigint(e: Column, k: Column): Column =
     Column.fn("kll_merge_agg_bigint", e, k)
@@ -2044,7 +2044,7 @@ object functions {
    * sketch.
    *
    * @group agg_funcs
-   * @since 4.1.0
+   * @since 4.1.2
    */
   def kll_merge_agg_bigint(e: Column, k: Int): Column =
     Column.fn("kll_merge_agg_bigint", e, lit(k))
@@ -2056,7 +2056,7 @@ object functions {
    * sketch.
    *
    * @group agg_funcs
-   * @since 4.1.0
+   * @since 4.1.2
    */
   def kll_merge_agg_bigint(columnName: String, k: Int): Column =
     kll_merge_agg_bigint(Column(columnName), k)
@@ -2067,7 +2067,7 @@ object functions {
    * sketch.
    *
    * @group agg_funcs
-   * @since 4.1.0
+   * @since 4.1.2
    */
   def kll_merge_agg_bigint(e: Column): Column =
     Column.fn("kll_merge_agg_bigint", e)
@@ -2078,7 +2078,7 @@ object functions {
    * sketch.
    *
    * @group agg_funcs
-   * @since 4.1.0
+   * @since 4.1.2
    */
   def kll_merge_agg_bigint(columnName: String): Column =
     kll_merge_agg_bigint(Column(columnName))
@@ -2089,7 +2089,7 @@ object functions {
    * If k is not specified, the merged sketch adopts the k value from the first input sketch.
    *
    * @group agg_funcs
-   * @since 4.1.0
+   * @since 4.1.2
    */
   def kll_merge_agg_float(e: Column, k: Column): Column =
     Column.fn("kll_merge_agg_float", e, k)
@@ -2100,7 +2100,7 @@ object functions {
    * If k is not specified, the merged sketch adopts the k value from the first input sketch.
    *
    * @group agg_funcs
-   * @since 4.1.0
+   * @since 4.1.2
    */
   def kll_merge_agg_float(e: Column, k: Int): Column =
     Column.fn("kll_merge_agg_float", e, lit(k))
@@ -2111,7 +2111,7 @@ object functions {
    * If k is not specified, the merged sketch adopts the k value from the first input sketch.
    *
    * @group agg_funcs
-   * @since 4.1.0
+   * @since 4.1.2
    */
   def kll_merge_agg_float(columnName: String, k: Int): Column =
     kll_merge_agg_float(Column(columnName), k)
@@ -2121,7 +2121,7 @@ object functions {
    * If k is not specified, the merged sketch adopts the k value from the first input sketch.
    *
    * @group agg_funcs
-   * @since 4.1.0
+   * @since 4.1.2
    */
   def kll_merge_agg_float(e: Column): Column =
     Column.fn("kll_merge_agg_float", e)
@@ -2131,7 +2131,7 @@ object functions {
    * If k is not specified, the merged sketch adopts the k value from the first input sketch.
    *
    * @group agg_funcs
-   * @since 4.1.0
+   * @since 4.1.2
    */
   def kll_merge_agg_float(columnName: String): Column =
     kll_merge_agg_float(Column(columnName))
@@ -2142,7 +2142,7 @@ object functions {
    * If k is not specified, the merged sketch adopts the k value from the first input sketch.
    *
    * @group agg_funcs
-   * @since 4.1.0
+   * @since 4.1.2
    */
   def kll_merge_agg_double(e: Column, k: Column): Column =
     Column.fn("kll_merge_agg_double", e, k)
@@ -2153,7 +2153,7 @@ object functions {
    * If k is not specified, the merged sketch adopts the k value from the first input sketch.
    *
    * @group agg_funcs
-   * @since 4.1.0
+   * @since 4.1.2
    */
   def kll_merge_agg_double(e: Column, k: Int): Column =
     Column.fn("kll_merge_agg_double", e, lit(k))
@@ -2164,7 +2164,7 @@ object functions {
    * If k is not specified, the merged sketch adopts the k value from the first input sketch.
    *
    * @group agg_funcs
-   * @since 4.1.0
+   * @since 4.1.2
    */
   def kll_merge_agg_double(columnName: String, k: Int): Column =
     kll_merge_agg_double(Column(columnName), k)
@@ -2174,7 +2174,7 @@ object functions {
    * If k is not specified, the merged sketch adopts the k value from the first input sketch.
    *
    * @group agg_funcs
-   * @since 4.1.0
+   * @since 4.1.2
    */
   def kll_merge_agg_double(e: Column): Column =
     Column.fn("kll_merge_agg_double", e)
@@ -2184,7 +2184,7 @@ object functions {
    * If k is not specified, the merged sketch adopts the k value from the first input sketch.
    *
    * @group agg_funcs
-   * @since 4.1.0
+   * @since 4.1.2
    */
   def kll_merge_agg_double(columnName: String): Column =
     kll_merge_agg_double(Column(columnName))
@@ -2530,6 +2530,63 @@ object functions {
   //////////////////////////////////////////////////////////////////////////////////////////////
   // Window functions
   //////////////////////////////////////////////////////////////////////////////////////////////
+
+  /**
+   * Window function: computes the differences between consecutive cumulative counter values in a
+   * time series, thereby converting the counter from the cumulative to the delta format.
+   *
+   * Gracefully handles counter resets by returning NULL. Counter resets are detected when the
+   * counter value decreases.
+   *
+   * Use the PARTITION BY clause of the window to separate independent counters. This is done by
+   * specifying all columns which uniquely identify a time series. These are typically the counter
+   * name and any attributes tied to the counter.
+   *
+   * Use the ORDER BY clause of the window to order the observations by the associated timestamp
+   * in ascending order.
+   *
+   * @param value
+   *   A cumulative counter. Must be a numeric data type. Must be non-negative.
+   *
+   * @return
+   *   The difference between the current and previous counter value within the window partition,
+   *   according to the order defined by the window's ORDER BY clause.
+   *
+   * @group window_funcs
+   * @since 4.3.0
+   */
+  def counter_diff(value: Column): Column = Column.fn("counter_diff", value)
+
+  /**
+   * Window function: computes the differences between consecutive cumulative counter values in a
+   * time series, thereby converting the counter from the cumulative to the delta format.
+   *
+   * Gracefully handles counter resets by returning NULL. Counter resets are detected when the
+   * counter value decreases, or when the start time advances between rows.
+   *
+   * Use the PARTITION BY clause of the window to separate independent counters. This is done by
+   * specifying all columns which uniquely identify a time series. These are typically the counter
+   * name and any attributes tied to the counter.
+   *
+   * Use the ORDER BY clause of the window to order the observations by the associated timestamp
+   * in ascending order.
+   *
+   * @param value
+   *   A cumulative counter. Must be a numeric data type. Must be non-negative.
+   *
+   * @param startTime
+   *   A timestamp indicating when the counter was last set to zero. Used to signal counter
+   *   resets.
+   *
+   * @return
+   *   The difference between the current and previous counter value within the window partition,
+   *   according to the order defined by the window's ORDER BY clause.
+   *
+   * @group window_funcs
+   * @since 4.3.0
+   */
+  def counter_diff(value: Column, startTime: Column): Column =
+    Column.fn("counter_diff", value, startTime)
 
   /**
    * Window function: returns the cumulative distribution of values within a window partition,
@@ -4411,6 +4468,14 @@ object functions {
    * @since 3.5.0
    */
   def current_schema(): Column = Column.fn("current_schema")
+
+  /**
+   * Returns the current SQL path as a comma-separated list of qualified schema names.
+   *
+   * @group misc_funcs
+   * @since 4.2.0
+   */
+  def current_path(): Column = Column.fn("current_path")
 
   /**
    * Returns the user name of current execution context.
@@ -8479,6 +8544,40 @@ object functions {
     Column.internalFn("timestampadd", lit(unit), quantity, ts)
 
   /**
+   * Returns the start of the fixed-size bucket of `bucketSize` that contains `ts`, with buckets
+   * aligned to the default origin (1970-01-01 00:00:00). For `TIMESTAMP_NTZ`, bucketing is
+   * performed in UTC. For `TIMESTAMP`, year-month interval buckets and calendar-day components of
+   * day-time interval buckets align to the session time zone.
+   *
+   * @param bucketSize
+   *   A day-time or year-month interval defining the bucket size. Must be positive and foldable.
+   * @param ts
+   *   A TIMESTAMP or TIMESTAMP_NTZ value to bucket.
+   * @group datetime_funcs
+   * @since 4.2.0
+   */
+  def time_bucket(bucketSize: Column, ts: Column): Column =
+    Column.fn("time_bucket", bucketSize, ts)
+
+  /**
+   * Returns the start of the fixed-size bucket of `bucketSize` that contains `ts`, with buckets
+   * aligned to `origin`. For `TIMESTAMP_NTZ`, bucketing is performed in UTC. For `TIMESTAMP`,
+   * year-month interval buckets and calendar-day components of day-time interval buckets align to
+   * the session time zone.
+   *
+   * @param bucketSize
+   *   A day-time or year-month interval defining the bucket size. Must be positive and foldable.
+   * @param ts
+   *   A TIMESTAMP or TIMESTAMP_NTZ value to bucket.
+   * @param origin
+   *   Alignment anchor. Must be the same type as `ts` and must be foldable.
+   * @group datetime_funcs
+   * @since 4.2.0
+   */
+  def time_bucket(bucketSize: Column, ts: Column, origin: Column): Column =
+    Column.fn("time_bucket", bucketSize, ts, origin)
+
+  /**
    * Returns the difference between two times, measured in specified units. Throws a
    * SparkIllegalArgumentException, in case the specified unit is not supported.
    *
@@ -9542,6 +9641,17 @@ object functions {
    * @since 4.0.0
    */
   def is_variant_null(v: Column): Column = Column.fn("is_variant_null", v)
+
+  /**
+   * Check if a variant value is valid. Returns true if the variant is valid, false if it is
+   * malformed, and NULL if the input is NULL.
+   *
+   * @param v
+   *   a variant column.
+   * @group variant_funcs
+   * @since 4.2.0
+   */
+  def is_valid_variant(v: Column): Column = Column.fn("is_valid_variant", v)
 
   /**
    * Extracts a sub-variant from `v` according to `path` string, and then cast the sub-variant to
@@ -11112,6 +11222,24 @@ object functions {
    */
   def st_asbinary(geo: Column): Column =
     Column.fn("st_asbinary", geo)
+
+  /**
+   * Returns the input GEOGRAPHY or GEOMETRY value in WKB format using the specified endianness.
+   *
+   * @group st_funcs
+   * @since 4.2.0
+   */
+  def st_asbinary(geo: Column, endianness: Column): Column =
+    Column.fn("st_asbinary", geo, endianness)
+
+  /**
+   * Returns the input GEOGRAPHY or GEOMETRY value in WKB format using the specified endianness.
+   *
+   * @group st_funcs
+   * @since 4.2.0
+   */
+  def st_asbinary(geo: Column, endianness: String): Column =
+    Column.fn("st_asbinary", geo, lit(endianness))
 
   /**
    * Parses the WKB description of a geography and returns the corresponding GEOGRAPHY value.

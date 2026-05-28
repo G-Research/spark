@@ -18,7 +18,7 @@ import datetime
 import unittest
 from zoneinfo import ZoneInfo
 
-from pyspark.errors import PySparkTypeError, PySparkValueError
+from pyspark.errors import PySparkRuntimeError, PySparkTypeError, PySparkValueError
 from pyspark.sql.conversion import (
     ArrowArrayToPandasConversion,
     ArrowTableToRowsConversion,
@@ -157,6 +157,111 @@ class ArrowBatchTransformerTests(unittest.TestCase):
 
         self.assertEqual(wrapped.num_rows, 0)
         self.assertEqual(wrapped.num_columns, 1)
+
+    def test_enforce_schema_nested_cast(self):
+        """Nested struct and list types are cast recursively by Arrow."""
+        import pyarrow as pa
+
+        inner = pa.struct([("a", pa.int32()), ("b", pa.float32())])
+        batch = pa.RecordBatch.from_arrays(
+            [
+                pa.array([{"a": 1, "b": 2.0}], type=inner),
+                pa.array([[1, 2]], type=pa.list_(pa.int32())),
+            ],
+            names=["s", "l"],
+        )
+        target = pa.schema(
+            [
+                ("s", pa.struct([("a", pa.int64()), ("b", pa.float64())])),
+                ("l", pa.list_(pa.int64())),
+            ]
+        )
+        result = ArrowBatchTransformer.enforce_schema(batch, target)
+        self.assertEqual(result.schema, target)
+
+    def test_enforce_schema_arrow_cast_false(self):
+        """arrow_cast=False raises on type mismatch instead of casting."""
+        import pyarrow as pa
+
+        batch = pa.RecordBatch.from_arrays([pa.array([1], type=pa.int32())], names=["x"])
+        target = pa.schema([("x", pa.int64())])
+        with self.assertRaises(PySparkRuntimeError) as cm:
+            ArrowBatchTransformer.enforce_schema(batch, target, arrow_cast=False)
+        self.assertEqual(cm.exception.getCondition(), "RESULT_COLUMN_TYPES_MISMATCH")
+
+    def test_enforce_schema_safecheck(self):
+        """safecheck=True rejects overflow; safecheck=False allows it."""
+        import pyarrow as pa
+
+        batch = pa.RecordBatch.from_arrays([pa.array([999], type=pa.int64())], names=["x"])
+        target = pa.schema([("x", pa.int8())])
+        with self.assertRaises(PySparkRuntimeError) as cm:
+            ArrowBatchTransformer.enforce_schema(batch, target, safecheck=True)
+        self.assertEqual(cm.exception.getCondition(), "RESULT_COLUMN_TYPES_MISMATCH")
+        result = ArrowBatchTransformer.enforce_schema(batch, target, safecheck=False)
+        self.assertEqual(result.schema, target)
+
+    def test_enforce_schema_missing_column(self):
+        """Missing column raises RESULT_COLUMN_NAMES_MISMATCH."""
+        import pyarrow as pa
+
+        batch = pa.RecordBatch.from_arrays([pa.array([1])], names=["a"])
+        with self.assertRaises(PySparkRuntimeError) as cm:
+            ArrowBatchTransformer.enforce_schema(batch, pa.schema([("missing", pa.int64())]))
+        self.assertEqual(cm.exception.getCondition(), "RESULT_COLUMN_NAMES_MISMATCH")
+
+    def test_enforce_schema_extra_column(self):
+        """Extra column raises RESULT_COLUMN_NAMES_MISMATCH with the extra name listed."""
+        import pyarrow as pa
+
+        batch = pa.RecordBatch.from_arrays([pa.array([1]), pa.array([2])], names=["a", "b"])
+        with self.assertRaises(PySparkRuntimeError) as cm:
+            ArrowBatchTransformer.enforce_schema(batch, pa.schema([("a", pa.int64())]))
+        self.assertEqual(cm.exception.getCondition(), "RESULT_COLUMN_NAMES_MISMATCH")
+        self.assertIn("b", str(cm.exception))
+
+    def test_enforce_schema_reorder_by_name(self):
+        """reorder_by_name=True reorders input columns to match target schema order."""
+        import pyarrow as pa
+
+        batch = pa.RecordBatch.from_arrays([pa.array(["x"]), pa.array([1])], names=["b", "a"])
+        target = pa.schema([("a", pa.int64()), ("b", pa.string())])
+        result = ArrowBatchTransformer.enforce_schema(batch, target)
+        self.assertEqual(result.schema.names, ["a", "b"])
+        self.assertEqual(result.column(0).to_pylist(), [1])
+        self.assertEqual(result.column(1).to_pylist(), ["x"])
+
+    def test_enforce_schema_positional(self):
+        """reorder_by_name=False matches columns by index, preserving input names."""
+        import pyarrow as pa
+
+        batch = pa.RecordBatch.from_arrays([pa.array([1]), pa.array(["x"])], names=["foo", "bar"])
+        target = pa.schema([("a", pa.int64()), ("b", pa.string())])
+        result = ArrowBatchTransformer.enforce_schema(batch, target, reorder_by_name=False)
+        # Input column names are preserved
+        self.assertEqual(result.schema.names, ["foo", "bar"])
+        self.assertEqual(result.column(0).to_pylist(), [1])
+        self.assertEqual(result.column(1).to_pylist(), ["x"])
+
+    def test_enforce_schema_positional_count_mismatch(self):
+        """reorder_by_name=False with wrong column count raises RESULT_COLUMN_SCHEMA_MISMATCH."""
+        import pyarrow as pa
+
+        batch = pa.RecordBatch.from_arrays([pa.array([1])], names=["a"])
+        target = pa.schema([("x", pa.int64()), ("y", pa.int64())])
+        with self.assertRaises(PySparkRuntimeError) as cm:
+            ArrowBatchTransformer.enforce_schema(batch, target, reorder_by_name=False)
+        self.assertEqual(cm.exception.getCondition(), "RESULT_COLUMN_SCHEMA_MISMATCH")
+
+    def test_enforce_schema_table_input(self):
+        """enforce_schema accepts pa.Table and returns pa.Table."""
+        import pyarrow as pa
+
+        table = pa.table({"x": pa.array([1], type=pa.int32())})
+        target = pa.schema([("x", pa.int64())])
+        result = ArrowBatchTransformer.enforce_schema(table, target)
+        self.assertIsInstance(result, pa.Table)
+        self.assertEqual(result.schema, target)
 
 
 @unittest.skipIf(not have_pyarrow, pyarrow_requirement_message)

@@ -15,147 +15,20 @@
  * limitations under the License.
  */
 
-/* global $, uiRoot, appBasePath */
-/* eslint-disable no-unused-vars */
-
-function formatDurationSql(milliseconds) {
-  if (milliseconds < 100) return parseInt(milliseconds).toFixed(1) + " ms";
-  var seconds = milliseconds / 1000;
-  if (seconds < 1) return seconds.toFixed(1) + " s";
-  if (seconds < 60) return seconds.toFixed(0) + " s";
-  var minutes = seconds / 60;
-  if (minutes < 10) return minutes.toFixed(1) + " min";
-  if (minutes < 60) return minutes.toFixed(0) + " min";
-  var hours = minutes / 60;
-  return hours.toFixed(1) + " h";
-}
-
-function formatDateSql(dateStr) {
-  if (!dateStr) return "";
-  try { return new Date(dateStr).toLocaleString(); } catch (e) { return dateStr; }
-}
-function escapeHtml(str) {
-  if (!str) return str;
-  var div = document.createElement("div");
-  div.appendChild(document.createTextNode(str));
-  return div.innerHTML;
-}
-/* eslint-enable no-unused-vars */
-
-function createRESTEndPointForSQLTab(appId) {
-  var words = document.baseURI.split("/");
-  var ind = words.indexOf("proxy");
-  var newBaseURI;
-  if (ind > 0) {
-    appId = words[ind + 1];
-    newBaseURI = words.slice(0, ind + 2).join("/");
-    return newBaseURI + "/api/v1/applications/" + appId +
-      "/sql/?details=false&planDescription=false";
-  }
-  ind = words.indexOf("history");
-  if (ind > 0) {
-    appId = words[ind + 1];
-    var attemptId = words[ind + 2];
-    newBaseURI = words.slice(0, ind).join("/");
-    if (isNaN(attemptId)) {
-      return newBaseURI + "/api/v1/applications/" + appId +
-        "/sql/?details=false&planDescription=false";
-    } else {
-      return newBaseURI + "/api/v1/applications/" + appId + "/" + attemptId +
-        "/sql/?details=false&planDescription=false";
-    }
-  }
-  return uiRoot + "/api/v1/applications/" + appId +
-    "/sql/?details=false&planDescription=false";
-}
-
-function statusBadge(status) {
-  var cls = "bg-secondary";
-  if (status === "COMPLETED") cls = "bg-success";
-  else if (status === "RUNNING") cls = "bg-primary";
-  else if (status === "FAILED") cls = "bg-danger";
-  return '<span class="badge ' + cls + '">' + status + '</span>';
-}
-
-function jobIdLinks(ids) {
-  if (!ids || ids.length === 0) return "";
-  var basePath = uiRoot + appBasePath;
-  return ids.map(function (id) {
-    return '<a href="' + basePath + '/jobs/job/?id=' + id + '">' + id + '</a>';
-  }).join(", ");
-}
-
-function descriptionHtml(exec) {
-  var desc = exec.description || "";
-  var basePath = uiRoot + appBasePath;
-  var url = basePath + "/SQL/execution/?id=" + exec.id;
-  if (desc.length > 100) {
-    var short = escapeHtml(desc.substring(0, 100)) + "...";
-    return '<a href="' + url + '" title="' + escapeHtml(desc) + '">' +
-      short + '</a>';
-  }
-  return '<a href="' + url + '">' + (escapeHtml(desc) || exec.id) + '</a>';
-}
-
-$.fn.dataTable.ext.search.push(function (settings, data) {
-  if (settings.nTable.id !== "sql-table") return true;
-  var sel = $("#status-filter").val();
-  return !sel || data[2] === sel;
-});
+/* global $, uiRoot, appBasePath, createSqlApiBase, getSqlTableColumns,
+   withResolvedAppId, statusBadge, jobIdLinks, formatDurationSql,
+   descriptionHtml */
 
 $(document).ready(function () {
-  var appId = "";
-  var endPoint = createRESTEndPointForSQLTab(appId);
-
+  // Read the cluster-level grouping toggle rendered into the page by Scala
   var groupSubExecEnabled = true;
   var configEl = document.getElementById("group-sub-exec-config");
   if (configEl) {
     groupSubExecEnabled = configEl.getAttribute("data-value") === "true";
   }
 
-  $.getJSON(endPoint, function (response) {
-    var tableData = response.map(function (exec) {
-      return [
-        exec.id,
-        exec.queryId || "",
-        exec.status,
-        exec.description || "",
-        exec.submissionTime || "",
-        exec.duration,
-        exec.runningJobIds || [],
-        exec.successJobIds || [],
-        exec.failedJobIds || [],
-        exec.errorMessage || "",
-        exec.rootExecutionId
-      ];
-    });
-
-    // Group sub-executions under their root execution (when enabled)
-    var subExecMap = {};
-    var rootRows = [];
-    if (groupSubExecEnabled) {
-      tableData.forEach(function (row) {
-        var id = row[0];
-        var rootId = row[10];
-        if (rootId !== id && subExecMap[rootId] !== undefined) {
-          subExecMap[rootId].push(row);
-        } else {
-          subExecMap[id] = [];
-          rootRows.push(row);
-        }
-      });
-      // Second pass: attach orphaned sub-executions that appeared before their root
-      tableData.forEach(function (row) {
-        var id = row[0];
-        var rootId = row[10];
-        if (rootId !== id && subExecMap[rootId] !== undefined
-            && subExecMap[rootId].indexOf(row) === -1) {
-          subExecMap[rootId].push(row);
-        }
-      });
-    } else {
-      rootRows = tableData;
-    }
+  function init(resolvedAppId) {
+    var sqlTableEndPoint = createSqlApiBase(resolvedAppId) + "/sqlTable";
 
     var container = document.getElementById("sql-executions-table");
     container.innerHTML =
@@ -169,142 +42,124 @@ $(document).ready(function () {
       '<table id="sql-table" class="table table-striped compact cell-border" ' +
       'style="width:100%"></table>';
 
-    var columns = [
-      {
-        title: "ID",
-        render: function (data, type) {
-          if (type !== "display") return data;
-          var basePath = uiRoot + appBasePath;
-          return '<a href="' + basePath + '/SQL/execution/?id=' + data + '">' +
-              data + '</a>';
-        }
-      },
-      {
-        title: "Query ID",
-        render: function (data, type) {
-          if (type !== "display" || !data) return data;
-          return '<span title="' + data + '">' + data.substring(0, 8) + '...</span>';
-        }
-      },
-      {
-        title: "Status",
-        render: function (data, type) {
-          if (type !== "display") return data;
-          return statusBadge(data);
-        }
-      },
-      {
-        title: "Description",
-        render: function (data, type, row) {
-          if (type !== "display") return data;
-          return descriptionHtml({ id: row[0], description: data });
-        }
-      },
-      {
-        title: "Submitted",
-        render: function (data, type) {
-          if (type !== "display") return data;
-          return formatDateSql(data);
-        }
-      },
-      {
-        title: "Duration",
-        render: function (data, type) {
-          if (type !== "display") return data;
-          return formatDurationSql(data);
-        }
-      },
-      {
-        title: "Running Jobs",
-        orderable: false,
-        render: function (data, type) {
-          if (type !== "display") return data.join(",");
-          return jobIdLinks(data);
-        }
-      },
-      {
-        title: "Succeeded Jobs",
-        orderable: false,
-        render: function (data, type) {
-          if (type !== "display") return data.join(",");
-          return jobIdLinks(data);
-        }
-      },
-      {
-        title: "Failed Jobs",
-        orderable: false,
-        render: function (data, type) {
-          if (type !== "display") return data.join(",");
-          return jobIdLinks(data);
-        }
-      },
-      {
-        title: "Error Message",
-        render: function (data, type) {
-          if (type !== "display" || !data) return data;
-          if (data.length > 100) {
-            return '<span title="' + escapeHtml(data) + '">' +
-                escapeHtml(data.substring(0, 100)) + '...</span>';
-          }
-          return escapeHtml(data);
-        }
-      }
-    ];
-
+    var columns = getSqlTableColumns({ detail: false });
     if (groupSubExecEnabled) {
+      // Trailing "Sub Executions" column matching the SPARK-41752 / 4.1 layout:
+      // shows "+N sub" when the root has children, blank otherwise. Click to
+      // expand a child row containing the sub-execution rows.
       columns.push({
-        title: "Sub Executions",
-        orderable: false,
-        render: function (_data, type, row) {
-          var children = subExecMap[row[0]] || [];
-          if (type !== "display" || children.length === 0) return children.length || "";
-          return '<a href="#" class="toggle-sub-exec">' +
-              '+' + children.length + ' sub</a>';
+        data: null, name: "subExecutions", title: "Sub Executions",
+        orderable: false, searchable: false,
+        className: "sub-exec-toggle",
+        render: function (data, type, row) {
+          if (type !== "display") return "";
+          var subs = row.subExecutions || [];
+          if (subs.length === 0) return "";
+          var childId = "sub-exec-" + row.id;
+          return '<a href="#" class="toggle-sub-exec" role="button" ' +
+            'aria-expanded="false" aria-controls="' + childId + '">' +
+            '+' + subs.length + ' sub</a>';
         }
       });
     }
 
     var table = $("#sql-table").DataTable({
-      data: rootRows,
+      serverSide: true,
+      processing: true,
+      paging: true,
+      info: true,
+      lengthMenu: [[20, 50, 100, -1], [20, 50, 100, "All"]],
+      orderMulti: false,
+      ajax: {
+        url: sqlTableEndPoint,
+        data: function (d) {
+          // Pass status filter as custom server-side parameter
+          var sel = $("#status-filter").val();
+          if (sel) {
+            d.status = sel;
+          }
+          d.groupSubExecution = groupSubExecEnabled ? "true" : "false";
+        },
+        dataSrc: function (json) { return json.aaData; },
+        error: function () {
+          $("#sql-table_processing").css("display", "none");
+        }
+      },
       columns: columns,
       order: [[0, "desc"]],
-      pageLength: 20,
-      deferRender: true,
       language: { search: "Search:&#160;" }
     });
 
-    // Child row expansion for sub-executions
-    $("#sql-table tbody").on("click", "a.toggle-sub-exec", function (e) {
-      e.preventDefault();
-      var tr = $(this).closest("tr");
-      var dtRow = table.row(tr);
-      if (dtRow.child.isShown()) {
-        dtRow.child.hide();
-        tr.removeClass("shown");
-      } else {
-        var parentId = dtRow.data()[0];
-        var children = subExecMap[parentId] || [];
-        var html = '<table class="table table-sm table-bordered mb-0 ms-4">';
+    // Child-row expansion for sub-executions. Sub data is embedded per root row
+    // in the server payload (`row.subExecutions`), so no second fetch is needed.
+    // Under serverSide: true DataTables destroys/recreates rows on every sort,
+    // filter or page change, so we track expanded row IDs out-of-band and
+    // re-attach the child on each draw.
+    if (groupSubExecEnabled) {
+      var expandedRowIds = {};
+
+      var renderSubExecutionsHtml = function (rowData) {
+        var subs = (rowData && rowData.subExecutions) || [];
+        var basePath = uiRoot + appBasePath;
+        var childId = "sub-exec-" + (rowData && rowData.id);
+        var html = '<table id="' + childId +
+          '" class="table table-sm table-bordered mb-0 sub-exec-table">';
         html += '<thead><tr><th>ID</th><th>Status</th><th>Description</th>' +
           '<th>Duration</th><th>Succeeded Jobs</th></tr></thead><tbody>';
-        children.forEach(function (child) {
-          var basePath = uiRoot + appBasePath;
-          html += '<tr><td><a href="' + basePath + '/SQL/execution/?id=' + child[0] +
-            '">' + child[0] + '</a></td>';
-          html += '<td>' + statusBadge(child[2]) + '</td>';
-          html += '<td>' + escapeHtml(child[3] || '') + '</td>';
-          html += '<td>' + formatDurationSql(child[5]) + '</td>';
-          html += '<td>' + jobIdLinks(child[7]) + '</td></tr>';
+        subs.forEach(function (child) {
+          html += '<tr><td><a href="' + basePath + '/SQL/execution/?id=' +
+            child.id + '">' + child.id + '</a></td>';
+          html += '<td>' + statusBadge(child.status) + '</td>';
+          html += '<td>' + descriptionHtml({
+            id: child.id, description: child.description || ""
+          }) + '</td>';
+          html += '<td>' + formatDurationSql(child.duration) + '</td>';
+          html += '<td>' + jobIdLinks(child.jobIds || []) + '</td></tr>';
         });
         html += '</tbody></table>';
-        dtRow.child(html).show();
-        tr.addClass("shown");
-      }
-    });
+        return html;
+      };
+
+      $("#sql-table tbody").on("click", "a.toggle-sub-exec", function (e) {
+        e.preventDefault();
+        var tr = $(this).closest("tr");
+        var dtRow = table.row(tr);
+        var rowData = dtRow.data();
+        var subs = (rowData && rowData.subExecutions) || [];
+        if (dtRow.child.isShown()) {
+          dtRow.child.hide();
+          tr.removeClass("shown");
+          $(this).text("+" + subs.length + " sub").attr("aria-expanded", "false");
+          delete expandedRowIds[rowData.id];
+        } else {
+          dtRow.child(renderSubExecutionsHtml(rowData)).show();
+          tr.addClass("shown");
+          $(this).text("\u2212" + subs.length + " sub").attr("aria-expanded", "true");
+          expandedRowIds[rowData.id] = true;
+        }
+      });
+
+      table.on("draw", function () {
+        $("#sql-table tbody > tr").each(function () {
+          var dtRow = table.row(this);
+          var data = dtRow.data();
+          if (data && expandedRowIds[data.id]) {
+            var subs = data.subExecutions || [];
+            dtRow.child(renderSubExecutionsHtml(data)).show();
+            $(this).addClass("shown");
+            $(this).find("a.toggle-sub-exec")
+              .text("\u2212" + subs.length + " sub")
+              .attr("aria-expanded", "true");
+          }
+        });
+      });
+    }
 
     $("#status-filter").on("change", function () {
       table.draw();
     });
-  });
 
+  } // end init
+
+  withResolvedAppId(init);
 });

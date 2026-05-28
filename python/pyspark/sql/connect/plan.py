@@ -43,7 +43,7 @@ import pyarrow as pa
 
 from pyspark.serializers import CloudPickleSerializer
 from pyspark.storagelevel import StorageLevel
-from pyspark.sql.types import DataType
+from pyspark.sql.types import DataType, StructType
 
 import pyspark.sql.connect.proto as proto
 from pyspark.sql.column import Column
@@ -383,6 +383,40 @@ class DataSource(LogicalPlan):
         return plan
 
 
+class Parse(LogicalPlan):
+    """Parse a DataFrame with a single string column into a structured DataFrame."""
+
+    def __init__(
+        self,
+        child: "LogicalPlan",
+        format: "proto.Parse.ParseFormat.ValueType",
+        schema: Optional[str] = None,
+        options: Optional[Mapping[str, str]] = None,
+    ) -> None:
+        super().__init__(child)
+        self._format = format
+        self._schema = schema
+        self._options = options
+
+    def plan(self, session: "SparkConnectClient") -> proto.Relation:
+        assert self._child is not None
+        plan = self._create_proto_relation()
+        plan.parse.input.CopyFrom(self._child.plan(session))
+        plan.parse.format = self._format
+        if self._schema is not None and len(self._schema) > 0:
+            plan.parse.schema.CopyFrom(
+                pyspark_types_to_proto_types(
+                    StructType.fromDDL(self._schema)
+                    if not self._schema.startswith("{")
+                    else StructType.fromJson(json.loads(self._schema))
+                )
+            )
+        if self._options is not None:
+            for k, v in self._options.items():
+                plan.parse.options[k] = v
+        return plan
+
+
 class Read(LogicalPlan):
     def __init__(
         self,
@@ -406,6 +440,31 @@ class Read(LogicalPlan):
 
     def print(self, indent: int = 0) -> str:
         return f"{' ' * indent}<Read table_name={self.table_name}>\n"
+
+
+class RelationChanges(LogicalPlan):
+    def __init__(
+        self,
+        table_name: str,
+        options: Optional[Dict[str, str]] = None,
+        is_streaming: Optional[bool] = None,
+    ) -> None:
+        super().__init__(None)
+        self.table_name = table_name
+        self.options = options or {}
+        self._is_streaming = is_streaming
+
+    def plan(self, session: "SparkConnectClient") -> proto.Relation:
+        plan = self._create_proto_relation()
+        plan.relation_changes.unparsed_identifier = self.table_name
+        if self._is_streaming is not None:
+            plan.relation_changes.is_streaming = self._is_streaming
+        for k, v in self.options.items():
+            plan.relation_changes.options[k] = v
+        return plan
+
+    def print(self, indent: int = 0) -> str:
+        return f"{' ' * indent}<RelationChanges table_name={self.table_name}>\n"
 
 
 class LocalRelation(LogicalPlan):
@@ -1095,7 +1154,7 @@ class Join(LogicalPlan):
 
     @property
     def observations(self) -> Dict[str, "Observation"]:
-        return dict(**super().observations, **self.right.observations)
+        return {**super().observations, **self.right.observations}
 
     def print(self, indent: int = 0) -> str:
         i = " " * indent
@@ -1188,7 +1247,7 @@ class AsOfJoin(LogicalPlan):
 
     @property
     def observations(self) -> Dict[str, "Observation"]:
-        return dict(**super().observations, **self.right.observations)
+        return {**super().observations, **self.right.observations}
 
     def print(self, indent: int = 0) -> str:
         assert self.left is not None
@@ -1263,7 +1322,7 @@ class LateralJoin(LogicalPlan):
 
     @property
     def observations(self) -> Dict[str, "Observation"]:
-        return dict(**super().observations, **self.right.observations)
+        return {**super().observations, **self.right.observations}
 
     def print(self, indent: int = 0) -> str:
         i = " " * indent
@@ -1279,6 +1338,108 @@ class LateralJoin(LogicalPlan):
         <ul>
             <li>
                 <b>LateralJoin</b><br />
+                Left: {self.left._repr_html_()}
+                Right: {self.right._repr_html_()}
+            </li>
+        </uL>
+        """
+
+
+# Acceptance lists for `nearestByJoin`. Must stay aligned with `NearestByJoinValidation` in
+# `sql/api/.../catalyst/plans/NearestByJoinValidation.scala`.
+_NEAREST_BY_JOIN_MAX_NUM_RESULTS = 100000
+_NEAREST_BY_JOIN_SUPPORTED_JOIN_TYPES = frozenset({"inner", "leftouter", "left"})
+_NEAREST_BY_JOIN_SUPPORTED_JOIN_TYPE_DISPLAY = "'INNER', 'LEFT OUTER'"
+_NEAREST_BY_JOIN_SUPPORTED_MODES = ("approx", "exact")
+_NEAREST_BY_JOIN_SUPPORTED_DIRECTIONS = ("distance", "similarity")
+
+
+class NearestByJoin(LogicalPlan):
+    def __init__(
+        self,
+        left: Optional[LogicalPlan],
+        right: LogicalPlan,
+        ranking_expression: Column,
+        num_results: int,
+        join_type: str,
+        mode: str,
+        direction: str,
+    ) -> None:
+        super().__init__(left, self._collect_references([ranking_expression]))
+        self.left = cast(LogicalPlan, left)
+        self.right = right
+        self.ranking_expression = ranking_expression
+        # Mirror of the Scala `Dataset.validateNearestByJoinArgs` validator -- raises the same
+        # `NEAREST_BY_JOIN.*` error classes the server would, so the user sees a consistent
+        # error regardless of where the check fires.
+        if num_results < 1 or num_results > _NEAREST_BY_JOIN_MAX_NUM_RESULTS:
+            raise AnalysisException(
+                errorClass="NEAREST_BY_JOIN.NUM_RESULTS_OUT_OF_RANGE",
+                messageParameters={
+                    "numResults": str(num_results),
+                    "min": "1",
+                    "max": str(_NEAREST_BY_JOIN_MAX_NUM_RESULTS),
+                },
+            )
+        if join_type.lower().replace("_", "") not in _NEAREST_BY_JOIN_SUPPORTED_JOIN_TYPES:
+            raise AnalysisException(
+                errorClass="NEAREST_BY_JOIN.UNSUPPORTED_JOIN_TYPE",
+                messageParameters={
+                    "joinType": join_type,
+                    "supported": _NEAREST_BY_JOIN_SUPPORTED_JOIN_TYPE_DISPLAY,
+                },
+            )
+        if mode.lower() not in _NEAREST_BY_JOIN_SUPPORTED_MODES:
+            raise AnalysisException(
+                errorClass="NEAREST_BY_JOIN.UNSUPPORTED_MODE",
+                messageParameters={
+                    "mode": mode,
+                    "supported": "'" + "', '".join(_NEAREST_BY_JOIN_SUPPORTED_MODES) + "'",
+                },
+            )
+        if direction.lower() not in _NEAREST_BY_JOIN_SUPPORTED_DIRECTIONS:
+            raise AnalysisException(
+                errorClass="NEAREST_BY_JOIN.UNSUPPORTED_DIRECTION",
+                messageParameters={
+                    "direction": direction,
+                    "supported": "'" + "', '".join(_NEAREST_BY_JOIN_SUPPORTED_DIRECTIONS) + "'",
+                },
+            )
+        self.num_results = int(num_results)
+        self.join_type = join_type
+        self.mode = mode
+        self.direction = direction
+
+    def plan(self, session: "SparkConnectClient") -> proto.Relation:
+        plan = self._create_proto_relation()
+        plan.nearest_by_join.left.CopyFrom(self.left.plan(session))
+        plan.nearest_by_join.right.CopyFrom(self.right.plan(session))
+        plan.nearest_by_join.ranking_expression.CopyFrom(self.ranking_expression.to_plan(session))
+        plan.nearest_by_join.num_results = self.num_results
+        plan.nearest_by_join.join_type = self.join_type
+        plan.nearest_by_join.mode = self.mode
+        plan.nearest_by_join.direction = self.direction
+        return self._with_relations(plan, session)
+
+    @property
+    def observations(self) -> Dict[str, "Observation"]:
+        return {**super().observations, **self.right.observations}
+
+    def print(self, indent: int = 0) -> str:
+        i = " " * indent
+        o = " " * (indent + LogicalPlan.INDENT)
+        n = indent + LogicalPlan.INDENT * 2
+        return (
+            f"{i}<NearestByJoin numResults={self.num_results} joinType={self.join_type} "
+            f"mode={self.mode} direction={self.direction}>\n{o}"
+            f"left=\n{self.left.print(n)}\n{o}right=\n{self.right.print(n)}"
+        )
+
+    def _repr_html_(self) -> str:
+        return f"""
+        <ul>
+            <li>
+                <b>NearestByJoin</b><br />
                 Left: {self.left._repr_html_()}
                 Right: {self.right._repr_html_()}
             </li>
@@ -1329,10 +1490,10 @@ class SetOperation(LogicalPlan):
 
     @property
     def observations(self) -> Dict[str, "Observation"]:
-        return dict(
+        return {
             **super().observations,
             **(self.other.observations if self.other is not None else {}),
-        )
+        }
 
     def print(self, indent: int = 0) -> str:
         assert self._child is not None
@@ -1639,7 +1800,7 @@ class CollectMetrics(LogicalPlan):
             observations = {str(self._observation._name): self._observation}
         else:
             observations = {}
-        return dict(**super().observations, **observations)
+        return {**super().observations, **observations}
 
 
 class NAFill(LogicalPlan):
@@ -1943,6 +2104,7 @@ class WriteOperation(LogicalPlan):
         self.options: Dict[str, Optional[str]] = {}
         self.num_buckets: int = -1
         self.bucket_cols: List[str] = []
+        self.with_schema_evolution: bool = False
 
     def command(self, session: "SparkConnectClient") -> proto.Command:
         assert self._child is not None
@@ -1954,6 +2116,7 @@ class WriteOperation(LogicalPlan):
         plan.write_operation.sort_column_names.extend(self.sort_cols)
         plan.write_operation.partitioning_columns.extend(self.partitioning_cols)
         plan.write_operation.clustering_columns.extend(self.clustering_cols)
+        plan.write_operation.with_schema_evolution = self.with_schema_evolution
 
         if self.num_buckets > 0:
             plan.write_operation.bucket_by.bucket_column_names.extend(self.bucket_cols)
@@ -2045,6 +2208,7 @@ class WriteOperationV2(LogicalPlan):
         self.table_properties: dict[str, Optional[str]] = {}
         self.mode: Optional[str] = None
         self.overwrite_condition: Optional[Column] = None
+        self.with_schema_evolution: bool = False
 
     def command(self, session: "SparkConnectClient") -> proto.Command:
         assert self._child is not None
@@ -2059,6 +2223,7 @@ class WriteOperationV2(LogicalPlan):
             [c.to_plan(session) for c in self.partitioning_columns]
         )
         plan.write_operation_v2.clustering_columns.extend(self.clustering_columns)
+        plan.write_operation_v2.with_schema_evolution = self.with_schema_evolution
 
         for k in self.options:
             if self.options[k] is None:
@@ -2479,6 +2644,157 @@ class ListCatalogs(LogicalPlan):
         plan.catalog.list_catalogs.SetInParent()
         if self._pattern is not None:
             plan.catalog.list_catalogs.pattern = self._pattern
+        return plan
+
+
+class DropTable(LogicalPlan):
+    def __init__(self, table_name: str, if_exists: bool = False, purge: bool = False) -> None:
+        super().__init__(None)
+        self._table_name = table_name
+        self._if_exists = if_exists
+        self._purge = purge
+
+    def plan(self, session: "SparkConnectClient") -> proto.Relation:
+        plan = self._create_proto_relation()
+        plan.catalog.drop_table.CopyFrom(
+            proto.DropTable(
+                table_name=self._table_name,
+                if_exists=self._if_exists,
+                purge=self._purge,
+            )
+        )
+        return plan
+
+
+class DropView(LogicalPlan):
+    def __init__(self, view_name: str, if_exists: bool = False) -> None:
+        super().__init__(None)
+        self._view_name = view_name
+        self._if_exists = if_exists
+
+    def plan(self, session: "SparkConnectClient") -> proto.Relation:
+        plan = self._create_proto_relation()
+        plan.catalog.drop_view.CopyFrom(
+            proto.DropView(view_name=self._view_name, if_exists=self._if_exists)
+        )
+        return plan
+
+
+class CreateDatabase(LogicalPlan):
+    def __init__(
+        self,
+        db_name: str,
+        if_not_exists: bool = False,
+        properties: Optional[Dict[str, str]] = None,
+    ) -> None:
+        super().__init__(None)
+        self._db_name = db_name
+        self._if_not_exists = if_not_exists
+        self._properties = properties or {}
+
+    def plan(self, session: "SparkConnectClient") -> proto.Relation:
+        plan = self._create_proto_relation()
+        cmd = proto.CreateDatabase(
+            db_name=self._db_name,
+            if_not_exists=self._if_not_exists,
+        )
+        for k, v in self._properties.items():
+            cmd.properties[k] = v
+        plan.catalog.create_database.CopyFrom(cmd)
+        return plan
+
+
+class DropDatabase(LogicalPlan):
+    def __init__(self, db_name: str, if_exists: bool = False, cascade: bool = False) -> None:
+        super().__init__(None)
+        self._db_name = db_name
+        self._if_exists = if_exists
+        self._cascade = cascade
+
+    def plan(self, session: "SparkConnectClient") -> proto.Relation:
+        plan = self._create_proto_relation()
+        plan.catalog.drop_database.CopyFrom(
+            proto.DropDatabase(
+                db_name=self._db_name,
+                if_exists=self._if_exists,
+                cascade=self._cascade,
+            )
+        )
+        return plan
+
+
+class ListPartitions(LogicalPlan):
+    def __init__(self, table_name: str) -> None:
+        super().__init__(None)
+        self._table_name = table_name
+
+    def plan(self, session: "SparkConnectClient") -> proto.Relation:
+        plan = self._create_proto_relation()
+        plan.catalog.list_partitions.table_name = self._table_name
+        return plan
+
+
+class ListViews(LogicalPlan):
+    def __init__(self, db_name: Optional[str] = None, pattern: Optional[str] = None) -> None:
+        super().__init__(None)
+        self._db_name = db_name
+        self._pattern = pattern
+
+    def plan(self, session: "SparkConnectClient") -> proto.Relation:
+        plan = self._create_proto_relation()
+        plan.catalog.list_views.SetInParent()
+        if self._db_name is not None:
+            plan.catalog.list_views.db_name = self._db_name
+        if self._pattern is not None:
+            plan.catalog.list_views.pattern = self._pattern
+        return plan
+
+
+class GetTableProperties(LogicalPlan):
+    def __init__(self, table_name: str) -> None:
+        super().__init__(None)
+        self._table_name = table_name
+
+    def plan(self, session: "SparkConnectClient") -> proto.Relation:
+        plan = self._create_proto_relation()
+        plan.catalog.get_table_properties.table_name = self._table_name
+        return plan
+
+
+class GetCreateTableString(LogicalPlan):
+    def __init__(self, table_name: str, as_serde: bool = False) -> None:
+        super().__init__(None)
+        self._table_name = table_name
+        self._as_serde = as_serde
+
+    def plan(self, session: "SparkConnectClient") -> proto.Relation:
+        plan = self._create_proto_relation()
+        plan.catalog.get_create_table_string.table_name = self._table_name
+        plan.catalog.get_create_table_string.as_serde = self._as_serde
+        return plan
+
+
+class TruncateTable(LogicalPlan):
+    def __init__(self, table_name: str) -> None:
+        super().__init__(None)
+        self._table_name = table_name
+
+    def plan(self, session: "SparkConnectClient") -> proto.Relation:
+        plan = self._create_proto_relation()
+        plan.catalog.truncate_table.table_name = self._table_name
+        return plan
+
+
+class AnalyzeTable(LogicalPlan):
+    def __init__(self, table_name: str, no_scan: bool = False) -> None:
+        super().__init__(None)
+        self._table_name = table_name
+        self._no_scan = no_scan
+
+    def plan(self, session: "SparkConnectClient") -> proto.Relation:
+        plan = self._create_proto_relation()
+        plan.catalog.analyze_table.table_name = self._table_name
+        plan.catalog.analyze_table.no_scan = self._no_scan
         return plan
 
 

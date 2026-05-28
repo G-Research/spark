@@ -41,7 +41,7 @@ import org.apache.spark.tags.ExtendedSQLTest
  * Test suite for functions in [[org.apache.spark.sql.functions]].
  */
 @ExtendedSQLTest
-class DataFrameFunctionsSuite extends QueryTest with SharedSparkSession {
+class DataFrameFunctionsSuite extends SharedSparkSession {
   import testImplicits._
 
   test("DataFrame function and SQL function parity") {
@@ -350,6 +350,13 @@ class DataFrameFunctionsSuite extends QueryTest with SharedSparkSession {
            "expression" -> "\"id\"",
            "expressionAnyValue" -> "\"any_value(id)\"")
         )
+
+        val nestedDf = Seq("error_multiple_providers", "openai")
+          .toDF("provider")
+          .select(struct(col("provider")).as("c"))
+        checkAnswer(
+          nestedDf.select(nullif(col("c.provider"), lower(lit("ERROR_MULTIPLE_PROVIDERS")))),
+          Seq(Row(null), Row("openai")))
       }
     }
   }
@@ -2147,6 +2154,45 @@ class DataFrameFunctionsSuite extends QueryTest with SharedSparkSession {
     testString()
   }
 
+  test("reverse function - binary") {
+    val df = Seq(
+      Array[Byte](0xCA.toByte, 0xFE.toByte),
+      Array[Byte](),
+      Array[Byte](0x01.toByte),
+      null
+    ).toDF("b")
+
+    def testBinary(): Unit = {
+      checkAnswer(
+        df.select(reverse($"b")),
+        Seq(
+          Row(Array[Byte](0xFE.toByte, 0xCA.toByte)),
+          Row(Array[Byte]()),
+          Row(Array[Byte](0x01.toByte)),
+          Row(null)))
+      checkAnswer(
+        df.selectExpr("reverse(b)"),
+        Seq(
+          Row(Array[Byte](0xFE.toByte, 0xCA.toByte)),
+          Row(Array[Byte]()),
+          Row(Array[Byte](0x01.toByte)),
+          Row(null)))
+    }
+
+    testBinary()
+    df.cache()
+    testBinary()
+
+    // Verify that reverse preserves BinaryType and does not cast to StringType
+    val resultType = df.select(reverse($"b")).schema.head.dataType
+    assert(resultType === BinaryType,
+      s"reverse on BinaryType column should return BinaryType, but got $resultType")
+    df.createOrReplaceTempView("binary_test")
+    val sqlResultType = spark.sql("SELECT reverse(b) FROM binary_test").schema.head.dataType
+    assert(sqlResultType === BinaryType,
+      s"reverse(b) via SQL should return BinaryType, but got $sqlResultType")
+  }
+
   test("reverse function - array for primitive type not containing null") {
     val idfNotContainsNull = Seq(
       Seq(1, 9, 8, 7),
@@ -2240,7 +2286,7 @@ class DataFrameFunctionsSuite extends QueryTest with SharedSparkSession {
         "paramIndex" -> "first",
         "inputSql" -> "\"struct(1, a)\"",
         "inputType" -> "\"STRUCT<col1: INT NOT NULL, col2: STRING NOT NULL>\"",
-        "requiredType" -> "(\"STRING\" or \"ARRAY\")"
+        "requiredType" -> "(\"STRING\" or \"BINARY\" or \"ARRAY\")"
       ),
       queryContext = Array(ExpectedContext("", "", 7, 29, "reverse(struct(1, 'a'))"))
     )
@@ -2255,7 +2301,7 @@ class DataFrameFunctionsSuite extends QueryTest with SharedSparkSession {
         "paramIndex" -> "first",
         "inputSql" -> "\"map(1, a)\"",
         "inputType" -> "\"MAP<INT, STRING>\"",
-        "requiredType" -> "(\"STRING\" or \"ARRAY\")"
+        "requiredType" -> "(\"STRING\" or \"BINARY\" or \"ARRAY\")"
       ),
       queryContext = Array(ExpectedContext("", "", 7, 26, "reverse(map(1, 'a'))"))
     )
@@ -6302,7 +6348,159 @@ class DataFrameFunctionsSuite extends QueryTest with SharedSparkSession {
           call_function("spark_catalog.default.custom_sum", $"a")),
         Row(12.0, 12.0, 12.0))
     }
+  }
 
+  private def isPositiveZero(d: Double): Boolean =
+    java.lang.Double.doubleToRawLongBits(d) == 0L
+
+  test("SPARK-54918: array set ops normalize -0.0 and NaN via VALUES inline table") {
+    val r = sql("""
+      SELECT
+        array_distinct(a) AS d,
+        array_union(a, b) AS u,
+        array_intersect(a, b) AS i,
+        array_except(a, b) AS e,
+        arrays_overlap(a, b) AS o
+      FROM VALUES (array(-0.0d, 0.0d, double('NaN')), array(0.0d, double('NaN')))
+      AS t(a, b)
+    """).head()
+
+    val distinct = r.getSeq[Double](0)
+    assert(distinct.length == 2)
+    assert(distinct.exists(isPositiveZero))
+    assert(distinct.exists(_.isNaN))
+
+    val union = r.getSeq[Double](1)
+    assert(union.length == 2)
+    assert(union.exists(isPositiveZero))
+    assert(union.exists(_.isNaN))
+
+    val intersect = r.getSeq[Double](2)
+    assert(intersect.length == 2)
+    assert(intersect.exists(isPositiveZero))
+    assert(intersect.exists(_.isNaN))
+
+    val except = r.getSeq[Double](3)
+    assert(except.isEmpty)
+
+    assert(r.getBoolean(4))
+  }
+
+  test("SPARK-54918: array_distinct normalizes -0.0 to +0.0 - literals") {
+    val r1 = Seq(1).toDF()
+      .select(array_distinct(typedLit(Array(-0.0d, 0.0d)))).head().getSeq[Double](0)
+
+    assert(r1.length == 1)
+    assert(isPositiveZero(r1.head))
+
+    val r2 = Seq(1).toDF()
+      .select(array_distinct(
+        typedLit(Array(Double.NaN, 0.0d, -0.0d, Double.NaN)))
+      ).head().getSeq[Double](0)
+
+    assert(r2.length == 2)
+    assert(r2.exists(_.isNaN))
+    assert(r2.exists(isPositiveZero))
+  }
+
+  test("SPARK-54918: array_distinct normalizes -0.0 to +0.0") {
+    val r1 = Seq(Array(-0.0d, 0.0d)).toDF("a")
+      .select(array_distinct($"a")).head().getSeq[Double](0)
+
+    assert(r1.length == 1)
+    assert(isPositiveZero(r1.head))
+
+    val r2 = Seq(Array(Double.NaN, 0.0d, -0.0d, Double.NaN)).toDF("a")
+      .select(array_distinct($"a")).head().getSeq[Double](0)
+
+    assert(r2.length == 2)
+    assert(r2.exists(_.isNaN))
+    assert(r2.exists(isPositiveZero))
+  }
+
+  test("SPARK-54918: array_union normalizes -0.0 to +0.0 - literals") {
+    val r = Seq(1).toDF()
+      .select(array_union(
+        typedLit(Array(-0.0d)),
+        typedLit(Array(0.0d)))
+      ).head().getSeq[Double](0)
+
+    assert(r.length == 1)
+    assert(isPositiveZero(r.head))
+  }
+
+  test("SPARK-54918: array_union normalizes -0.0 to +0.0") {
+    val r = Seq((Array(-0.0d), Array(0.0d))).toDF("a", "b")
+      .select(array_union($"a", $"b")).head().getSeq[Double](0)
+
+    assert(r.length == 1)
+    assert(isPositiveZero(r.head))
+  }
+
+  test("SPARK-54918: array_intersect normalizes -0.0 to +0.0 - literals") {
+    val r = Seq(1).toDF()
+      .select(array_intersect(
+        typedLit(Array(-0.0d)),
+        typedLit(Array(0.0d)))
+      ).head().getSeq[Double](0)
+
+    assert(r.length == 1)
+    assert(isPositiveZero(r.head))
+  }
+
+  test("SPARK-54918: array_intersect normalizes -0.0 to +0.0") {
+    val r = Seq((Array(-0.0d), Array(0.0d))).toDF("a", "b")
+      .select(array_intersect($"a", $"b")).head().getSeq[Double](0)
+
+    assert(r.length == 1)
+    assert(isPositiveZero(r.head))
+  }
+
+  test("SPARK-54918: array_except normalizes -0.0 to +0.0 - literals") {
+    val r1 = Seq(1).toDF()
+      .select(array_except(
+        typedLit(Array(-0.0d)),
+        typedLit(Array(0.0d)))
+      ).head().getSeq[Double](0)
+
+    assert(r1.isEmpty)
+
+    val r2 = Seq(1).toDF()
+      .select(array_except(
+        typedLit(Array(0.0d)),
+        typedLit(Array(-0.0d)))
+      ).head().getSeq[Double](0)
+
+    assert(r2.isEmpty)
+  }
+
+  test("SPARK-54918: array_except normalizes -0.0 to +0.0") {
+    val r1 = Seq((Array(-0.0d), Array(0.0d))).toDF("a", "b")
+      .select(array_except($"a", $"b")).head().getSeq[Double](0)
+
+    assert(r1.isEmpty)
+
+    val r2 = Seq((Array(0.0d), Array(-0.0d))).toDF("a", "b")
+      .select(array_except($"a", $"b")).head().getSeq[Double](0)
+
+    assert(r2.isEmpty)
+  }
+
+  test("SPARK-54918: arrays_overlap normalizes -0.0 to +0.0 - literals") {
+    val r = Seq(1).toDF()
+      .select(arrays_overlap(
+        typedLit(Array(-0.0d)),
+        typedLit(Array(0.0d)))
+      ).head().getBoolean(0)
+
+    assert(r)
+  }
+
+  test("SPARK-54918: arrays_overlap normalizes -0.0 to +0.0") {
+    val r = Seq((Array(-0.0d), Array(0.0d))).toDF("a", "b")
+      .select(arrays_overlap($"a", $"b")).head().getBoolean(0)
+
+    assert(r)
   }
 }
 

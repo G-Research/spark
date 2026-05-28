@@ -116,9 +116,7 @@ public final class OnHeapColumnVector extends WritableColumnVector {
   @Override
   public void putNulls(int rowId, int count) {
     if (isAllNull()) return; // Skip writing nulls to all-null vector.
-    for (int i = 0; i < count; ++i) {
-      nulls[rowId + i] = (byte)1;
-    }
+    Arrays.fill(nulls, rowId, rowId + count, (byte) 1);
     numNulls += count;
   }
 
@@ -146,10 +144,8 @@ public final class OnHeapColumnVector extends WritableColumnVector {
 
   @Override
   public void putBooleans(int rowId, int count, boolean value) {
-    byte v = (byte)((value) ? 1 : 0);
-    for (int i = 0; i < count; ++i) {
-      byteData[i + rowId] = v;
-    }
+    byte v = (byte) (value ? 1 : 0);
+    Arrays.fill(byteData, rowId, rowId + count, v);
   }
 
   @Override
@@ -191,14 +187,18 @@ public final class OnHeapColumnVector extends WritableColumnVector {
 
   @Override
   public void putBytes(int rowId, int count, byte value) {
-    for (int i = 0; i < count; ++i) {
-      byteData[i + rowId] = value;
-    }
+    Arrays.fill(byteData, rowId, rowId + count, value);
   }
 
   @Override
   public void putBytes(int rowId, int count, byte[] src, int srcIndex) {
     System.arraycopy(src, srcIndex, byteData, rowId, count);
+  }
+
+  @Override
+  public void putBytes(int rowId, int count, ByteBuffer src, int srcIndex) {
+    // Absolute bulk get: single copy, does not modify src's position.
+    src.get(srcIndex, byteData, rowId, count);
   }
 
   @Override
@@ -247,9 +247,7 @@ public final class OnHeapColumnVector extends WritableColumnVector {
 
   @Override
   public void putShorts(int rowId, int count, short value) {
-    for (int i = 0; i < count; ++i) {
-      shortData[i + rowId] = value;
-    }
+    Arrays.fill(shortData, rowId, rowId + count, value);
   }
 
   @Override
@@ -313,9 +311,7 @@ public final class OnHeapColumnVector extends WritableColumnVector {
 
   @Override
   public void putInts(int rowId, int count, int value) {
-    for (int i = 0; i < count; ++i) {
-      intData[i + rowId] = value;
-    }
+    Arrays.fill(intData, rowId, rowId + count, value);
   }
 
   @Override
@@ -389,9 +385,7 @@ public final class OnHeapColumnVector extends WritableColumnVector {
 
   @Override
   public void putLongs(int rowId, int count, long value) {
-    for (int i = 0; i < count; ++i) {
-      longData[i + rowId] = value;
-    }
+    Arrays.fill(longData, rowId, rowId + count, value);
   }
 
   @Override

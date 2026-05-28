@@ -41,9 +41,8 @@ case class ComplexClass(a: Long, b: StringLongClass)
 case class ArrayClass(arr: Seq[StringIntClass])
 
 class QueryCompilationErrorsSuite
-  extends QueryTest
-  with QueryErrorsBase
-  with SharedSparkSession {
+  extends SharedSparkSession
+  with QueryErrorsBase {
   import testImplicits._
 
   test("CANNOT_UP_CAST_DATATYPE: invalid upcast data type") {
@@ -712,7 +711,7 @@ class QueryCompilationErrorsSuite
     )
   }
 
-  test("TEMP_VIEW_NAME_TOO_MANY_NAME_PARTS: " +
+  test("INVALID_TEMP_OBJ_QUALIFIER: " +
     "create temp view doesn't support identifiers consisting of more than 2 parts") {
     val sqlText =
       "CREATE TEMPORARY VIEW db_name.schema_name.view_name AS SELECT '1' as test_column"
@@ -720,9 +719,12 @@ class QueryCompilationErrorsSuite
       exception = intercept[ParseException] {
         sql(sqlText)
       },
-      condition = "TEMP_VIEW_NAME_TOO_MANY_NAME_PARTS",
-      sqlState = "428EK",
-      parameters = Map("actualName" -> "`db_name`.`schema_name`.`view_name`"),
+      condition = "INVALID_TEMP_OBJ_QUALIFIER",
+      sqlState = "42602",
+      parameters = Map(
+        "objectType" -> "VIEW",
+        "objectName" -> "`view_name`",
+        "qualifier" -> "`db_name`.`schema_name`"),
       context = ExpectedContext(
         fragment = sqlText,
         start = 0,
@@ -872,39 +874,6 @@ class QueryCompilationErrorsSuite
       parameters = Map(
         "expression" -> "\"coalesce(1, a, a)\"",
         "inputTypes" -> "[\"INT\", \"STRING\", \"STRING\"]"))
-  }
-
-  test("SPARK-49666: the trim collation feature is off without collate builder call") {
-    withSQLConf(SQLConf.TRIM_COLLATION_ENABLED.key -> "false") {
-      Seq(
-        "CREATE TABLE t(col STRING COLLATE EN_RTRIM_CI) USING parquet",
-        "CREATE TABLE t(col STRING COLLATE UTF8_LCASE_RTRIM) USING parquet",
-        "SELECT 'aaa' COLLATE UNICODE_LTRIM_CI"
-      ).foreach { sqlText =>
-        checkError(
-          exception = intercept[AnalysisException](sql(sqlText)),
-          condition = "UNSUPPORTED_FEATURE.TRIM_COLLATION"
-        )
-      }
-    }
-  }
-
-  test("SPARK-49666: the trim collation feature is off with collate builder call") {
-    withSQLConf(SQLConf.TRIM_COLLATION_ENABLED.key -> "false") {
-      Seq(
-        "SELECT collate('aaa', 'UNICODE_RTRIM')",
-        "SELECT collate('aaa', 'UTF8_BINARY_RTRIM')",
-        "SELECT collate('aaa', 'EN_AI_RTRIM')"
-      ).foreach { sqlText =>
-        checkError(
-          exception = intercept[AnalysisException](sql(sqlText)),
-          condition = "UNSUPPORTED_FEATURE.TRIM_COLLATION",
-          parameters = Map.empty,
-          context =
-            ExpectedContext(fragment = sqlText.substring(7), start = 7, stop = sqlText.length - 1)
-        )
-      }
-    }
   }
 
   test("SPARK-50779: the object level collations feature is unsupported when flag is disabled") {

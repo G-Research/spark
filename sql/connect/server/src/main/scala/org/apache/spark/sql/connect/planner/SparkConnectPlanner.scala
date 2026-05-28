@@ -43,7 +43,7 @@ import org.apache.spark.internal.LogKeys.{DATAFRAME_ID, SESSION_ID}
 import org.apache.spark.resource.{ExecutorResourceRequest, ResourceProfile, TaskResourceProfile, TaskResourceRequest}
 import org.apache.spark.sql.{AnalysisException, Column, Encoders, ForeachWriter, Row}
 import org.apache.spark.sql.catalyst.{expressions, AliasIdentifier, FunctionIdentifier, InternalRow, QueryPlanningTracker}
-import org.apache.spark.sql.catalyst.analysis.{ChangelogInfoUtils, FunctionRegistry, GlobalTempView, LocalTempView, MultiAlias, RelationChanges, UnresolvedAlias, UnresolvedAttribute, UnresolvedDataFrameStar, UnresolvedDeserializer, UnresolvedExtractValue, UnresolvedFunction, UnresolvedOrdinal, UnresolvedPlanId, UnresolvedRegex, UnresolvedRelation, UnresolvedStar, UnresolvedStarWithColumns, UnresolvedStarWithColumnsRenames, UnresolvedSubqueryColumnAliases, UnresolvedTableValuedFunction, UnresolvedTranspose}
+import org.apache.spark.sql.catalyst.analysis.{ChangelogContextUtils, FunctionRegistry, GlobalTempView, LocalTempView, MultiAlias, RelationChanges, UnresolvedAlias, UnresolvedAttribute, UnresolvedDataFrameStar, UnresolvedDeserializer, UnresolvedExtractValue, UnresolvedFunction, UnresolvedOrdinal, UnresolvedPlanId, UnresolvedRegex, UnresolvedRelation, UnresolvedStar, UnresolvedStarWithColumns, UnresolvedStarWithColumnsRenames, UnresolvedSubqueryColumnAliases, UnresolvedTableValuedFunction, UnresolvedTranspose}
 import org.apache.spark.sql.catalyst.encoders.{encoderFor, AgnosticEncoder, ExpressionEncoder, RowEncoder}
 import org.apache.spark.sql.catalyst.encoders.AgnosticEncoders.{ProductEncoder, RowEncoder => AgnosticRowEncoder, StringEncoder, UnboundRowEncoder}
 import org.apache.spark.sql.catalyst.expressions._
@@ -83,6 +83,7 @@ import org.apache.spark.sql.streaming.{GroupStateTimeout, OutputMode, StatefulPr
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.{ArrowUtils, CaseInsensitiveStringMap}
 import org.apache.spark.storage.CacheId
+import org.apache.spark.unsafe.types.UTF8String
 import org.apache.spark.util.ArrayImplicits._
 import org.apache.spark.util.Utils
 
@@ -158,6 +159,8 @@ class SparkConnectPlanner(
         case proto.Relation.RelTypeCase.JOIN => transformJoinOrJoinWith(rel.getJoin)
         case proto.Relation.RelTypeCase.AS_OF_JOIN => transformAsOfJoin(rel.getAsOfJoin)
         case proto.Relation.RelTypeCase.LATERAL_JOIN => transformLateralJoin(rel.getLateralJoin)
+        case proto.Relation.RelTypeCase.NEAREST_BY_JOIN =>
+          transformNearestByJoin(rel.getNearestByJoin)
         case proto.Relation.RelTypeCase.DEDUPLICATE => transformDeduplicate(rel.getDeduplicate)
         case proto.Relation.RelTypeCase.SET_OP => transformSetOperation(rel.getSetOp)
         case proto.Relation.RelTypeCase.SORT => transformSort(rel.getSort)
@@ -313,6 +316,23 @@ class SparkConnectPlanner(
         transformSetCurrentCatalog(catalog.getSetCurrentCatalog)
       case proto.Catalog.CatTypeCase.LIST_CATALOGS =>
         transformListCatalogs(catalog.getListCatalogs)
+      case proto.Catalog.CatTypeCase.DROP_TABLE => transformDropTable(catalog.getDropTable)
+      case proto.Catalog.CatTypeCase.DROP_VIEW => transformDropView(catalog.getDropView)
+      case proto.Catalog.CatTypeCase.CREATE_DATABASE =>
+        transformCreateDatabase(catalog.getCreateDatabase)
+      case proto.Catalog.CatTypeCase.DROP_DATABASE =>
+        transformDropDatabase(catalog.getDropDatabase)
+      case proto.Catalog.CatTypeCase.LIST_PARTITIONS =>
+        transformListPartitions(catalog.getListPartitions)
+      case proto.Catalog.CatTypeCase.LIST_VIEWS => transformListViews(catalog.getListViews)
+      case proto.Catalog.CatTypeCase.GET_TABLE_PROPERTIES =>
+        transformGetTableProperties(catalog.getGetTableProperties)
+      case proto.Catalog.CatTypeCase.GET_CREATE_TABLE_STRING =>
+        transformGetCreateTableString(catalog.getGetCreateTableString)
+      case proto.Catalog.CatTypeCase.TRUNCATE_TABLE =>
+        transformTruncateTable(catalog.getTruncateTable)
+      case proto.Catalog.CatTypeCase.ANALYZE_TABLE =>
+        transformAnalyzeTable(catalog.getAnalyzeTable)
       case other =>
         throw InvalidInputErrors.invalidOneOfField(other, catalog.getDescriptorForType)
     }
@@ -434,7 +454,7 @@ class SparkConnectPlanner(
       rel.getLowerBound,
       rel.getUpperBound,
       rel.getWithReplacement,
-      if (rel.hasSeed) rel.getSeed else Utils.random.nextLong,
+      if (rel.hasSeed) Some(rel.getSeed) else None,
       plan)
   }
 
@@ -1721,10 +1741,10 @@ class SparkConnectPlanner(
     val tableName = rel.getUnparsedIdentifier
     val options = new CaseInsensitiveStringMap(rel.getOptionsMap)
     val timeZone = session.sessionState.conf.sessionLocalTimeZone
-    val changelogInfo = ChangelogInfoUtils.fromOptions(options, timeZone)
+    val ctx = ChangelogContextUtils.fromOptions(options, timeZone)
     val ident = parser.parseMultipartIdentifier(tableName)
     val relation = UnresolvedRelation(ident, options, isStreaming = rel.getIsStreaming)
-    RelationChanges(relation, changelogInfo)
+    RelationChanges(relation, ctx)
   }
 
   private def transformParse(rel: proto.Parse): LogicalPlan = {
@@ -1740,13 +1760,26 @@ class SparkConnectPlanner(
       localMap.foreach { case (key, value) => reader.option(key, value) }
       reader
     }
-    def ds: Dataset[String] = Dataset(session, transformRelation(rel.getInput))(Encoders.STRING)
+    def ds: Dataset[String] = {
+      val input = transformRelation(rel.getInput)
+      val df = Dataset.ofRows(session, input)
+      val fields = df.schema.fields
+      if (fields.length != 1) {
+        throw QueryCompilationErrors.dataframeInputNotSingleColumnError(fields.length)
+      }
+      if (fields.head.dataType != org.apache.spark.sql.types.StringType) {
+        throw QueryCompilationErrors.dataframeInputNotStringTypeError(fields.head.dataType)
+      }
+      df.as(Encoders.STRING)
+    }
 
     rel.getFormat match {
       case ParseFormat.PARSE_FORMAT_CSV =>
         dataFrameReader.csv(ds).queryExecution.analyzed
       case ParseFormat.PARSE_FORMAT_JSON =>
         dataFrameReader.json(ds).queryExecution.analyzed
+      case ParseFormat.PARSE_FORMAT_XML =>
+        dataFrameReader.xml(ds).queryExecution.analyzed
       case other => throw InvalidInputErrors.invalidEnum(other)
     }
   }
@@ -2536,6 +2569,28 @@ class SparkConnectPlanner(
       condition = joinCondition)
   }
 
+  private def transformNearestByJoin(rel: proto.NearestByJoin): LogicalPlan = {
+    assertPlan(rel.hasLeft && rel.hasRight, "Both join sides must be present")
+    assertPlan(rel.hasRankingExpression, "Ranking expression must be present")
+    // proto3 string fields default to "" when not set; reject the empty case explicitly so the
+    // user sees a "must be set" error instead of a misleading "unsupported value" error.
+    assertPlan(rel.getJoinType.nonEmpty, "NearestByJoin.join_type must be set")
+    assertPlan(rel.getMode.nonEmpty, "NearestByJoin.mode must be set")
+    assertPlan(rel.getDirection.nonEmpty, "NearestByJoin.direction must be set")
+    val left = Dataset.ofRows(session, transformRelation(rel.getLeft))
+    val right = Dataset.ofRows(session, transformRelation(rel.getRight))
+    val rankingExpression = Column(transformExpression(rel.getRankingExpression))
+    left
+      .nearestByJoin(
+        right,
+        rankingExpression,
+        rel.getNumResults,
+        rel.getMode,
+        rel.getDirection,
+        rel.getJoinType)
+      .logicalPlan
+  }
+
   private def transformSort(sort: proto.Sort): LogicalPlan = {
     assertPlan(sort.getOrderCount > 0, "'order' must be present and contain elements.")
     logical.Sort(
@@ -2900,7 +2955,8 @@ class SparkConnectPlanner(
       sessionHolder,
       command,
       responseObserver,
-      transformRelation)
+      transformRelation,
+      transformExpression)
     executeHolder.eventsManager.postFinished()
     responseObserver.onNext(
       proto.ExecutePlanResponse
@@ -3322,6 +3378,10 @@ class SparkConnectPlanner(
       w.format(writeOperation.getSource)
     }
 
+    if (writeOperation.getWithSchemaEvolution) {
+      w.withSchemaEvolution()
+    }
+
     writeOperation.getSaveTypeCase match {
       case proto.WriteOperation.SaveTypeCase.SAVETYPE_NOT_SET => w.saveCommand(None)
       case proto.WriteOperation.SaveTypeCase.PATH =>
@@ -3386,6 +3446,10 @@ class SparkConnectPlanner(
     if (writeOperation.getClusteringColumnsCount > 0) {
       val names = writeOperation.getClusteringColumnsList.asScala
       w.clusterBy(names.head, names.tail.toSeq: _*)
+    }
+
+    if (writeOperation.getWithSchemaEvolution) {
+      w.withSchemaEvolution()
     }
 
     writeOperation.getMode match {
@@ -4252,6 +4316,75 @@ class SparkConnectPlanner(
     } else {
       session.catalog.listCatalogs().logicalPlan
     }
+  }
+
+  private def transformDropTable(p: proto.DropTable): LogicalPlan = {
+    session.catalog.dropTable(p.getTableName, p.getIfExists, p.getPurge)
+    emptyLocalRelation
+  }
+
+  private def transformDropView(p: proto.DropView): LogicalPlan = {
+    session.catalog.dropView(p.getViewName, p.getIfExists)
+    emptyLocalRelation
+  }
+
+  private def transformCreateDatabase(p: proto.CreateDatabase): LogicalPlan = {
+    val jmap = new java.util.HashMap[String, String]()
+    p.getPropertiesMap.asScala.foreach { case (k, v) => jmap.put(k, v) }
+    session.catalog.createDatabase(p.getDbName, p.getIfNotExists, jmap)
+    emptyLocalRelation
+  }
+
+  private def transformDropDatabase(p: proto.DropDatabase): LogicalPlan = {
+    session.catalog.dropDatabase(p.getDbName, p.getIfExists, p.getCascade)
+    emptyLocalRelation
+  }
+
+  private def transformListPartitions(p: proto.ListPartitions): LogicalPlan = {
+    session.catalog.listPartitions(p.getTableName).logicalPlan
+  }
+
+  private def transformListViews(p: proto.ListViews): LogicalPlan = {
+    if (p.hasDbName) {
+      if (p.hasPattern) {
+        session.catalog.listViews(p.getDbName, p.getPattern).logicalPlan
+      } else {
+        session.catalog.listViews(p.getDbName).logicalPlan
+      }
+    } else if (p.hasPattern) {
+      val currentDatabase = session.catalog.currentDatabase
+      session.catalog.listViews(currentDatabase, p.getPattern).logicalPlan
+    } else {
+      session.catalog.listViews().logicalPlan
+    }
+  }
+
+  private def transformGetTableProperties(p: proto.GetTableProperties): LogicalPlan = {
+    val props = session.catalog.getTableProperties(p.getTableName).asScala
+    val attrs = Seq(
+      AttributeReference("key", StringType, nullable = false)(),
+      AttributeReference("value", StringType, nullable = true)())
+    val rows = props.map { case (k, v) =>
+      InternalRow(UTF8String.fromString(k), UTF8String.fromString(v))
+    }.toSeq
+    LocalRelation(attrs, rows)
+  }
+
+  private def transformGetCreateTableString(p: proto.GetCreateTableString): LogicalPlan = {
+    session
+      .createDataset(session.catalog.getCreateTableString(p.getTableName, p.getAsSerde) :: Nil)(
+        Encoders.STRING)
+      .logicalPlan
+  }
+
+  private def transformTruncateTable(p: proto.TruncateTable): LogicalPlan = {
+    session.catalog.truncateTable(p.getTableName)
+    emptyLocalRelation
+  }
+
+  private def transformAnalyzeTable(p: proto.AnalyzeTable): LogicalPlan = {
+    session.catalog.analyzeTable(p.getTableName, p.getNoScan)
+    emptyLocalRelation
   }
 
   private def transformSubqueryExpression(
