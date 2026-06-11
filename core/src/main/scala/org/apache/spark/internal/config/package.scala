@@ -321,6 +321,18 @@ package object config {
         "configured to be at least 2 MiB.")
       .createWithDefaultString("128m")
 
+  private[spark] val EVENT_LOG_ROLLING_APP_STATUS_FILE_USE_RENAME =
+    ConfigBuilder("spark.eventLog.rolling.appStatusFileUseRename")
+      .doc(s"When ${EVENT_LOG_ENABLE_ROLLING.key}=true, whether to mark the application as " +
+        "completed by renaming the in-progress app status file in the event log directory. " +
+        "If set to false, the completed app status file is created first and the in-progress " +
+        "one is deleted afterwards, avoiding the rename operation which is not atomic or " +
+        "efficient on some file systems such as object stores. Only disable this after all " +
+        "Spark History Servers reading the event log directory run Spark 5.0.0 or later.")
+      .version("5.0.0")
+      .booleanConf
+      .createWithDefault(true)
+
   private[spark] val EXECUTOR_ID =
     ConfigBuilder("spark.executor.id").version("1.2.0").stringConf.createOptional
 

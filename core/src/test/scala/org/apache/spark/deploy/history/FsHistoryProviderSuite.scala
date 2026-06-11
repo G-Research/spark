@@ -40,7 +40,7 @@ import org.scalatest.matchers.should.Matchers._
 import org.apache.spark.{JobExecutionStatus, SecurityManager, SPARK_VERSION, SparkConf, SparkFunSuite}
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.deploy.history.EventLogTestHelper._
-import org.apache.spark.internal.config.DRIVER_LOG_DFS_DIR
+import org.apache.spark.internal.config.{DRIVER_LOG_DFS_DIR, EVENT_LOG_ROLLING_APP_STATUS_FILE_USE_RENAME}
 import org.apache.spark.internal.config.History._
 import org.apache.spark.internal.config.UI.{ADMIN_ACLS, ADMIN_ACLS_GROUPS, UI_VIEW_ACLS, UI_VIEW_ACLS_GROUPS, USER_GROUPS_MAPPING}
 import org.apache.spark.io._
@@ -1671,6 +1671,38 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
       val newProvider = new FsHistoryProvider(conf)
       newProvider.checkForLogs()
       assert(newProvider.getListing().length === 1)
+    }
+  }
+
+  test("detect completion of rolling event log without renaming the app status file") {
+    withTempDir { dir =>
+      val conf = createTestConf(true)
+      conf.set(HISTORY_LOG_DIR, dir.getAbsolutePath)
+      conf.set(EVENT_LOG_ROLLING_APP_STATUS_FILE_USE_RENAME, false)
+      val hadoopConf = SparkHadoopUtil.newConfiguration(conf)
+
+      val provider = new FsHistoryProvider(conf)
+
+      val writer = new RollingEventLogFilesWriter("app", None, dir.toURI, conf, hadoopConf)
+      writer.start()
+
+      writeEventsToRollingWriter(writer, Seq(
+        SparkListenerApplicationStart("app", Some("app"), 0, "user", None),
+        SparkListenerJobStart(1, 0, Seq.empty)), rollFile = false)
+
+      provider.checkForLogs()
+      assert(provider.getListing().length === 1)
+      assert(!provider.getListing().next().attempts.head.completed)
+
+      writeEventsToRollingWriter(writer, Seq(SparkListenerApplicationEnd(1000L)),
+        rollFile = false)
+      writer.stop()
+
+      provider.checkForLogs()
+      assert(provider.getListing().length === 1)
+      assert(provider.getListing().next().attempts.head.completed)
+
+      provider.stop()
     }
   }
 

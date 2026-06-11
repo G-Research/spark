@@ -226,7 +226,7 @@ private[history] class RollingEventLogFilesFileReader(
     ret
   }
 
-  private lazy val appStatusFile = files.find(isAppStatusFile).get
+  private lazy val appStatusFiles = files.filter(isAppStatusFile)
 
   private lazy val eventLogFiles: Seq[FileStatus] = {
     val eventLogFiles = files.filter(isEventLogFile).sortBy { status =>
@@ -251,7 +251,12 @@ private[history] class RollingEventLogFilesFileReader(
   override def fileSizeForLastIndex: Long = lastEventLogFile.getLen
 
   override def completed: Boolean = {
-    !appStatusFile.getPath.getName.endsWith(EventLogFileWriter.IN_PROGRESS)
+    // The writer may create the completed app status file before deleting the in-progress one
+    // (instead of renaming it), so the directory can contain both. The application is completed
+    // once the completed app status file exists.
+    appStatusFiles.exists { status =>
+      !status.getPath.getName.endsWith(EventLogFileWriter.IN_PROGRESS)
+    }
   }
 
   override def fileSizeForLastIndexForDFS: Option[Long] = {

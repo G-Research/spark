@@ -1565,6 +1565,19 @@ Apart from these, the following properties are also available, and may be useful
   <td>3.0.0</td>
 </tr>
 <tr>
+  <td><code>spark.eventLog.rolling.appStatusFileUseRename</code></td>
+  <td>true</td>
+  <td>
+    When <code>spark.eventLog.rolling.enabled=true</code>, whether to mark the application as
+    completed by renaming the in-progress app status file in the event log directory. If set to
+    false, the completed app status file is created first and the in-progress one is deleted
+    afterwards, avoiding the rename operation which is not atomic or efficient on some file
+    systems such as object stores. Only disable this after all Spark History Servers reading
+    the event log directory run Spark 5.0.0 or later.
+  </td>
+  <td>5.0.0</td>
+</tr>
+<tr>
   <td><code>spark.ui.dagGraph.retainedRootRDDs</code></td>
   <td>Int.MaxValue</td>
   <td>

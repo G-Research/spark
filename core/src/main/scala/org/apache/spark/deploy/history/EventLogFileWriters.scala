@@ -316,6 +316,9 @@ class RollingEventLogFilesWriter(
 
   private val eventFileMaxLength = sparkConf.get(EVENT_LOG_ROLLING_MAX_FILE_SIZE)
 
+  private val appStatusFileUseRename =
+    sparkConf.get(EVENT_LOG_ROLLING_APP_STATUS_FILE_USE_RENAME)
+
   private val logDirForAppPath = getAppEventLogDirPath(logBaseDir, appId, appAttemptId)
 
   private var countingOutputStream: Option[CountingOutputStream] = None
@@ -372,9 +375,20 @@ class RollingEventLogFilesWriter(
     closeWriter()
     val appStatusPathIncomplete = getAppStatusFilePath(logDirForAppPath, appId, appAttemptId,
       inProgress = true)
-    val appStatusPathComplete = getAppStatusFilePath(logDirForAppPath, appId, appAttemptId,
-      inProgress = false)
-    renameFile(appStatusPathIncomplete, appStatusPathComplete, overwrite = true)
+    if (appStatusFileUseRename) {
+      val appStatusPathComplete = getAppStatusFilePath(logDirForAppPath, appId, appAttemptId,
+        inProgress = false)
+      renameFile(appStatusPathIncomplete, appStatusPathComplete, overwrite = true)
+    } else {
+      // Create the completed app status file before deleting the in-progress one, so that the
+      // log directory always contains at least one app status file. Readers treat the
+      // application as completed as soon as the completed file exists, so a failure between
+      // the two operations leaves a benign leftover in-progress file.
+      createAppStatusFile(inProgress = false)
+      if (!fileSystem.delete(appStatusPathIncomplete, false)) {
+        logWarning(log"Error deleting ${MDC(PATH, appStatusPathIncomplete)}")
+      }
+    }
   }
 
   override def logPath: String = logDirForAppPath.toString

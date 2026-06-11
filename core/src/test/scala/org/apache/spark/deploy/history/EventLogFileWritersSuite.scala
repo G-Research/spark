@@ -484,6 +484,34 @@ class RollingEventLogFilesWriterSuite extends EventLogFileWritersSuite {
     }
   }
 
+  test("mark application as completed without renaming the app status file") {
+    val appId = getUniqueApplicationId
+    val attemptId = None
+
+    val conf = getLoggingConf(testDirPath)
+    conf.set(EVENT_LOG_ENABLE_ROLLING, true)
+    conf.set(EVENT_LOG_ROLLING_APP_STATUS_FILE_USE_RENAME, false)
+
+    val writer = createWriter(appId, attemptId, testDirPath.toUri, conf,
+      SparkHadoopUtil.get.newConfiguration(conf))
+
+    writer.start()
+
+    val logDirPath = getAppEventLogDirPath(testDirPath.toUri, appId, attemptId)
+    val inProgressFile = getAppStatusFilePath(logDirPath, appId, attemptId, inProgress = true)
+    val completedFile = getAppStatusFilePath(logDirPath, appId, attemptId, inProgress = false)
+    assert(fileSystem.exists(inProgressFile))
+    assert(!fileSystem.exists(completedFile))
+
+    val dummyData = Seq("dummy1", "dummy2", "dummy3")
+    dummyData.foreach(writer.writeEvent(_, flushLogger = true))
+
+    writer.stop()
+
+    assert(!fileSystem.exists(inProgressFile))
+    verifyWriteEventLogFile(appId, attemptId, testDirPath.toUri, None, dummyData)
+  }
+
   test(s"rolling event log files - the max size of event log file size less than lower limit") {
     val appId = getUniqueApplicationId
     val attemptId = None

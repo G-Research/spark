@@ -292,6 +292,53 @@ class RollingEventLogFilesReaderSuite extends EventLogFileReadersSuite {
     }
   }
 
+  test("rolling event log files - completion marked without renaming the app status file") {
+    val appId = getUniqueApplicationId
+    val attemptId = None
+
+    val conf = getLoggingConf(testDirPath)
+    conf.set(EVENT_LOG_ENABLE_ROLLING, true)
+    conf.set(EVENT_LOG_ROLLING_APP_STATUS_FILE_USE_RENAME, false)
+
+    val writer = createWriter(appId, attemptId, testDirPath.toUri, conf,
+      SparkHadoopUtil.get.newConfiguration(conf))
+
+    writer.start()
+    val dummyData = Seq("dummy1", "dummy2", "dummy3")
+    dummyData.foreach(writer.writeEvent(_, flushLogger = true))
+
+    val logPath = new Path(writer.logPath)
+    verifyReader(EventLogFileReader(fileSystem, logPath).get, logPath, None, isCompleted = false)
+
+    writer.stop()
+
+    verifyReader(EventLogFileReader(fileSystem, logPath).get, logPath, None, isCompleted = true)
+  }
+
+  test("application is completed when in-progress and completed app status files coexist") {
+    val appId = getUniqueApplicationId
+    val attemptId = None
+
+    val conf = getLoggingConf(testDirPath)
+    conf.set(EVENT_LOG_ENABLE_ROLLING, true)
+
+    val writer = createWriter(appId, attemptId, testDirPath.toUri, conf,
+      SparkHadoopUtil.get.newConfiguration(conf))
+
+    writer.start()
+    val dummyData = Seq("dummy1", "dummy2", "dummy3")
+    dummyData.foreach(writer.writeEvent(_, flushLogger = true))
+    writer.stop()
+
+    // Simulate a failure between creating the completed app status file and deleting the
+    // in-progress one: both files are present in the log directory.
+    val logPath = new Path(writer.logPath)
+    fileSystem.create(getAppStatusFilePath(logPath, appId, attemptId, inProgress = true)).close()
+
+    val reader = EventLogFileReader(fileSystem, logPath).get
+    assert(reader.completed)
+  }
+
   override protected def createWriter(
       appId: String,
       appAttemptId: Option[String],
