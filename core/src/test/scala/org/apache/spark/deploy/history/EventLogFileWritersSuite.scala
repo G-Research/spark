@@ -414,16 +414,9 @@ class RollingEventLogFilesWriterSuite extends EventLogFileWritersSuite {
       RollingEventLogFilesWriter.getAppStatusFilePath(logDir, appId, appAttemptId,
         inProgress = false).toString)
 
-    // appstatus per application status
-    assert(s"$logDir/${APPSTATUS_FILE_NAME_PREFIX}${appId}${EventLogFileWriter.IN_PROGRESS}" ===
-      RollingEventLogFilesWriter.getAppStatusFilePath(logDir, appId, appAttemptId,
-        AppStatus.IN_PROGRESS).toString)
-    assert(s"$logDir/${APPSTATUS_FILE_NAME_PREFIX}${appId}" ===
-      RollingEventLogFilesWriter.getAppStatusFilePath(logDir, appId, appAttemptId,
-        AppStatus.COMPLETE).toString)
+    // appstatus: completion marker
     assert(s"$logDir/${APPSTATUS_FILE_NAME_PREFIX}${appId}${EventLogFileWriter.DONE}" ===
-      RollingEventLogFilesWriter.getAppStatusFilePath(logDir, appId, appAttemptId,
-        AppStatus.DONE).toString)
+      RollingEventLogFilesWriter.getAppStatusDoneFilePath(logDir, appId, appAttemptId).toString)
 
     // without compression
     assert(s"$logDir/${EVENT_LOG_FILE_NAME_PREFIX}1_${appId}" ===
@@ -536,29 +529,30 @@ class RollingEventLogFilesWriterSuite extends EventLogFileWritersSuite {
       SparkHadoopUtil.get.newConfiguration(conf))
 
     val logDirPath = getAppEventLogDirPath(testDirPath.toUri, appId, attemptId)
-    def appStatusFile(status: AppStatus): Path =
-      getAppStatusFilePath(logDirPath, appId, attemptId, status)
+    val inProgressFile = getAppStatusFilePath(logDirPath, appId, attemptId, inProgress = true)
+    val completeFile = getAppStatusFilePath(logDirPath, appId, attemptId, inProgress = false)
+    val doneFile = getAppStatusDoneFilePath(logDirPath, appId, attemptId)
 
     writer.start()
     writer.writeEvent("dummy", flushLogger = true)
 
     // while writing, the ".inprogress" file marks the application in progress in either layout
-    assert(fileSystem.exists(appStatusFile(AppStatus.IN_PROGRESS)))
-    assert(!fileSystem.exists(appStatusFile(AppStatus.COMPLETE)))
-    assert(!fileSystem.exists(appStatusFile(AppStatus.DONE)))
+    assert(fileSystem.exists(inProgressFile))
+    assert(!fileSystem.exists(completeFile))
+    assert(!fileSystem.exists(doneFile))
 
     writer.stop()
 
     if (useCompletionMarker) {
       // the ".done" file is added, while the ".inprogress" file is left in place
-      assert(fileSystem.exists(appStatusFile(AppStatus.DONE)))
-      assert(fileSystem.exists(appStatusFile(AppStatus.IN_PROGRESS)))
-      assert(!fileSystem.exists(appStatusFile(AppStatus.COMPLETE)))
+      assert(fileSystem.exists(doneFile))
+      assert(fileSystem.exists(inProgressFile))
+      assert(!fileSystem.exists(completeFile))
     } else {
       // the ".inprogress" file is renamed to drop the suffix
-      assert(fileSystem.exists(appStatusFile(AppStatus.COMPLETE)))
-      assert(!fileSystem.exists(appStatusFile(AppStatus.IN_PROGRESS)))
-      assert(!fileSystem.exists(appStatusFile(AppStatus.DONE)))
+      assert(fileSystem.exists(completeFile))
+      assert(!fileSystem.exists(inProgressFile))
+      assert(!fileSystem.exists(doneFile))
     }
   }
 
@@ -582,8 +576,11 @@ class RollingEventLogFilesWriterSuite extends EventLogFileWritersSuite {
 
     assert(fileSystem.exists(logDirPath) && fileSystem.getFileStatus(logDirPath).isDirectory)
 
-    val completeStatus = if (useCompletionMarker) AppStatus.DONE else AppStatus.COMPLETE
-    val appStatusFile = getAppStatusFilePath(logDirPath, appId, appAttemptId, completeStatus)
+    val appStatusFile = if (useCompletionMarker) {
+      getAppStatusDoneFilePath(logDirPath, appId, appAttemptId)
+    } else {
+      getAppStatusFilePath(logDirPath, appId, appAttemptId, inProgress = false)
+    }
     assert(fileSystem.exists(appStatusFile) && fileSystem.getFileStatus(appStatusFile).isFile)
 
     val eventLogFiles = listEventLogFiles(logDirPath)

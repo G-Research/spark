@@ -232,29 +232,32 @@ class RollingEventLogFilesReaderSuite extends EventLogFileReadersSuite {
   protected def useCompletionMarker: Boolean = false
 
   test("appstatus file tells whether the application completed") {
+    val inProgress = EventLogFileWriter.IN_PROGRESS
+    val done = EventLogFileWriter.DONE
     Seq(
-      (Seq(AppStatus.IN_PROGRESS), false),
-      (Seq(AppStatus.COMPLETE), true),
-      (Seq(AppStatus.DONE), true),
+      (Seq(inProgress), false),
+      (Seq(""), true),
+      (Seq(done), true),
       // with completion marker, the ".inprogress" file is left in place on termination
-      (Seq(AppStatus.IN_PROGRESS, AppStatus.DONE), true),
+      (Seq(inProgress, done), true),
       // an ".inprogress" file left behind by a rename that failed halfway does not hide completion
-      (Seq(AppStatus.IN_PROGRESS, AppStatus.COMPLETE), true),
-      (Seq(AppStatus.COMPLETE, AppStatus.DONE), true)
-    ).foreach { case (statuses, expectedCompleted) =>
+      (Seq(inProgress, ""), true),
+      (Seq("", done), true)
+    ).foreach { case (suffixes, expectedCompleted) =>
       withTempDir { dir =>
         val appId = getUniqueApplicationId
         val logDirPath = getAppEventLogDirPath(dir.toURI, appId, None)
         fileSystem.mkdirs(logDirPath)
         fileSystem.create(getEventLogFilePath(logDirPath, appId, None, 1, None)).close()
-        statuses.foreach { status =>
-          fileSystem.create(getAppStatusFilePath(logDirPath, appId, None, status)).close()
+        suffixes.foreach { suffix =>
+          val appStatusFile = getAppStatusFilePath(logDirPath, appId, None, inProgress = false)
+          fileSystem.create(new Path(appStatusFile.toString + suffix)).close()
         }
 
         val reader = EventLogFileReader(fileSystem, logDirPath)
-        assert(reader.isDefined, s"Expected a reader for appstatus files $statuses")
+        assert(reader.isDefined, s"Expected a reader for appstatus files $suffixes")
         assert(reader.get.completed === expectedCompleted,
-          s"Unexpected completed state for appstatus files $statuses")
+          s"Unexpected completed state for appstatus files $suffixes")
       }
     }
   }

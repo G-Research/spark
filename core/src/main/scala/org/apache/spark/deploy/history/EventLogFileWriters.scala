@@ -365,7 +365,8 @@ class RollingEventLogFilesWriter(
 
     // SPARK-30860: use the class method to avoid the umask causing permission issues
     FileSystem.mkdirs(fileSystem, logDirForAppPath, EventLogFileWriter.LOG_FOLDER_PERMISSIONS)
-    createAppStatusFile(AppStatus.IN_PROGRESS)
+    createAppStatusFile(getAppStatusFilePath(logDirForAppPath, appId, appAttemptId,
+      inProgress = true))
     rollEventLogFile()
   }
 
@@ -401,20 +402,19 @@ class RollingEventLogFilesWriter(
     if (useCompletionMarker) {
       // The completion marker is created after the event log file has been closed, so that readers
       // never consider the application complete while events are still to be flushed.
-      createAppStatusFile(AppStatus.DONE)
+      createAppStatusFile(getAppStatusDoneFilePath(logDirForAppPath, appId, appAttemptId))
     } else {
       val appStatusPathIncomplete = getAppStatusFilePath(logDirForAppPath, appId, appAttemptId,
-        AppStatus.IN_PROGRESS)
+        inProgress = true)
       val appStatusPathComplete = getAppStatusFilePath(logDirForAppPath, appId, appAttemptId,
-        AppStatus.COMPLETE)
+        inProgress = false)
       renameFile(appStatusPathIncomplete, appStatusPathComplete, overwrite = true)
     }
   }
 
   override def logPath: String = logDirForAppPath.toString
 
-  private def createAppStatusFile(status: AppStatus): Unit = {
-    val appStatusPath = getAppStatusFilePath(logDirForAppPath, appId, appAttemptId, status)
+  private def createAppStatusFile(appStatusPath: Path): Unit = {
     // SPARK-30860: use the class method to avoid the umask causing permission issues
     val outputStream = FileSystem.create(fileSystem, appStatusPath,
       EventLogFileWriter.LOG_FILE_PERMISSIONS)
@@ -432,39 +432,25 @@ object RollingEventLogFilesWriter {
     new Path(new Path(logBaseDir), EVENT_LOG_DIR_NAME_PREFIX +
       EventLogFileWriter.nameForAppAndAttempt(appId, appAttemptId))
 
-  /**
-   * The application status a rolling event log directory can be in, and the suffix its appstatus
-   * file carries to express it. Note that a directory being actively written carries no appstatus
-   * file at all when spark.eventLog.rolling.completionMarker.enabled is true.
-   */
-  private[history] sealed abstract class AppStatus(val suffix: String)
-
-  private[history] object AppStatus {
-    /** The application is still writing the directory (without completion marker). */
-    case object IN_PROGRESS extends AppStatus(EventLogFileWriter.IN_PROGRESS)
-    /** The application terminated (without completion marker). */
-    case object COMPLETE extends AppStatus("")
-    /** The application terminated (with completion marker). */
-    case object DONE extends AppStatus(EventLogFileWriter.DONE)
-  }
-
   def getAppStatusFilePath(
       appLogDir: Path,
       appId: String,
       appAttemptId: Option[String],
       inProgress: Boolean): Path = {
-    getAppStatusFilePath(appLogDir, appId, appAttemptId,
-      if (inProgress) AppStatus.IN_PROGRESS else AppStatus.COMPLETE)
-  }
-
-  private[history] def getAppStatusFilePath(
-      appLogDir: Path,
-      appId: String,
-      appAttemptId: Option[String],
-      status: AppStatus): Path = {
     val base = APPSTATUS_FILE_NAME_PREFIX +
       EventLogFileWriter.nameForAppAndAttempt(appId, appAttemptId)
-    new Path(appLogDir, base + status.suffix)
+    val name = if (inProgress) base + EventLogFileWriter.IN_PROGRESS else base
+    new Path(appLogDir, name)
+  }
+
+  /** Returns the path of the appstatus file that marks completion via completion marker. */
+  private[history] def getAppStatusDoneFilePath(
+      appLogDir: Path,
+      appId: String,
+      appAttemptId: Option[String]): Path = {
+    val base = APPSTATUS_FILE_NAME_PREFIX +
+      EventLogFileWriter.nameForAppAndAttempt(appId, appAttemptId)
+    new Path(appLogDir, base + EventLogFileWriter.DONE)
   }
 
   def getEventLogFilePath(
@@ -493,19 +479,6 @@ object RollingEventLogFilesWriter {
 
   def isAppStatusFile(status: FileStatus): Boolean = {
     status.isFile && status.getPath.getName.startsWith(APPSTATUS_FILE_NAME_PREFIX)
-  }
-
-  /** Returns the application status the given file expresses, None if it is no appstatus file. */
-  private[history] def appStatusOf(status: FileStatus): Option[AppStatus] = {
-    if (!isAppStatusFile(status)) {
-      None
-    } else if (status.getPath.getName.endsWith(EventLogFileWriter.IN_PROGRESS)) {
-      Some(AppStatus.IN_PROGRESS)
-    } else if (status.getPath.getName.endsWith(EventLogFileWriter.DONE)) {
-      Some(AppStatus.DONE)
-    } else {
-      Some(AppStatus.COMPLETE)
-    }
   }
 
   def getEventLogFileIndex(eventLogFileName: String): Long = {

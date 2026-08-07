@@ -229,7 +229,7 @@ private[history] class RollingEventLogFilesFileReader(
     ret
   }
 
-  private lazy val appStatuses: Seq[AppStatus] = files.flatMap(appStatusOf)
+  private lazy val appStatusFiles: Seq[FileStatus] = files.filter(isAppStatusFile)
 
   private lazy val eventLogFiles: Seq[FileStatus] = {
     val eventLogFiles = files.filter(isEventLogFile).sortBy { status =>
@@ -254,11 +254,11 @@ private[history] class RollingEventLogFilesFileReader(
   override def fileSizeForLastIndex: Long = lastEventLogFile.getLen
 
   override def completed: Boolean = {
-    // The appstatus files that mark completion (".done" suffix with a completion marker, no suffix
-    // without one) are only ever created on termination, while the ".inprogress" file is created on
-    // start. Hence any of the former marks the application complete, no matter whether the
-    // ".inprogress" file is still around.
-    appStatuses.exists(_ != AppStatus.IN_PROGRESS)
+    // An appstatus file that marks completion (".done" suffix with a completion marker, no suffix
+    // without one) is only ever created on termination, while the ".inprogress" file is created on
+    // start. Hence any file without that suffix marks the application complete, no matter whether
+    // the ".inprogress" file is still around.
+    appStatusFiles.exists(!_.getPath.getName.endsWith(EventLogFileWriter.IN_PROGRESS))
   }
 
   override def fileSizeForLastIndexForDFS: Option[Long] = {

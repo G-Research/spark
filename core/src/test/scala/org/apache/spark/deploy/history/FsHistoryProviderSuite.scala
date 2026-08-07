@@ -1694,11 +1694,12 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
         SparkListenerJobStart(1, 0, Seq.empty)), rollFile = false)
 
       val logDirPath = new Path(writer.logPath)
-      def appStatusFile(status: RollingEventLogFilesWriter.AppStatus): Path =
-        RollingEventLogFilesWriter.getAppStatusFilePath(logDirPath, "app", None, status)
+      val inProgressFile = RollingEventLogFilesWriter.getAppStatusFilePath(logDirPath, "app", None,
+        inProgress = true)
+      val doneFile = RollingEventLogFilesWriter.getAppStatusDoneFilePath(logDirPath, "app", None)
 
       // while being written, the application is listed as incomplete
-      assert(fs.exists(appStatusFile(RollingEventLogFilesWriter.AppStatus.IN_PROGRESS)))
+      assert(fs.exists(inProgressFile))
       provider.checkForLogs()
       val incomplete = provider.getListing().toSeq
       assert(incomplete.length === 1)
@@ -1707,8 +1708,8 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
       // stopping the writer adds the completion marker, leaving the ".inprogress" file in place
       writeEventsToRollingWriter(writer, Seq(SparkListenerApplicationEnd(1000)), rollFile = false)
       writer.stop()
-      assert(fs.exists(appStatusFile(RollingEventLogFilesWriter.AppStatus.DONE)))
-      assert(fs.exists(appStatusFile(RollingEventLogFilesWriter.AppStatus.IN_PROGRESS)))
+      assert(fs.exists(doneFile))
+      assert(fs.exists(inProgressFile))
 
       // which makes the provider re-read the log and list the application as complete
       provider.checkForLogs()
