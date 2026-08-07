@@ -213,9 +213,6 @@ private[history] class SingleFileEventLogFileReader(
  *
  * This reader lists the files only once; if caller would like to play with updated list,
  * it needs to create another reader instance.
- *
- * The reader detects completion for both appstatus file layouts described in
- * [[RollingEventLogFilesWriter]], as it cannot know how the writing application was configured.
  */
 private[history] class RollingEventLogFilesFileReader(
     fs: FileSystem,

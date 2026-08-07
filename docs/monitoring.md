@@ -118,8 +118,8 @@ depends on <code>spark.eventLog.rolling.completionMarker.enabled</code>:
   created on termination, so it takes precedence over the <code>.inprogress</code> file.
 
 Enabling the completion marker avoids the rename, which is not atomic on some file systems, in particular on
-object stores. It only affects how applications write their event log, the History Server reads both layouts.
-Consider the following before enabling it:
+object stores, and may require read permissions. It only affects how applications write their event log, the
+History Server reads both layouts. Consider the following before enabling it:
 
 * History Servers before Spark 5.0.0 pick an arbitrary status file when a directory contains more than one,
   so they may list a terminated application as incomplete. Upgrade your History Server first.

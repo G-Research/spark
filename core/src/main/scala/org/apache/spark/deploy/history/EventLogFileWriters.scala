@@ -318,7 +318,7 @@ object SingleEventLogFileWriter {
  * - When disabled (default), the file is renamed to drop the ".inprogress" suffix.
  * - When enabled, an additional appstatus file with the ".done" suffix is created, while the
  *   ".inprogress" file is left in place. This avoids a rename, which is not atomic on some file
- *   systems.
+ *   systems and may require read permissions.
  *
  * Readers must support both layouts, see [[RollingEventLogFilesFileReader]]. As a file that marks
  * completion (".done" suffix, or no suffix without completion marker) is only ever created once
