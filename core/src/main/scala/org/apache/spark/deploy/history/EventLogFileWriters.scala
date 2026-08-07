@@ -311,18 +311,18 @@ object SingleEventLogFileWriter {
  * - The name of metadata (app. status) file name:
  *   appstatus_[appId](_[appAttemptId])(.inprogress|.done)
  *
- * The appstatus file tells whether the application is still writing the directory.
- * There are two layouts, selected by spark.eventLog.rolling.completionMarker.enabled:
+ * The appstatus file tells whether the application is still writing the directory. It is created
+ * with the ".inprogress" suffix on start, and on termination one of two layouts is used, selected
+ * by spark.eventLog.rolling.completionMarker.enabled:
  *
- * - When disabled (default), the file is created with the ".inprogress" suffix on start, and
- *   renamed to drop the suffix on termination.
- * - When enabled, no appstatus file is created on start: the absence of an appstatus file marks
- *   the directory as being actively written. On termination, an appstatus file with the ".done"
- *   suffix is created. This avoids a rename, which is not atomic on some file systems.
+ * - When disabled (default), the file is renamed to drop the ".inprogress" suffix.
+ * - When enabled, an additional appstatus file with the ".done" suffix is created, while the
+ *   ".inprogress" file is left in place. This avoids a rename, which is not atomic on some file
+ *   systems.
  *
- * Readers must support both layouts, see [[RollingEventLogFilesFileReader]]. The layouts are
- * distinguishable because a file that marks completion (".done" suffix, or no suffix for the
- * layout without completion marker) is only ever created once the application terminated.
+ * Readers must support both layouts, see [[RollingEventLogFilesFileReader]]. As a file that marks
+ * completion (".done" suffix, or no suffix without completion marker) is only ever created once
+ * the application terminated, it takes precedence over the ".inprogress" file.
  *
  * The writer will roll over the event log file when configured size is reached. Note that the
  * writer doesn't check the size on file being open for write: the writer tracks the count of bytes
@@ -365,11 +365,7 @@ class RollingEventLogFilesWriter(
 
     // SPARK-30860: use the class method to avoid the umask causing permission issues
     FileSystem.mkdirs(fileSystem, logDirForAppPath, EventLogFileWriter.LOG_FOLDER_PERMISSIONS)
-    // With a completion marker, the absence of an appstatus file marks the directory as being
-    // actively written, hence no file is created here.
-    if (!useCompletionMarker) {
-      createAppStatusFile(AppStatus.IN_PROGRESS)
-    }
+    createAppStatusFile(AppStatus.IN_PROGRESS)
     rollEventLogFile()
   }
 

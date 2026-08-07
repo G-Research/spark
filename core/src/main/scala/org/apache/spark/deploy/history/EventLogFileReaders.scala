@@ -105,55 +105,24 @@ object EventLogFileReader extends Logging {
       fs: FileSystem,
       path: Path,
       lastIndex: Option[Long]): EventLogFileReader = {
-    apply(fs, path, lastIndex, completionMarkerEnabled = false)
-  }
-
-  /**
-   * Creates a reader for the given path. Rolling event log directories that are actively written
-   * by applications with spark.eventLog.rolling.completionMarker.enabled=true have no appstatus
-   * file, so callers have to allow for that via completionMarkerEnabled, see
-   * [[RollingEventLogFilesWriter]].
-   */
-  private[history] def apply(
-      fs: FileSystem,
-      path: Path,
-      lastIndex: Option[Long],
-      completionMarkerEnabled: Boolean): EventLogFileReader = {
     lastIndex match {
-      case Some(_) => new RollingEventLogFilesFileReader(fs, path, completionMarkerEnabled)
+      case Some(_) => new RollingEventLogFilesFileReader(fs, path)
       case None => new SingleFileEventLogFileReader(fs, path)
     }
   }
 
   def apply(fs: FileSystem, path: Path): Option[EventLogFileReader] = {
-    apply(fs, path, completionMarkerEnabled = false)
-  }
-
-  private[history] def apply(
-      fs: FileSystem,
-      path: Path,
-      completionMarkerEnabled: Boolean): Option[EventLogFileReader] = {
-    apply(fs, fs.getFileStatus(path), completionMarkerEnabled)
+    apply(fs, fs.getFileStatus(path))
   }
 
   def apply(fs: FileSystem, status: FileStatus): Option[EventLogFileReader] = {
-    apply(fs, status, completionMarkerEnabled = false)
-  }
-
-  private[history] def apply(
-      fs: FileSystem,
-      status: FileStatus,
-      completionMarkerEnabled: Boolean): Option[EventLogFileReader] = {
     if (isSingleEventLog(status)) {
       Some(new SingleFileEventLogFileReader(fs, status.getPath, Option(status)))
     } else if (isRollingEventLogs(status)) {
       val files = fs.listStatus(status.getPath)
-      // Without completion marker, an appstatus file is written on start, so a directory without
-      // one is not a valid event log directory (SPARK-46012). With completion marker, the absence
-      // of an appstatus file marks the directory as being actively written.
       if (files.exists(RollingEventLogFilesWriter.isEventLogFile) &&
-          (completionMarkerEnabled || files.exists(RollingEventLogFilesWriter.isAppStatusFile))) {
-        Some(new RollingEventLogFilesFileReader(fs, status.getPath, completionMarkerEnabled))
+          files.exists(RollingEventLogFilesWriter.isAppStatusFile)) {
+        Some(new RollingEventLogFilesFileReader(fs, status.getPath))
       } else {
         logDebug(s"Rolling event log directory have no event log file at ${status.getPath}")
         None
@@ -247,22 +216,16 @@ private[history] class SingleFileEventLogFileReader(
  *
  * The reader detects completion for both appstatus file layouts described in
  * [[RollingEventLogFilesWriter]], as it cannot know how the writing application was configured.
- * Reading a directory that is actively written with completion marker, which has no appstatus file
- * at all, requires completionMarkerEnabled to be set.
  */
 private[history] class RollingEventLogFilesFileReader(
     fs: FileSystem,
-    path: Path,
-    completionMarkerEnabled: Boolean) extends EventLogFileReader(fs, path) {
+    path: Path) extends EventLogFileReader(fs, path) {
   import RollingEventLogFilesWriter._
-
-  def this(fs: FileSystem, path: Path) = this(fs, path, false)
 
   private lazy val files: Seq[FileStatus] = {
     val ret = fs.listStatus(rootPath).toImmutableArraySeq
     require(ret.exists(isEventLogFile), "Log directory must contain at least one event log file!")
-    require(completionMarkerEnabled || ret.exists(isAppStatusFile),
-      "Log directory must contain an appstatus file!")
+    require(ret.exists(isAppStatusFile), "Log directory must contain an appstatus file!")
     ret
   }
 
@@ -291,11 +254,10 @@ private[history] class RollingEventLogFilesFileReader(
   override def fileSizeForLastIndex: Long = lastEventLogFile.getLen
 
   override def completed: Boolean = {
-    // App. status files that mark completion (".done" suffix with a completion marker, no suffix
-    // without one) are only ever created on termination, while the ".inprogress" file is created
-    // on start. Hence any of the former marks the application complete, even when an ".inprogress"
-    // file is left behind by a rename that failed halfway. No appstatus file at all means the
-    // application is still writing, having a completion marker configured.
+    // The appstatus files that mark completion (".done" suffix with a completion marker, no suffix
+    // without one) are only ever created on termination, while the ".inprogress" file is created on
+    // start. Hence any of the former marks the application complete, no matter whether the
+    // ".inprogress" file is still around.
     appStatuses.exists(_ != AppStatus.IN_PROGRESS)
   }
 

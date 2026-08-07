@@ -1648,12 +1648,10 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
       assert(dir.listFiles().length === 1)
       assert(provider.getListing().length === 1)
 
-      // Manually delete the event log files to make an invalid rolling event log.
-      // Note that a directory without appstatus file is a valid in-progress application,
-      // see spark.eventLog.rolling.completionMarker.enabled.
-      fs.listStatus(new Path(writer.logPath))
-        .filter(RollingEventLogFilesWriter.isEventLogFile)
-        .foreach { eventLogFile => fs.delete(eventLogFile.getPath, false) }
+      // Manually delete the appstatus file to make an invalid rolling event log
+      val appStatusPath = RollingEventLogFilesWriter.getAppStatusFilePath(new Path(writer.logPath),
+        "app", None, true)
+      fs.delete(appStatusPath, false)
       provider.checkForLogs()
       provider.cleanLogs()
       assert(provider.getListing().length === 0)
@@ -1695,21 +1693,22 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
         SparkListenerApplicationStart("app", Some("app"), 0, "user", None),
         SparkListenerJobStart(1, 0, Seq.empty)), rollFile = false)
 
-      // while being written, the log directory has no appstatus file at all
       val logDirPath = new Path(writer.logPath)
-      assert(!fs.listStatus(logDirPath).exists(RollingEventLogFilesWriter.isAppStatusFile))
+      def appStatusFile(status: RollingEventLogFilesWriter.AppStatus): Path =
+        RollingEventLogFilesWriter.getAppStatusFilePath(logDirPath, "app", None, status)
 
-      // the application is listed as incomplete
+      // while being written, the application is listed as incomplete
+      assert(fs.exists(appStatusFile(RollingEventLogFilesWriter.AppStatus.IN_PROGRESS)))
       provider.checkForLogs()
       val incomplete = provider.getListing().toSeq
       assert(incomplete.length === 1)
       assert(!incomplete.head.attempts.head.completed)
 
-      // stopping the writer creates the completion marker
+      // stopping the writer adds the completion marker, leaving the ".inprogress" file in place
       writeEventsToRollingWriter(writer, Seq(SparkListenerApplicationEnd(1000)), rollFile = false)
       writer.stop()
-      assert(fs.exists(RollingEventLogFilesWriter.getAppStatusFilePath(logDirPath, "app", None,
-        RollingEventLogFilesWriter.AppStatus.DONE)))
+      assert(fs.exists(appStatusFile(RollingEventLogFilesWriter.AppStatus.DONE)))
+      assert(fs.exists(appStatusFile(RollingEventLogFilesWriter.AppStatus.IN_PROGRESS)))
 
       // which makes the provider re-read the log and list the application as complete
       provider.checkForLogs()

@@ -94,7 +94,7 @@ abstract class EventLogFileReadersSuite extends SparkFunSuite with LocalSparkCon
 
     // path with last index - rolling event log
     val reader2 = EventLogFileReader(fileSystem,
-      new Path(testDirPath, s"${EVENT_LOG_DIR_NAME_PREFIX}aaa"), Some(3L))
+      new Path(testDirPath, s"${EVENT_LOG_DIR_NAME_PREFIX}aaa"), Some(3))
     assertInstanceOfEventLogReader(Some(classOf[RollingEventLogFilesFileReader]), Some(reader2))
 
     // path - file (both path and FileStatus)
@@ -135,7 +135,7 @@ abstract class EventLogFileReadersSuite extends SparkFunSuite with LocalSparkCon
       dummyData.foreach(writer.writeEvent(_, flushLogger = true))
 
       val logPathIncompleted = getCurrentLogPath(writer.logPath, isCompleted = false)
-      val readerOpt = createReader(new Path(logPathIncompleted))
+      val readerOpt = EventLogFileReader(fileSystem, new Path(logPathIncompleted))
       assertAppropriateReader(readerOpt)
       val reader = readerOpt.get
 
@@ -144,7 +144,7 @@ abstract class EventLogFileReadersSuite extends SparkFunSuite with LocalSparkCon
       writer.stop()
 
       val logPathCompleted = getCurrentLogPath(writer.logPath, isCompleted = true)
-      val readerOpt2 = createReader(new Path(logPathCompleted))
+      val readerOpt2 = EventLogFileReader(fileSystem, new Path(logPathCompleted))
       assertAppropriateReader(readerOpt2)
       val reader2 = readerOpt2.get
 
@@ -160,10 +160,6 @@ abstract class EventLogFileReadersSuite extends SparkFunSuite with LocalSparkCon
       hadoopConf: Configuration): EventLogFileWriter
 
   protected def getCurrentLogPath(logPath: String, isCompleted: Boolean): String
-
-  /** Creates a reader for the given log path, the way the History Server would. */
-  protected def createReader(logPath: Path): Option[EventLogFileReader] =
-    EventLogFileReader(fileSystem, logPath)
 
   protected def assertAppropriateReader(actualReader: Option[EventLogFileReader]): Unit
 
@@ -235,6 +231,34 @@ class RollingEventLogFilesReaderSuite extends EventLogFileReadersSuite {
   /** Whether written event log directories are marked as completed by an ".done" file. */
   protected def useCompletionMarker: Boolean = false
 
+  test("appstatus file tells whether the application completed") {
+    Seq(
+      (Seq(AppStatus.IN_PROGRESS), false),
+      (Seq(AppStatus.COMPLETE), true),
+      (Seq(AppStatus.DONE), true),
+      // with completion marker, the ".inprogress" file is left in place on termination
+      (Seq(AppStatus.IN_PROGRESS, AppStatus.DONE), true),
+      // an ".inprogress" file left behind by a rename that failed halfway does not hide completion
+      (Seq(AppStatus.IN_PROGRESS, AppStatus.COMPLETE), true),
+      (Seq(AppStatus.COMPLETE, AppStatus.DONE), true)
+    ).foreach { case (statuses, expectedCompleted) =>
+      withTempDir { dir =>
+        val appId = getUniqueApplicationId
+        val logDirPath = getAppEventLogDirPath(dir.toURI, appId, None)
+        fileSystem.mkdirs(logDirPath)
+        fileSystem.create(getEventLogFilePath(logDirPath, appId, None, 1, None)).close()
+        statuses.foreach { status =>
+          fileSystem.create(getAppStatusFilePath(logDirPath, appId, None, status)).close()
+        }
+
+        val reader = EventLogFileReader(fileSystem, logDirPath)
+        assert(reader.isDefined, s"Expected a reader for appstatus files $statuses")
+        assert(reader.get.completed === expectedCompleted,
+          s"Unexpected completed state for appstatus files $statuses")
+      }
+    }
+  }
+
   test("SPARK-46012: appStatus file should exist") {
     withTempDir { dir =>
       val appId = getUniqueApplicationId
@@ -243,8 +267,8 @@ class RollingEventLogFilesReaderSuite extends EventLogFileReadersSuite {
       val conf = getLoggingConf(testDirPath)
       conf.set(EVENT_LOG_ENABLE_ROLLING, true)
       conf.set(EVENT_LOG_ROLLING_MAX_FILE_SIZE.key, "10m")
-      // this test is about the layout without completion marker, where the appstatus file is
-      // written on start and hence has to exist
+      // with completion marker, a terminated application leaves two appstatus files behind, so
+      // this test writes the log without one to have a single appstatus file to remove
       conf.set(EVENT_LOG_ROLLING_COMPLETION_MARKER, false)
 
       val writer = new RollingEventLogFilesWriter(appId, attemptId, testDirPath.toUri, conf,
@@ -269,65 +293,6 @@ class RollingEventLogFilesReaderSuite extends EventLogFileReadersSuite {
     }
   }
 
-  test("event log directory without appstatus file is in progress") {
-    val appId = getUniqueApplicationId
-    val attemptId = None
-
-    val conf = getLoggingConf(testDirPath)
-    conf.set(EVENT_LOG_ENABLE_ROLLING, true)
-    conf.set(EVENT_LOG_ROLLING_COMPLETION_MARKER, true)
-
-    val writer = new RollingEventLogFilesWriter(appId, attemptId, testDirPath.toUri, conf,
-      SparkHadoopUtil.get.newConfiguration(conf))
-
-    writer.start()
-    writer.writeEvent("dummy", flushLogger = true)
-
-    val logPath = new Path(writer.logPath)
-    assert(!fileSystem.listStatus(logPath).exists(RollingEventLogFilesWriter.isAppStatusFile))
-
-    // the application is in progress for a History Server that expects a completion marker
-    val readerOpt = EventLogFileReader(fileSystem, logPath, completionMarkerEnabled = true)
-    assert(readerOpt.get.isInstanceOf[RollingEventLogFilesFileReader])
-    assert(!readerOpt.get.completed)
-
-    // while a History Server that does not skips the directory, as it has no appstatus file
-    assert(EventLogFileReader(fileSystem, logPath).isEmpty)
-
-    // the completion marker created on stop marks the application complete for either
-    writer.stop()
-    assert(EventLogFileReader(fileSystem, logPath, completionMarkerEnabled = true).get.completed)
-    assert(EventLogFileReader(fileSystem, logPath).get.completed)
-  }
-
-  test("appstatus file tells whether the application completed") {
-    Seq(
-      (Seq.empty[AppStatus], false),
-      (Seq(AppStatus.IN_PROGRESS), false),
-      (Seq(AppStatus.COMPLETE), true),
-      (Seq(AppStatus.DONE), true),
-      // an ".inprogress" file left behind by a rename that failed halfway does not hide completion
-      (Seq(AppStatus.IN_PROGRESS, AppStatus.COMPLETE), true),
-      (Seq(AppStatus.IN_PROGRESS, AppStatus.DONE), true),
-      (Seq(AppStatus.COMPLETE, AppStatus.DONE), true)
-    ).foreach { case (statuses, expectedCompleted) =>
-      withTempDir { dir =>
-        val appId = getUniqueApplicationId
-        val logDirPath = getAppEventLogDirPath(dir.toURI, appId, None)
-        fileSystem.mkdirs(logDirPath)
-        fileSystem.create(getEventLogFilePath(logDirPath, appId, None, 1, None)).close()
-        statuses.foreach { status =>
-          fileSystem.create(getAppStatusFilePath(logDirPath, appId, None, status)).close()
-        }
-
-        val reader = EventLogFileReader(fileSystem, logDirPath, completionMarkerEnabled = true)
-        assert(reader.isDefined, s"Expected a reader for appstatus files $statuses")
-        assert(reader.get.completed === expectedCompleted,
-          s"Unexpected completed state for appstatus files $statuses")
-      }
-    }
-  }
-
   allCodecs.foreach { codecShortName =>
     test(s"rolling event log files - codec $codecShortName") {
       val appId = getUniqueApplicationId
@@ -347,14 +312,15 @@ class RollingEventLogFilesReaderSuite extends EventLogFileReadersSuite {
       writeTestEvents(writer, dummyStr, 1024 * 1024 * 20)
 
       val logPathIncompleted = getCurrentLogPath(writer.logPath, isCompleted = false)
-      val readerOpt = createReader(new Path(logPathIncompleted))
+      val readerOpt = EventLogFileReader(fileSystem,
+        new Path(logPathIncompleted))
       verifyReader(readerOpt.get, new Path(logPathIncompleted), codecShortName, isCompleted = false)
       assert(readerOpt.get.listEventLogFiles.length === 3)
 
       writer.stop()
 
       val logPathCompleted = getCurrentLogPath(writer.logPath, isCompleted = true)
-      val readerOpt2 = createReader(new Path(logPathCompleted))
+      val readerOpt2 = EventLogFileReader(fileSystem, new Path(logPathCompleted))
       verifyReader(readerOpt2.get, new Path(logPathCompleted), codecShortName, isCompleted = true)
       assert(readerOpt2.get.listEventLogFiles.length === 3)
     }
@@ -368,10 +334,6 @@ class RollingEventLogFilesReaderSuite extends EventLogFileReadersSuite {
       hadoopConf: Configuration): EventLogFileWriter = {
     sparkConf.set(EVENT_LOG_ROLLING_COMPLETION_MARKER, useCompletionMarker)
     new RollingEventLogFilesWriter(appId, appAttemptId, logBaseDir, sparkConf, hadoopConf)
-  }
-
-  override protected def createReader(logPath: Path): Option[EventLogFileReader] = {
-    EventLogFileReader(fileSystem, logPath, useCompletionMarker)
   }
 
   override protected def assertAppropriateReader(actualReader: Option[EventLogFileReader]): Unit = {

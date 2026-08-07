@@ -542,18 +542,24 @@ class RollingEventLogFilesWriterSuite extends EventLogFileWritersSuite {
     writer.start()
     writer.writeEvent("dummy", flushLogger = true)
 
-    // while writing, the appstatus file is only there without completion marker
-    assert(fileSystem.exists(appStatusFile(AppStatus.IN_PROGRESS)) === !useCompletionMarker)
+    // while writing, the ".inprogress" file marks the application in progress in either layout
+    assert(fileSystem.exists(appStatusFile(AppStatus.IN_PROGRESS)))
     assert(!fileSystem.exists(appStatusFile(AppStatus.COMPLETE)))
     assert(!fileSystem.exists(appStatusFile(AppStatus.DONE)))
 
     writer.stop()
 
-    // once stopped, completion is marked by the ".done" file,
-    // or by dropping the ".inprogress" suffix
-    assert(!fileSystem.exists(appStatusFile(AppStatus.IN_PROGRESS)))
-    assert(fileSystem.exists(appStatusFile(AppStatus.DONE)) === useCompletionMarker)
-    assert(fileSystem.exists(appStatusFile(AppStatus.COMPLETE)) === !useCompletionMarker)
+    if (useCompletionMarker) {
+      // the ".done" file is added, while the ".inprogress" file is left in place
+      assert(fileSystem.exists(appStatusFile(AppStatus.DONE)))
+      assert(fileSystem.exists(appStatusFile(AppStatus.IN_PROGRESS)))
+      assert(!fileSystem.exists(appStatusFile(AppStatus.COMPLETE)))
+    } else {
+      // the ".inprogress" file is renamed to drop the suffix
+      assert(fileSystem.exists(appStatusFile(AppStatus.COMPLETE)))
+      assert(!fileSystem.exists(appStatusFile(AppStatus.IN_PROGRESS)))
+      assert(!fileSystem.exists(appStatusFile(AppStatus.DONE)))
+    }
   }
 
   override protected def createWriter(

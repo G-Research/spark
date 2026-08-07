@@ -108,26 +108,23 @@ Without rolling event log files, the application writes a single file with the <
 suffix, and renames it to drop that suffix on termination.
 
 With rolling event log files, the application writes a directory named <code>eventlog_v2_[appId](_[appAttemptId])</code>
-holding the event log files and a zero-byte application status file. There are two layouts for that
-status file, selected by <code>spark.eventLog.rolling.completionMarker.enabled</code>:
+holding the event log files and a zero-byte application status file. That status file is created as
+<code>appstatus_[appId](_[appAttemptId]).inprogress</code> on start, and how termination is expressed
+depends on <code>spark.eventLog.rolling.completionMarker.enabled</code>:
 
-* When disabled (default), the status file is created as <code>appstatus_[appId](_[appAttemptId]).inprogress</code>
-  on start, and renamed to drop the suffix on termination.
-* When enabled, no status file is created on start: the absence of a status file marks the directory as being
-  actively written. On termination, <code>appstatus_[appId](_[appAttemptId]).done</code> is created.
+* When disabled (default), the status file is renamed to drop the <code>.inprogress</code> suffix.
+* When enabled, an additional status file <code>appstatus_[appId](_[appAttemptId]).done</code> is created,
+  while the <code>.inprogress</code> file is left in place. A status file marking completion is only ever
+  created on termination, so it takes precedence over the <code>.inprogress</code> file.
 
 Enabling the completion marker avoids the rename, which is not atomic on some file systems, in particular on
-object stores. Consider the following before enabling it:
+object stores. It only affects how applications write their event log, the History Server reads both layouts.
+Consider the following before enabling it:
 
-* Set <code>spark.eventLog.rolling.completionMarker.enabled</code> on the History Server as well. A directory
-  without status file is only accepted as an actively written application when the History Server has the
-  option enabled, as an event log directory without status file is invalid otherwise. Either way, the History
-  Server lists such applications correctly once they terminated.
-* Upgrade your History Server first. History Servers before Spark 5.0.0 do not list applications that are
-  actively writing such a directory, and consequently their log cleaner does not remove those directories
-  either. They do list such applications correctly once terminated.
-* Tools other than the History Server that look for <code>.inprogress</code> files to tell running from
-  terminated applications need to be updated as well.
+* History Servers before Spark 5.0.0 pick an arbitrary status file when a directory contains more than one,
+  so they may list a terminated application as incomplete. Upgrade your History Server first.
+* Tools other than the History Server that tell running from terminated applications by the presence of an
+  <code>.inprogress</code> file need to be updated as well, as that file is never removed.
 * An application that is killed before it can mark its event log as finished stays listed as incomplete with
   either layout.
 
