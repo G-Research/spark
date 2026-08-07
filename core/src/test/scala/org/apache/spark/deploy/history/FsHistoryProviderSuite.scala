@@ -41,6 +41,7 @@ import org.apache.spark.{JobExecutionStatus, SecurityManager, SPARK_VERSION, Spa
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.deploy.history.EventLogTestHelper._
 import org.apache.spark.internal.config.DRIVER_LOG_DFS_DIR
+import org.apache.spark.internal.config.EVENT_LOG_ROLLING_COMPLETION_MARKER
 import org.apache.spark.internal.config.History._
 import org.apache.spark.internal.config.UI.{ADMIN_ACLS, ADMIN_ACLS_GROUPS, UI_VIEW_ACLS, UI_VIEW_ACLS_GROUPS, USER_GROUPS_MAPPING}
 import org.apache.spark.io._
@@ -1673,6 +1674,50 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
       val newProvider = new FsHistoryProvider(conf)
       newProvider.checkForLogs()
       assert(newProvider.getListing().length === 1)
+    }
+  }
+
+  test("rolling event log directory with completion marker") {
+    withTempDir { dir =>
+      val conf = createTestConf(true)
+      conf.set(HISTORY_LOG_DIR, dir.getAbsolutePath)
+      conf.set(EVENT_LOG_ROLLING_COMPLETION_MARKER, true)
+      val hadoopConf = SparkHadoopUtil.newConfiguration(conf)
+      val fs = new Path(dir.getAbsolutePath).getFileSystem(hadoopConf)
+
+      val provider = new FsHistoryProvider(conf)
+
+      val writer = new RollingEventLogFilesWriter("app", None, dir.toURI, conf, hadoopConf)
+      writer.start()
+      writeEventsToRollingWriter(writer, Seq(
+        SparkListenerApplicationStart("app", Some("app"), 0, "user", None),
+        SparkListenerJobStart(1, 0, Seq.empty)), rollFile = false)
+
+      val logDirPath = new Path(writer.logPath)
+      val inProgressFile = RollingEventLogFilesWriter.getAppStatusFilePath(logDirPath, "app", None,
+        inProgress = true)
+      val doneFile = RollingEventLogFilesWriter.getAppStatusDoneFilePath(logDirPath, "app", None)
+
+      // while being written, the application is listed as incomplete
+      assert(fs.exists(inProgressFile))
+      provider.checkForLogs()
+      val incomplete = provider.getListing().toSeq
+      assert(incomplete.length === 1)
+      assert(!incomplete.head.attempts.head.completed)
+
+      // stopping the writer adds the completion marker, leaving the ".inprogress" file in place
+      writeEventsToRollingWriter(writer, Seq(SparkListenerApplicationEnd(1000)), rollFile = false)
+      writer.stop()
+      assert(fs.exists(doneFile))
+      assert(fs.exists(inProgressFile))
+
+      // which makes the provider re-read the log and list the application as complete
+      provider.checkForLogs()
+      val complete = provider.getListing().toSeq
+      assert(complete.length === 1)
+      assert(complete.head.attempts.head.completed)
+
+      provider.stop()
     }
   }
 

@@ -1565,6 +1565,21 @@ Apart from these, the following properties are also available, and may be useful
   <td>3.0.0</td>
 </tr>
 <tr>
+  <td><code>spark.eventLog.rolling.completionMarker.enabled</code></td>
+  <td>false</td>
+  <td>
+    When <code>spark.eventLog.rolling.enabled=true</code>, marks the event log directory as finished by
+    creating an <code>appstatus_[appId](_[appAttemptId]).done</code> file on termination, leaving the
+    <code>appstatus_[appId](_[appAttemptId]).inprogress</code> file written on start in place. When false,
+    that <code>.inprogress</code> file is renamed to drop the suffix on termination. Enabling this avoids a
+    rename on termination, which is not atomic on some file systems and may require read permissions. Read
+    the section of "Marking event logs as in progress or finished" in the <a href="monitoring.html">
+    monitoring documentation</a> before
+    enabling this.
+  </td>
+  <td>5.0.0</td>
+</tr>
+<tr>
   <td><code>spark.ui.dagGraph.retainedRootRDDs</code></td>
   <td>Int.MaxValue</td>
   <td>

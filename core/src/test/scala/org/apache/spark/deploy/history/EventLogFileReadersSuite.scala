@@ -228,6 +228,40 @@ class SingleFileEventLogFileReaderSuite extends EventLogFileReadersSuite {
 }
 
 class RollingEventLogFilesReaderSuite extends EventLogFileReadersSuite {
+  /** Whether written event log directories are marked as completed by an ".done" file. */
+  protected def useCompletionMarker: Boolean = false
+
+  test("appstatus file tells whether the application completed") {
+    val inProgress = EventLogFileWriter.IN_PROGRESS
+    val done = EventLogFileWriter.DONE
+    Seq(
+      (Seq(inProgress), false),
+      (Seq(""), true),
+      (Seq(done), true),
+      // with completion marker, the ".inprogress" file is left in place on termination
+      (Seq(inProgress, done), true),
+      // an ".inprogress" file left behind by a rename that failed halfway does not hide completion
+      (Seq(inProgress, ""), true),
+      (Seq("", done), true)
+    ).foreach { case (suffixes, expectedCompleted) =>
+      withTempDir { dir =>
+        val appId = getUniqueApplicationId
+        val logDirPath = getAppEventLogDirPath(dir.toURI, appId, None)
+        fileSystem.mkdirs(logDirPath)
+        fileSystem.create(getEventLogFilePath(logDirPath, appId, None, 1, None)).close()
+        suffixes.foreach { suffix =>
+          val appStatusFile = getAppStatusFilePath(logDirPath, appId, None, inProgress = false)
+          fileSystem.create(new Path(appStatusFile.toString + suffix)).close()
+        }
+
+        val reader = EventLogFileReader(fileSystem, logDirPath)
+        assert(reader.isDefined, s"Expected a reader for appstatus files $suffixes")
+        assert(reader.get.completed === expectedCompleted,
+          s"Unexpected completed state for appstatus files $suffixes")
+      }
+    }
+  }
+
   test("SPARK-46012: appStatus file should exist") {
     withTempDir { dir =>
       val appId = getUniqueApplicationId
@@ -236,8 +270,11 @@ class RollingEventLogFilesReaderSuite extends EventLogFileReadersSuite {
       val conf = getLoggingConf(testDirPath)
       conf.set(EVENT_LOG_ENABLE_ROLLING, true)
       conf.set(EVENT_LOG_ROLLING_MAX_FILE_SIZE.key, "10m")
+      // with completion marker, a terminated application leaves two appstatus files behind, so
+      // this test writes the log without one to have a single appstatus file to remove
+      conf.set(EVENT_LOG_ROLLING_COMPLETION_MARKER, false)
 
-      val writer = createWriter(appId, attemptId, testDirPath.toUri, conf,
+      val writer = new RollingEventLogFilesWriter(appId, attemptId, testDirPath.toUri, conf,
         SparkHadoopUtil.get.newConfiguration(conf))
 
       writer.start()
@@ -298,6 +335,7 @@ class RollingEventLogFilesReaderSuite extends EventLogFileReadersSuite {
       logBaseDir: URI,
       sparkConf: SparkConf,
       hadoopConf: Configuration): EventLogFileWriter = {
+    sparkConf.set(EVENT_LOG_ROLLING_COMPLETION_MARKER, useCompletionMarker)
     new RollingEventLogFilesWriter(appId, appAttemptId, logBaseDir, sparkConf, hadoopConf)
   }
 
@@ -375,4 +413,8 @@ class RollingEventLogFilesReaderSuite extends EventLogFileReadersSuite {
       assert(count === allFileNames.size)
     }
   }
+}
+
+class RollingEventLogFilesReaderWithCompletionMarkerSuite extends RollingEventLogFilesReaderSuite {
+  override protected def useCompletionMarker: Boolean = true
 }

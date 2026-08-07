@@ -98,6 +98,36 @@ The history server can be configured as follows:
   </tr>
 </table>
 
+### Marking event logs as in progress or finished
+
+The History Server lists applications as incomplete while they are still writing their event log, and as
+completed once they terminated. How an event log expresses this depends on whether rolling event log files
+are enabled (<code>spark.eventLog.rolling.enabled</code>, enabled by default).
+
+Without rolling event log files, the application writes a single file with the <code>.inprogress</code>
+suffix, and renames it to drop that suffix on termination.
+
+With rolling event log files, the application writes a directory named <code>eventlog_v2_[appId](_[appAttemptId])</code>
+holding the event log files and a zero-byte application status file. That status file is created as
+<code>appstatus_[appId](_[appAttemptId]).inprogress</code> on start, and how termination is expressed
+depends on <code>spark.eventLog.rolling.completionMarker.enabled</code>:
+
+* When disabled (default), the status file is renamed to drop the <code>.inprogress</code> suffix.
+* When enabled, an additional status file <code>appstatus_[appId](_[appAttemptId]).done</code> is created,
+  while the <code>.inprogress</code> file is left in place. A status file marking completion is only ever
+  created on termination, so it takes precedence over the <code>.inprogress</code> file.
+
+Enabling the completion marker avoids the rename, which is not atomic on some file systems, in particular on
+object stores, and may require read permissions. It only affects how applications write their event log, the
+History Server reads both layouts. Consider the following before enabling it:
+
+* History Servers before Spark 5.0.0 pick an arbitrary status file when a directory contains more than one,
+  so they may list a terminated application as incomplete. Upgrade your History Server first.
+* Tools other than the History Server that tell running from terminated applications by the presence of an
+  <code>.inprogress</code> file need to be updated as well, as that file is never removed.
+* An application that is killed before it can mark its event log as finished stays listed as incomplete with
+  either layout.
+
 ### Applying compaction on rolling event log files
 
 A long-running application (e.g. streaming) can bring a huge single event log file which may cost a lot to maintain and

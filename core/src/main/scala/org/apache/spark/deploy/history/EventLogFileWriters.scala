@@ -185,6 +185,9 @@ abstract class EventLogFileWriter(
 object EventLogFileWriter {
   // Suffix applied to the names of files still being written by applications.
   val IN_PROGRESS = ".inprogress"
+  // Suffix applied to the name of the application status file of a rolling event log directory
+  // once the application terminated. See RollingEventLogFilesWriter for details.
+  val DONE = ".done"
   val COMPACTED = ".compact"
 
   val LOG_FILE_PERMISSIONS = new FsPermission(Integer.parseInt("660", 8).toShort)
@@ -305,7 +308,21 @@ object SingleEventLogFileWriter {
  * - The name of directory: eventlog_v2_appId(_[appAttemptId])
  * - The prefix of name on event files: events_[index]_[appId](_[appAttemptId])(.[codec])
  *   - "index" would be monotonically increasing value (say, sequence)
- * - The name of metadata (app. status) file name: appstatus_[appId](_[appAttemptId])(.inprogress)
+ * - The name of metadata (app. status) file name:
+ *   appstatus_[appId](_[appAttemptId])(.inprogress|.done)
+ *
+ * The appstatus file tells whether the application is still writing the directory. It is created
+ * with the ".inprogress" suffix on start, and on termination one of two layouts is used, selected
+ * by spark.eventLog.rolling.completionMarker.enabled:
+ *
+ * - When disabled (default), the file is renamed to drop the ".inprogress" suffix.
+ * - When enabled, an additional appstatus file with the ".done" suffix is created, while the
+ *   ".inprogress" file is left in place. This avoids a rename, which is not atomic on some file
+ *   systems and may require read permissions.
+ *
+ * Readers must support both layouts, see [[RollingEventLogFilesFileReader]]. As a file that marks
+ * completion (".done" suffix, or no suffix without completion marker) is only ever created once
+ * the application terminated, it takes precedence over the ".inprogress" file.
  *
  * The writer will roll over the event log file when configured size is reached. Note that the
  * writer doesn't check the size on file being open for write: the writer tracks the count of bytes
@@ -324,6 +341,8 @@ class RollingEventLogFilesWriter(
   import RollingEventLogFilesWriter._
 
   private val eventFileMaxLength = sparkConf.get(EVENT_LOG_ROLLING_MAX_FILE_SIZE)
+
+  private val useCompletionMarker = sparkConf.get(EVENT_LOG_ROLLING_COMPLETION_MARKER)
 
   private val logDirForAppPath = getAppEventLogDirPath(logBaseDir, appId, appAttemptId)
 
@@ -346,7 +365,8 @@ class RollingEventLogFilesWriter(
 
     // SPARK-30860: use the class method to avoid the umask causing permission issues
     FileSystem.mkdirs(fileSystem, logDirForAppPath, EventLogFileWriter.LOG_FOLDER_PERMISSIONS)
-    createAppStatusFile(inProgress = true)
+    createAppStatusFile(getAppStatusFilePath(logDirForAppPath, appId, appAttemptId,
+      inProgress = true))
     rollEventLogFile()
   }
 
@@ -379,17 +399,22 @@ class RollingEventLogFilesWriter(
   override def stop(): Unit = {
     logInfo(log"Stopping event writer for ${MDC(PATH, logPath)}")
     closeWriter()
-    val appStatusPathIncomplete = getAppStatusFilePath(logDirForAppPath, appId, appAttemptId,
-      inProgress = true)
-    val appStatusPathComplete = getAppStatusFilePath(logDirForAppPath, appId, appAttemptId,
-      inProgress = false)
-    renameFile(appStatusPathIncomplete, appStatusPathComplete, overwrite = true)
+    if (useCompletionMarker) {
+      // The completion marker is created after the event log file has been closed, so that readers
+      // never consider the application complete while events are still to be flushed.
+      createAppStatusFile(getAppStatusDoneFilePath(logDirForAppPath, appId, appAttemptId))
+    } else {
+      val appStatusPathIncomplete = getAppStatusFilePath(logDirForAppPath, appId, appAttemptId,
+        inProgress = true)
+      val appStatusPathComplete = getAppStatusFilePath(logDirForAppPath, appId, appAttemptId,
+        inProgress = false)
+      renameFile(appStatusPathIncomplete, appStatusPathComplete, overwrite = true)
+    }
   }
 
   override def logPath: String = logDirForAppPath.toString
 
-  private def createAppStatusFile(inProgress: Boolean): Unit = {
-    val appStatusPath = getAppStatusFilePath(logDirForAppPath, appId, appAttemptId, inProgress)
+  private def createAppStatusFile(appStatusPath: Path): Unit = {
     // SPARK-30860: use the class method to avoid the umask causing permission issues
     val outputStream = FileSystem.create(fileSystem, appStatusPath,
       EventLogFileWriter.LOG_FILE_PERMISSIONS)
@@ -416,6 +441,16 @@ object RollingEventLogFilesWriter {
       EventLogFileWriter.nameForAppAndAttempt(appId, appAttemptId)
     val name = if (inProgress) base + EventLogFileWriter.IN_PROGRESS else base
     new Path(appLogDir, name)
+  }
+
+  /** Returns the path of the appstatus file that marks completion via completion marker. */
+  private[history] def getAppStatusDoneFilePath(
+      appLogDir: Path,
+      appId: String,
+      appAttemptId: Option[String]): Path = {
+    val base = APPSTATUS_FILE_NAME_PREFIX +
+      EventLogFileWriter.nameForAppAndAttempt(appId, appAttemptId)
+    new Path(appLogDir, base + EventLogFileWriter.DONE)
   }
 
   def getEventLogFilePath(
