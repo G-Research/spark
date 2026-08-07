@@ -394,6 +394,9 @@ class SingleEventLogFileWriterSuite extends EventLogFileWritersSuite {
 class RollingEventLogFilesWriterSuite extends EventLogFileWritersSuite {
   import RollingEventLogFilesWriter._
 
+  /** Whether written event log directories are marked as completed by an ".done" file. */
+  protected def useCompletionMarker: Boolean = false
+
   test("Event log names") {
     val baseDirUri = Utils.resolveURI("/base-dir")
     val appId = "app1"
@@ -410,6 +413,17 @@ class RollingEventLogFilesWriterSuite extends EventLogFileWritersSuite {
     assert(s"$logDir/${APPSTATUS_FILE_NAME_PREFIX}${appId}" ===
       RollingEventLogFilesWriter.getAppStatusFilePath(logDir, appId, appAttemptId,
         inProgress = false).toString)
+
+    // appstatus per application status
+    assert(s"$logDir/${APPSTATUS_FILE_NAME_PREFIX}${appId}${EventLogFileWriter.IN_PROGRESS}" ===
+      RollingEventLogFilesWriter.getAppStatusFilePath(logDir, appId, appAttemptId,
+        AppStatus.IN_PROGRESS).toString)
+    assert(s"$logDir/${APPSTATUS_FILE_NAME_PREFIX}${appId}" ===
+      RollingEventLogFilesWriter.getAppStatusFilePath(logDir, appId, appAttemptId,
+        AppStatus.COMPLETE).toString)
+    assert(s"$logDir/${APPSTATUS_FILE_NAME_PREFIX}${appId}${EventLogFileWriter.DONE}" ===
+      RollingEventLogFilesWriter.getAppStatusFilePath(logDir, appId, appAttemptId,
+        AppStatus.DONE).toString)
 
     // without compression
     assert(s"$logDir/${EVENT_LOG_FILE_NAME_PREFIX}1_${appId}" ===
@@ -513,12 +527,42 @@ class RollingEventLogFilesWriterSuite extends EventLogFileWritersSuite {
     assert(e.getMessage.contains("should be configured to be at least"))
   }
 
+  test("appstatus file marks the application status") {
+    val appId = getUniqueApplicationId
+    val attemptId = None
+
+    val conf = getLoggingConf(testDirPath, None)
+    val writer = createWriter(appId, attemptId, testDirPath.toUri, conf,
+      SparkHadoopUtil.get.newConfiguration(conf))
+
+    val logDirPath = getAppEventLogDirPath(testDirPath.toUri, appId, attemptId)
+    def appStatusFile(status: AppStatus): Path =
+      getAppStatusFilePath(logDirPath, appId, attemptId, status)
+
+    writer.start()
+    writer.writeEvent("dummy", flushLogger = true)
+
+    // while writing, the appstatus file is only there without completion marker
+    assert(fileSystem.exists(appStatusFile(AppStatus.IN_PROGRESS)) === !useCompletionMarker)
+    assert(!fileSystem.exists(appStatusFile(AppStatus.COMPLETE)))
+    assert(!fileSystem.exists(appStatusFile(AppStatus.DONE)))
+
+    writer.stop()
+
+    // once stopped, completion is marked by the ".done" file,
+    // or by dropping the ".inprogress" suffix
+    assert(!fileSystem.exists(appStatusFile(AppStatus.IN_PROGRESS)))
+    assert(fileSystem.exists(appStatusFile(AppStatus.DONE)) === useCompletionMarker)
+    assert(fileSystem.exists(appStatusFile(AppStatus.COMPLETE)) === !useCompletionMarker)
+  }
+
   override protected def createWriter(
       appId: String,
       appAttemptId: Option[String],
       logBaseDir: URI,
       sparkConf: SparkConf,
       hadoopConf: Configuration): EventLogFileWriter = {
+    sparkConf.set(EVENT_LOG_ROLLING_COMPLETION_MARKER, useCompletionMarker)
     new RollingEventLogFilesWriter(appId, appAttemptId, logBaseDir, sparkConf, hadoopConf)
   }
 
@@ -532,7 +576,8 @@ class RollingEventLogFilesWriterSuite extends EventLogFileWritersSuite {
 
     assert(fileSystem.exists(logDirPath) && fileSystem.getFileStatus(logDirPath).isDirectory)
 
-    val appStatusFile = getAppStatusFilePath(logDirPath, appId, appAttemptId, inProgress = false)
+    val completeStatus = if (useCompletionMarker) AppStatus.DONE else AppStatus.COMPLETE
+    val appStatusFile = getAppStatusFilePath(logDirPath, appId, appAttemptId, completeStatus)
     assert(fileSystem.exists(appStatusFile) && fileSystem.getFileStatus(appStatusFile).isFile)
 
     val eventLogFiles = listEventLogFiles(logDirPath)
@@ -548,4 +593,8 @@ class RollingEventLogFilesWriterSuite extends EventLogFileWritersSuite {
     fileSystem.listStatus(logDirPath).filter(isEventLogFile)
       .sortBy { fs => getEventLogFileIndex(fs.getPath.getName) }.toImmutableArraySeq
   }
+}
+
+class RollingEventLogFilesWriterWithCompletionMarkerSuite extends RollingEventLogFilesWriterSuite {
+  override protected def useCompletionMarker: Boolean = true
 }

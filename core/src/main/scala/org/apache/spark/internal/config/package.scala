@@ -322,6 +322,21 @@ package object config {
         "configured to be at least 2 MiB.")
       .createWithDefaultString("128m")
 
+  private[spark] val EVENT_LOG_ROLLING_COMPLETION_MARKER =
+    ConfigBuilder("spark.eventLog.rolling.completionMarker.enabled")
+      .doc(s"When ${EVENT_LOG_ENABLE_ROLLING.key}=true, marks a rolling event log directory as " +
+        "being actively written by the absence of an application status file, and as finished " +
+        "by an 'appstatus_[appId](_[appAttemptId]).done' file created on termination. When " +
+        "false, the directory is marked as being actively written by an " +
+        "'appstatus_[appId](_[appAttemptId]).inprogress' file, which is renamed on termination. " +
+        "Enabling this avoids a rename on termination, which is not atomic on some file systems. " +
+        "The Spark History Server reads this option as well, and only lists applications that " +
+        "are actively writing such a directory when it is enabled there too. Applications that " +
+        "terminated are listed either way.")
+      .version("5.0.0")
+      .booleanConf
+      .createWithDefault(false)
+
   private[spark] val EXECUTOR_ID =
     ConfigBuilder("spark.executor.id").version("1.2.0").stringConf.createOptional
 

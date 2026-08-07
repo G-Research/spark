@@ -98,6 +98,39 @@ The history server can be configured as follows:
   </tr>
 </table>
 
+### Marking event logs as in progress or finished
+
+The History Server lists applications as incomplete while they are still writing their event log, and as
+completed once they terminated. How an event log expresses this depends on whether rolling event log files
+are enabled (<code>spark.eventLog.rolling.enabled</code>, enabled by default).
+
+Without rolling event log files, the application writes a single file with the <code>.inprogress</code>
+suffix, and renames it to drop that suffix on termination.
+
+With rolling event log files, the application writes a directory named <code>eventlog_v2_[appId](_[appAttemptId])</code>
+holding the event log files and a zero-byte application status file. There are two layouts for that
+status file, selected by <code>spark.eventLog.rolling.completionMarker.enabled</code>:
+
+* When disabled (default), the status file is created as <code>appstatus_[appId](_[appAttemptId]).inprogress</code>
+  on start, and renamed to drop the suffix on termination.
+* When enabled, no status file is created on start: the absence of a status file marks the directory as being
+  actively written. On termination, <code>appstatus_[appId](_[appAttemptId]).done</code> is created.
+
+Enabling the completion marker avoids the rename, which is not atomic on some file systems, in particular on
+object stores. Consider the following before enabling it:
+
+* Set <code>spark.eventLog.rolling.completionMarker.enabled</code> on the History Server as well. A directory
+  without status file is only accepted as an actively written application when the History Server has the
+  option enabled, as an event log directory without status file is invalid otherwise. Either way, the History
+  Server lists such applications correctly once they terminated.
+* Upgrade your History Server first. History Servers before Spark 5.0.0 do not list applications that are
+  actively writing such a directory, and consequently their log cleaner does not remove those directories
+  either. They do list such applications correctly once terminated.
+* Tools other than the History Server that look for <code>.inprogress</code> files to tell running from
+  terminated applications need to be updated as well.
+* An application that is killed before it can mark its event log as finished stays listed as incomplete with
+  either layout.
+
 ### Applying compaction on rolling event log files
 
 A long-running application (e.g. streaming) can bring a huge single event log file which may cost a lot to maintain and

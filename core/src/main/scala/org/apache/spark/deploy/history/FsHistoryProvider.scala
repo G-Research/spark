@@ -187,6 +187,7 @@ private[history] class FsHistoryProvider(conf: SparkConf, clock: Clock)
 
   private val storePath = conf.get(LOCAL_STORE_DIR).map(new File(_))
   private val fastInProgressParsing = conf.get(FAST_IN_PROGRESS_PARSING)
+  private val completionMarkerEnabled = conf.get(EVENT_LOG_ROLLING_COMPLETION_MARKER)
 
   private val hybridStoreEnabled = conf.get(History.HYBRID_STORE_ENABLED)
   private val hybridStoreDiskBackend =
@@ -485,7 +486,9 @@ private[history] class FsHistoryProvider(conf: SparkConf, clock: Clock)
     // source directory; resolveLogPath will scan all directories to find the log.
     val (dirFs, fullPath) = resolveLogPath(logPath, "")
     try {
-      EventLogFileReader(dirFs, dirFs.getFileStatus(fullPath)).foreach { reader =>
+      val readerOpt = EventLogFileReader(dirFs, dirFs.getFileStatus(fullPath),
+        completionMarkerEnabled)
+      readerOpt.foreach { reader =>
         mergeApplicationListing(reader, clock.getTimeMillis(), enableOptimizations = true)
       }
       Some(load(appId))
@@ -657,7 +660,7 @@ private[history] class FsHistoryProvider(conf: SparkConf, clock: Clock)
             true
           }
         }
-        .flatMap { entry => EventLogFileReader(dirFs, entry) }
+        .flatMap { entry => EventLogFileReader(dirFs, entry, completionMarkerEnabled) }
         .filter { reader =>
           try {
             reader.modificationTime
@@ -863,7 +866,8 @@ private[history] class FsHistoryProvider(conf: SparkConf, clock: Clock)
         .getOrElse(app.attempts)
         .foreach { attempt =>
           val (logFs, logPath) = resolveLogPath(attempt.logPath, attempt.logSourceFullPath)
-          val reader = EventLogFileReader(logFs, logPath, attempt.lastIndex)
+          val reader = EventLogFileReader(logFs, logPath, attempt.lastIndex,
+            completionMarkerEnabled)
           reader.zipEventLogFiles(zipStream)
         }
     } finally {
@@ -1582,7 +1586,7 @@ private[history] class FsHistoryProvider(conf: SparkConf, clock: Clock)
     var hybridStore: HybridStore = null
     val (logFs, logPath) = resolveLogPath(attempt.logPath, attempt.logSourceFullPath)
     val reader = EventLogFileReader(logFs, logPath,
-      attempt.lastIndex)
+      attempt.lastIndex, completionMarkerEnabled)
 
     // Use InMemoryStore to rebuild app store
     while (hybridStore == null) {
@@ -1658,7 +1662,7 @@ private[history] class FsHistoryProvider(conf: SparkConf, clock: Clock)
     while (newStorePath == null) {
       val (logFs, logPath) = resolveLogPath(attempt.logPath, attempt.logSourceFullPath)
       val reader = EventLogFileReader(logFs, logPath,
-        attempt.lastIndex)
+        attempt.lastIndex, completionMarkerEnabled)
       val isCompressed = reader.compressionCodec.isDefined
       logInfo(log"Leasing disk manager space for app" +
         log" ${MDC(APP_ID, appId)} / ${MDC(LogKeys.APP_ATTEMPT_ID, attempt.info.attemptId)}...")
@@ -1694,7 +1698,7 @@ private[history] class FsHistoryProvider(conf: SparkConf, clock: Clock)
         val s = new InMemoryStore()
         val (logFs, logPath) = resolveLogPath(attempt.logPath, attempt.logSourceFullPath)
         val reader = EventLogFileReader(logFs, logPath,
-          attempt.lastIndex)
+          attempt.lastIndex, completionMarkerEnabled)
         rebuildAppStore(s, reader, attempt.info.lastUpdated.getTime())
         store = s
       } catch {
